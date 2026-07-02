@@ -122,6 +122,7 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
 
     # Update Market Case
     update_case(date_str, {
+        "features": features.model_dump(),
         "attribution": attr.model_dump(),
         "labels": {
             "actual_driver": actual_driver,
