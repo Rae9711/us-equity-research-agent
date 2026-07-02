@@ -290,32 +290,25 @@ us-equity-research-agent/
 | **3** | Web 流程首页 + `/verify` + `/history` | ✅ |
 | **4** | S2–S4 盘中 jobs | ✅（S4 待升 EV） |
 
-### 待实施（Learning 飞轮）
+### 已完成（Learning 飞轮 — Phase 5a–8）
 
-```mermaid
-flowchart TD
-    P4d[Phase 4 done] --> P5a[5a Market Case DB]
-    P5a --> P5b[5b Feature Store]
-    P5b --> P5c[5c R0 Regime Engine]
-    P5c --> P5d[5d P17 Hypothesis]
-    P5d --> P5e[5e S7 Attribution]
-    P5e --> P5f[5f S8 Bayesian + Playbook]
-    P5f --> P6[6 S5–S8 全调度]
-    P6 --> P7[7 S4 EV + Calibration]
-    P7 --> P8[8 Weekly XGBoost + SHAP]
-```
+| Phase | 交付物 | 状态 |
+|-------|--------|------|
+| **5a** | `market_cases` / `playbook_cases` / `training_rows` 表 + Pydantic schema + 日终双写 | ✅ 2026-07-02 |
+| **5b** | `src/features/build.py` 自动特征（10字段） | ✅ 2026-07-02 |
+| **5c** | R0 Regime Engine `engines/regime.py` + `config/rules/regime.yaml` | ✅ 2026-07-02 |
+| **5d** | P17 Hypothesis `engines/hypothesis.py`，集成进 morning research | ✅ 2026-07-02 |
+| **5e** | S7 Attribution `engines/attribution.py` + `steps/s07_evening.py` | ✅ 2026-07-02 |
+| **5f** | S8 Bayesian `engines/bayesian.py` + Playbook `engines/playbook.py` + `jobs/step8_learning.py` | ✅ 2026-07-02 |
+| **6** | S5/S6 步骤 + 全 cron wired + `/cases` `/playbook` 页面 | ✅ 2026-07-02 |
+| **7** | S4 EV + Calibration `engines/calibration.py`，step4.json 含 EV 字段 | ✅ 2026-07-02 |
+| **8** | Weekly ML `engines/ml/train.py`（XGBoost+SHAP；< 10 行优雅 skip） | ✅ 2026-07-02 |
 
-| Phase | 交付物 | 验收标准 |
-|-------|--------|----------|
-| **5a** | `market_cases` 表 + 日终双写 | 每日一条 Case JSON 可查 |
-| **5b** | `features/` 自动特征 | Case 含完整 `features` |
-| **5c** | R0 Regime @ Step 1a | Regime 先于 P1 写入 Case |
-| **5d** | P17 Hypothesis | evidence/counter/id；S2 验证对象 |
-| **5e** | S7 Attribution | QQQ 涨跌贡献分解 |
-| **5f** | S8 Bayesian + Playbook DB | Driver 后验更新；Case 入库 |
-| **6** | S5–S6 + 全 cron | 交易日无人值守 |
-| **7** | S4 EV + Confidence 校准 | 输出 expected_return / R:R |
-| **8** | Weekly ML job | feature_importance + SHAP 报告 |
+### 阻塞项（VPS 部署待确认）
+
+- [ ] VPS `./deploy/hetzner-ship.sh` 部署（需 API keys）
+- [ ] `curl https://rae-trading.com/health` 冒烟
+- [ ] 真实 raw data 积累后重跑 60d 回放
 
 ---
 

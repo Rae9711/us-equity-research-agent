@@ -8,6 +8,7 @@ from typing import Any
 from pytz import timezone
 
 from src.db import ConclusionRecord, DailyRun
+from src.db.market_case_service import load_case, save_case
 from src.db.session import get_session
 from src.llm.anthropic_client import AnthropicClient
 from src.research.context import build_research_context
@@ -68,7 +69,23 @@ def run_morning_research(
     if not raw.get("data_ready"):
         logger.warning("Raw data not fully ready: %s", raw.get("missing"))
 
+    # Step 1a: R0 Regime Engine (must run before P1-P16)
+    regime_model = None
+    try:
+        from src.features.build import build_features
+        from src.engines.regime import classify_regime
+        features = build_features(trading_date)
+        regime_model = classify_regime(features)
+        logger.info("R0 Regime: %s (conf=%.2f)", regime_model.label, regime_model.confidence)
+    except Exception:
+        logger.exception("R0 Regime Engine failed; using default")
+        from src.schemas.market_case import RegimeModel, FeaturesModel
+        regime_model = RegimeModel(label="Range", confidence=0.50)
+        features = FeaturesModel()
+
     context = build_research_context(raw)
+    # Inject regime context so LLM can use it
+    context["r0_regime"] = {"label": regime_model.label, "confidence": regime_model.confidence}
     rule_bundle = compute_rule_parts(raw)
 
     llm_parts: dict[str, Any] = {}
@@ -91,6 +108,37 @@ def run_morning_research(
                     "body_md": "",
                 }
 
+    # Add R0 as a part for display purposes
+    parts["R0"] = {
+        "judgment": f"Regime：{regime_model.label}",
+        "confidence": regime_model.confidence,
+        "one_liner": f"{regime_model.label}，conf={regime_model.confidence:.0%}",
+    }
+
+    # Step 1c: P17 Hypothesis (after P1-P16)
+    hypothesis_model = None
+    try:
+        from src.engines.hypothesis import build_hypothesis
+        morning_total = rule_bundle.get("total") or 0
+        morning_bias = rule_bundle.get("bias") or "Neutral"
+        hypothesis_model = build_hypothesis(
+            trading_date=trading_date,
+            features=features,
+            regime=regime_model,
+            morning_bias=morning_bias,
+            morning_total=morning_total,
+            morning_parts=parts,
+        )
+        parts["P17"] = {
+            "judgment": f"Hypothesis：{hypothesis_model.id} · 状态：{hypothesis_model.status}",
+            "confidence": hypothesis_model.confidence,
+            "one_liner": hypothesis_model.statement[:100],
+            "hypothesis": hypothesis_model.model_dump(),
+        }
+        logger.info("P17 Hypothesis: %s (conf=%.2f)", hypothesis_model.id, hypothesis_model.confidence)
+    except Exception:
+        logger.exception("P17 Hypothesis Engine failed")
+
     payload: dict[str, Any] = {
         "generated_at": datetime.now(ET).isoformat(),
         "trading_date": date_str,
@@ -100,6 +148,8 @@ def run_morning_research(
         "bias": rule_bundle.get("bias"),
         "total_score": rule_bundle.get("total"),
         "parts": parts,
+        "r0": {"label": regime_model.label, "confidence": regime_model.confidence} if regime_model else None,
+        "hypothesis": hypothesis_model.model_dump() if hypothesis_model else None,
     }
 
     report_md = render_morning_report(
@@ -112,6 +162,18 @@ def run_morning_research(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     logger.info("Wrote morning report to %s", morning_report_path(date_str))
+
+    # Update Market Case with morning data
+    try:
+        from src.db.market_case_service import update_case
+        update_case(date_str, {
+            "regime": regime_model.model_dump() if regime_model else {},
+            "hypothesis": hypothesis_model.model_dump() if hypothesis_model else {},
+            "morning": {"bias": rule_bundle.get("bias"), "total": rule_bundle.get("total")},
+            "features": features.model_dump() if features else {},
+        })
+    except Exception:
+        logger.exception("Failed to update Market Case from morning research")
 
     _persist_morning(payload)
     return payload

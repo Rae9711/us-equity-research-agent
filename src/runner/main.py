@@ -16,6 +16,10 @@ from src.research.morning import run_morning_research
 from src.steps.s02_open import run_step2_open
 from src.steps.s03_update import run_step3_market_update
 from src.steps.s04_decision import run_step4_trade_decision
+from src.steps.s05_midday import run_step5_midday
+from src.steps.s06_afternoon import run_step6_afternoon
+from src.steps.s07_evening import run_step7_evening
+from src.jobs.step8_learning import run_step8_learning
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +88,52 @@ def _trade_decision_job() -> None:
         logger.exception("Step 4 trade_decision failed")
 
 
+def _midday_review_job() -> None:
+    logger.info("Job midday_review — Step 5 starting")
+    try:
+        payload = run_step5_midday()
+        logger.info("Step 5 done: %s", payload["conclusion"]["judgment"])
+    except Exception:
+        logger.exception("Step 5 midday_review failed")
+
+
+def _afternoon_review_job() -> None:
+    logger.info("Job afternoon_review — Step 6 starting")
+    try:
+        payload = run_step6_afternoon()
+        logger.info("Step 6 done: %s", payload["conclusion"]["judgment"])
+    except Exception:
+        logger.exception("Step 6 afternoon_review failed")
+
+
+def _evening_review_job() -> None:
+    logger.info("Job evening_review — Step 7 starting")
+    try:
+        payload = run_step7_evening()
+        logger.info("Step 7 done: %s", payload["conclusion"]["judgment"])
+    except Exception:
+        logger.exception("Step 7 evening_review failed")
+
+
+def _learning_job() -> None:
+    logger.info("Job learning — Step 8 starting")
+    try:
+        payload = run_step8_learning()
+        logger.info("Step 8 done: %s", payload["conclusion"]["judgment"])
+    except Exception:
+        logger.exception("Step 8 learning failed")
+
+
+def _weekly_ml_job() -> None:
+    logger.info("Job weekly_ml starting")
+    try:
+        from src.engines.ml.train import run_weekly_ml
+        result = run_weekly_ml()
+        logger.info("Weekly ML done: %s", result.get("status", ""))
+    except Exception:
+        logger.exception("Weekly ML failed")
+
+
 def build_scheduler() -> BlockingScheduler:
     scheduler = BlockingScheduler(timezone=ET)
 
@@ -106,6 +156,10 @@ def build_scheduler() -> BlockingScheduler:
         "open_report": _open_report_job,
         "market_update": _market_update_job,
         "trade_decision": _trade_decision_job,
+        "midday_review": _midday_review_job,
+        "afternoon_review": _afternoon_review_job,
+        "evening_review": _evening_review_job,
+        "learning": _learning_job,
     }
 
     for _label, step_id, dow, hour, minute in schedule:
@@ -118,6 +172,14 @@ def build_scheduler() -> BlockingScheduler:
             CronTrigger(day_of_week=dow, hour=hour, minute=minute, timezone=ET),
             **kwargs,
         )
+
+    # Weekly ML job (Sunday 20:00 ET)
+    scheduler.add_job(
+        _weekly_ml_job,
+        CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=ET),
+        id="weekly_ml",
+        replace_existing=True,
+    )
 
     return scheduler
 

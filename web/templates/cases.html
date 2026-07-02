@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>Market Cases — Daily Trading OS</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+{% include "nav.html" %}
+<main>
+  <h1>Market Cases</h1>
+  <p class="subtitle">每日 Market Case — 结构化 JSON 核心资产</p>
+  {% if cases %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>Regime (R0)</th>
+        <th>真正 Driver</th>
+        <th>Hypothesis</th>
+        <th>AI 贡献</th>
+        <th>Surprise</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in cases %}
+      <tr>
+        <td><a href="/api/cases/{{ c.date }}">{{ c.date }}</a></td>
+        <td>{{ c.regime }}</td>
+        <td>{{ c.actual_driver }}</td>
+        <td class="{% if c.hypothesis_correct == '对' %}correct{% elif c.hypothesis_correct == '错' %}wrong{% else %}partial{% endif %}">
+          {{ c.hypothesis_correct }}
+        </td>
+        <td>{{ "%.0f%%"|format((c.attribution.get('ai', 0) * 100)) if c.attribution else 'N/A' }}</td>
+        <td>{{ c.surprise[:60] if c.surprise else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>暂无 Market Case 数据。运行完整 pipeline 后将自动填充。</p>
+  {% endif %}
+</main>
+</body>
+</html>

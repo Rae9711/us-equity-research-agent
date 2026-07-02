@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>Playbook — Daily Trading OS</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+{% include "nav.html" %}
+<main>
+  <h1>Playbook Cases</h1>
+  <p class="subtitle">可复现市场模式 — L3 Case Memory</p>
+  {% if playbook %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Case ID</th>
+        <th>日期</th>
+        <th>Regime</th>
+        <th>实际 Driver</th>
+        <th>Lesson</th>
+        <th>Surprise</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in playbook %}
+      <tr>
+        <td><strong>{{ p.case_id }}</strong></td>
+        <td>{{ p.date }}</td>
+        <td>{{ p.regime }}</td>
+        <td>{{ p.actual_driver }}</td>
+        <td>{{ p.lesson[:80] if p.lesson else '—' }}</td>
+        <td>{{ p.surprise[:80] if p.surprise else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>暂无 Playbook Case。Step 8 Learning 完成后将自动入库。</p>
+  {% endif %}
+</main>
+</body>
+</html>
