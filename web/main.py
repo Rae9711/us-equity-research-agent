@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from src.db import ConclusionRecord, init_db
+from src.db import ConclusionRecord, MarketCase, PlaybookCase, init_db
 from src.db.session import get_session
 from src.research.parts_meta import part_about, part_label
 from src.steps.meta import STEPS, STEP_BY_NUM, step_about, step_label
@@ -351,6 +351,89 @@ def api_morning(trading_date: str) -> JSONResponse:
 @app.get("/api/history", dependencies=_AUTH)
 def api_history() -> JSONResponse:
     return JSONResponse(list_trading_days())
+
+
+@app.get("/cases", response_class=HTMLResponse, dependencies=_AUTH)
+def cases_page(request: Request) -> HTMLResponse:
+    """Read-only Market Case browser."""
+    session = get_session()
+    try:
+        rows = session.query(MarketCase).order_by(MarketCase.date.desc()).limit(90).all()
+        cases = []
+        for row in rows:
+            try:
+                data = json.loads(row.case_json)
+                cases.append({
+                    "date": row.date,
+                    "regime": (data.get("regime") or {}).get("label", "N/A"),
+                    "actual_driver": (data.get("labels") or {}).get("actual_driver", "N/A"),
+                    "hypothesis_correct": (data.get("labels") or {}).get("hypothesis_correct", "N/A"),
+                    "surprise": data.get("surprise", ""),
+                    "attribution": data.get("attribution", {}),
+                })
+            except Exception:
+                cases.append({"date": row.date, "regime": "Error", "actual_driver": "N/A",
+                               "hypothesis_correct": "N/A", "surprise": "", "attribution": {}})
+    finally:
+        session.close()
+
+    return templates.TemplateResponse(
+        request,
+        "cases.html",
+        {"active": "cases", "cases": cases},
+    )
+
+
+@app.get("/playbook", response_class=HTMLResponse, dependencies=_AUTH)
+def playbook_page(request: Request) -> HTMLResponse:
+    """Read-only Playbook Case browser."""
+    session = get_session()
+    try:
+        rows = session.query(PlaybookCase).order_by(PlaybookCase.created_at.desc()).limit(100).all()
+        playbook = []
+        for row in rows:
+            try:
+                pattern = json.loads(row.pattern_json)
+            except Exception:
+                pattern = {}
+            playbook.append({
+                "case_id": row.case_id,
+                "date": row.trading_date or "N/A",
+                "regime": pattern.get("regime", "N/A"),
+                "actual_driver": pattern.get("actual_driver", "N/A"),
+                "lesson": row.lesson or "",
+                "surprise": row.surprise or "",
+            })
+    finally:
+        session.close()
+
+    return templates.TemplateResponse(
+        request,
+        "playbook.html",
+        {"active": "playbook", "playbook": playbook},
+    )
+
+
+@app.get("/api/cases", dependencies=_AUTH)
+def api_cases() -> JSONResponse:
+    session = get_session()
+    try:
+        rows = session.query(MarketCase).order_by(MarketCase.date.desc()).limit(90).all()
+        return JSONResponse([{"date": r.date, "case": json.loads(r.case_json)} for r in rows])
+    finally:
+        session.close()
+
+
+@app.get("/api/cases/{trading_date}", dependencies=_AUTH)
+def api_case_detail(trading_date: str) -> JSONResponse:
+    session = get_session()
+    try:
+        row = session.query(MarketCase).filter(MarketCase.date == trading_date).first()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"No case for {trading_date}")
+        return JSONResponse(json.loads(row.case_json))
+    finally:
+        session.close()
 
 
 @app.get("/api/stats", dependencies=_AUTH)

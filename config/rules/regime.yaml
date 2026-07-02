@@ -1,0 +1,43 @@
+# Regime classification rules — rule priority order (first match wins).
+# Input: FeaturesModel fields
+# Output: Regime label + confidence
+
+regimes:
+
+  - label: "AI Expansion"
+    description: "AI/semiconductor leadership dominates; bond constraints relaxed"
+    confidence: 0.82
+    conditions:
+      # SMH outperforming QQQ OR NVDA strong
+      any:
+        - smh_chg_gt_qqq: true   # handled in code
+        - nvda_chg_gte: 1.5
+      # VIX not elevated
+      vix_lte: 22
+      # DGS10 not spiking (< 5.2)
+      dgs10_lte: 5.2
+
+  - label: "Macro Fear"
+    description: "Macro data or Fed shock dominates; risk-off across the board"
+    confidence: 0.80
+    conditions:
+      any:
+        - vix_gte: 25
+        - dgs10_gte: 4.8
+      qqq_chg_lte: -1.0
+
+  - label: "Liquidity Driven"
+    description: "Broad-based rally/selloff; all sectors move together"
+    confidence: 0.70
+    conditions:
+      breadth_proxy_gte: 0.85
+      qqq_chg_gte: 0.5
+
+  - label: "Range"
+    description: "No clear dominant driver; choppy price action"
+    confidence: 0.60
+    conditions: {}   # fallback
+
+# Default when no other rule fires
+default: "Range"
+default_confidence: 0.50
