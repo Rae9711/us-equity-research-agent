@@ -7,8 +7,9 @@
 
 ## 0. 运行前检查
 
-1. 仓库已 push 到 GitHub（Cloud Agent 需要 `gitConfig`）。
-2. `.env` **不入 git**；VPS 上 `/opt/trading-os/.env` 已配置 API keys。
+1. 仓库：**https://github.com/Rae9711/us-equity-research-agent**
+2. **触发方式**：`git push` 到分支 `automation/trading-os-v2-build` 启动本 Automation
+3. `.env` **不入 git**；VPS 上 `/opt/trading-os/.env` 已配置 API keys。
 3. 当前基线：**Phase 0–4 已实现**（collectors、P1–P16、Web、S2–S4）。
 4. 禁止：伪造数据、跳过验收、声称「能自动下单赚钱」（系统为 `ADVISORY_ONLY`）。
 
