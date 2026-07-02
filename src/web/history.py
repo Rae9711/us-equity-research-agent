@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path, raw_dir, reports_dir
+from src.web.launch import trading_day_number
 from src.web.steps_status import steps_status
 
 
@@ -31,6 +32,7 @@ def list_trading_days() -> list[dict]:
         days.append(
             {
                 "date": date_str,
+                "day_number": trading_day_number(date_str),
                 "has_morning": morning_report_path(date_str).exists(),
                 "has_raw": raw_data_path(date_str).exists(),
                 "bias": meta.get("bias"),

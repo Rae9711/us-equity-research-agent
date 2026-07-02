@@ -10,19 +10,12 @@
 <body>
   {% include "nav.html" %}
   <div class="page-wrap">
-    <p class="muted"><a href="/?date={{ trading_date }}">← 流程首页</a> · <a href="/history">历史</a></p>
+    <p class="muted"><a href="/?date={{ day.trading_date }}">← 流程首页</a></p>
     <h1 class="page-title">Step {{ step_num }} — {{ step_def.title }}</h1>
-    <p class="muted">{{ step_def.time_et }} ET · {{ step_def.subtitle }} · 交易日 {{ trading_date }}</p>
+    <p class="muted">{{ step_def.time_et }} ET · {{ step_def.subtitle }}</p>
 
-    <form method="get" class="date-bar panel">
-      <label for="date">切换日期</label>
-      <select id="date" name="date" onchange="this.form.submit()">
-        {% for d in days %}
-        <option value="{{ d.date }}" {% if d.date == trading_date %}selected{% endif %}>{{ d.date }}</option>
-        {% endfor %}
-      </select>
-      <a href="/verify?date={{ trading_date }}">核对本日结论</a>
-    </form>
+    {% include "_day_header.html" %}
+    {% include "_step_nav.html" %}
 
     {% if conclusion %}
     <div class="report-meta">

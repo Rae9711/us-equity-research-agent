@@ -22,7 +22,9 @@ from src.utils.paths import (
     step_report_path,
 )
 from src.utils.trading_calendar import today_et
+from src.web.day_context import day_summary
 from src.web.history import list_trading_days
+from src.web.launch import launch_date
 from src.web.labels import unified_about, unified_label
 from src.web.stats import accuracy_by_date, accuracy_for_date, global_accuracy
 from src.web.steps_status import step_available, steps_status
@@ -35,6 +37,47 @@ templates = Jinja2Templates(directory="web/templates")
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 _AUTH = [Depends(optional_basic_auth)]
+
+
+def _page_context(trading_date: str, **extra: object) -> dict:
+    days = list_trading_days()
+    if not days:
+        days = [day_summary(trading_date)]
+    day = day_summary(trading_date)
+    ctx = {"days": days, "day": day, "trading_date": trading_date, "launch_date": launch_date().isoformat()}
+    ctx.update(extra)
+    return ctx
+
+
+def _hypothesis_class(value: str | None) -> str:
+    if value == "对":
+        return "ok"
+    if value == "错":
+        return "bad"
+    return "partial"
+
+
+def _format_case_row(row: MarketCase) -> dict:
+    try:
+        data = json.loads(row.case_json)
+    except Exception:
+        data = {}
+    attr = data.get("attribution") or {}
+    hyp = (data.get("labels") or {}).get("hypothesis_correct", "N/A")
+    from src.web.launch import trading_day_number
+
+    return {
+        "date": row.date,
+        "day_number": trading_day_number(row.date),
+        "regime": (data.get("regime") or {}).get("label", "N/A"),
+        "actual_driver": (data.get("labels") or {}).get("actual_driver", "N/A"),
+        "hypothesis_correct": hyp,
+        "hypothesis_class": _hypothesis_class(hyp if hyp in ("对", "错", "部分对") else None),
+        "ai_pct": f"{attr.get('ai', 0) * 100:.0f}%" if attr else "N/A",
+        "surprise_short": (data.get("surprise") or "—")[:60],
+        "attribution": attr,
+        "surprise": data.get("surprise", ""),
+    }
 
 
 @app.on_event("startup")
@@ -56,32 +99,14 @@ def health() -> JSONResponse:
 @app.get("/", response_class=HTMLResponse, dependencies=_AUTH)
 def index(request: Request, date: str | None = None) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
-    days = list_trading_days()
-    if not days:
-        days = [{"date": trading_date, "steps": steps_status(trading_date)}]
-    status = steps_status(trading_date)
-    timeline = []
-    for s in STEPS:
-        timeline.append(
-            {
-                "num": s.num,
-                "time": s.time_et,
-                "title": s.title,
-                "subtitle": s.subtitle,
-                "step_id": s.step_id,
-                "available": status.get(s.num, False),
-                "url": f"/step/{s.num}?date={trading_date}",
-            }
-        )
     return templates.TemplateResponse(
         request,
         "index.html",
         {
+            **_page_context(trading_date),
             "active": "home",
-            "trading_date": trading_date,
-            "days": list_trading_days(),
-            "timeline": timeline,
             "stats": global_accuracy(),
+            "form_action": "/",
         },
     )
 
@@ -97,6 +122,7 @@ def history_page(request: Request) -> HTMLResponse:
             "days": list_trading_days(),
             "date_accuracy": {row["date"]: row for row in acc},
             "stats": global_accuracy(),
+            "launch_date": launch_date().isoformat(),
         },
     )
 
@@ -207,8 +233,7 @@ def step0_view(request: Request, date: str | None = None) -> HTMLResponse:
             request,
             "raw.html",
             {
-                "active": "step0",
-                "trading_date": trading_date,
+                **_page_context(trading_date, active="step0", current_step=0),
                 "collected_at": "—",
                 "data_ready": False,
                 "checklist": {},
@@ -222,8 +247,7 @@ def step0_view(request: Request, date: str | None = None) -> HTMLResponse:
         request,
         "raw.html",
         {
-            "active": "step0",
-            "trading_date": payload.get("trading_date", trading_date),
+            **_page_context(trading_date, active="step0", current_step=0),
             "collected_at": payload.get("collected_at", "—"),
             "data_ready": payload.get("data_ready", False),
             "checklist": payload.get("checklist", {}),
@@ -253,15 +277,12 @@ def step_page(request: Request, step_num: int, date: str | None = None) -> HTMLR
             request,
             "step.html",
             {
-                "active": "home",
+                **_page_context(trading_date, active="home", current_step=step_num),
                 "step_num": step_num,
                 "step_def": step_def,
-                "trading_date": trading_date,
-                "days": list_trading_days(),
                 "report_html": (
                     f"<p class='empty'>Step {step_num} 尚未生成。"
-                    f"等待 {step_def.time_et} ET 自动运行，或在 VPS 执行 "
-                    f"<code>step{step_num}_*</code>。</p>"
+                    f"等待 {step_def.time_et} ET 自动运行，或在 VPS 执行对应 job。</p>"
                 ),
                 "meta": None,
                 "conclusion": None,
@@ -281,11 +302,9 @@ def step_page(request: Request, step_num: int, date: str | None = None) -> HTMLR
         request,
         "step.html",
         {
-            "active": "home",
+            **_page_context(trading_date, active="home", current_step=step_num),
             "step_num": step_num,
             "step_def": step_def,
-            "trading_date": trading_date,
-            "days": list_trading_days(),
             "report_html": report_html,
             "meta": meta,
             "conclusion": (meta or {}).get("conclusion"),
@@ -304,8 +323,7 @@ def today_report(request: Request, date: str | None = None) -> HTMLResponse:
             request,
             "today.html",
             {
-                "active": "today",
-                "trading_date": trading_date,
+                **_page_context(trading_date, active="today", current_step=1),
                 "report_html": "<p class='empty'>该日 Morning Research 尚未生成。<a href='/history'>查看历史</a> 或等待 8:00 ET 自动运行。</p>",
                 "meta": None,
             },
@@ -324,8 +342,7 @@ def today_report(request: Request, date: str | None = None) -> HTMLResponse:
         request,
         "today.html",
         {
-            "active": "today",
-            "trading_date": trading_date,
+            **_page_context(trading_date, active="today", current_step=1),
             "report_html": report_html,
             "meta": meta,
         },
@@ -359,28 +376,75 @@ def cases_page(request: Request) -> HTMLResponse:
     session = get_session()
     try:
         rows = session.query(MarketCase).order_by(MarketCase.date.desc()).limit(90).all()
-        cases = []
-        for row in rows:
-            try:
-                data = json.loads(row.case_json)
-                cases.append({
-                    "date": row.date,
-                    "regime": (data.get("regime") or {}).get("label", "N/A"),
-                    "actual_driver": (data.get("labels") or {}).get("actual_driver", "N/A"),
-                    "hypothesis_correct": (data.get("labels") or {}).get("hypothesis_correct", "N/A"),
-                    "surprise": data.get("surprise", ""),
-                    "attribution": data.get("attribution", {}),
-                })
-            except Exception:
-                cases.append({"date": row.date, "regime": "Error", "actual_driver": "N/A",
-                               "hypothesis_correct": "N/A", "surprise": "", "attribution": {}})
+        cases = [_format_case_row(row) for row in rows]
     finally:
         session.close()
 
     return templates.TemplateResponse(
         request,
         "cases.html",
-        {"active": "cases", "cases": cases},
+        {"active": "cases", "cases": cases, "launch_date": launch_date().isoformat()},
+    )
+
+
+@app.get("/cases/{trading_date}", response_class=HTMLResponse, dependencies=_AUTH)
+def case_detail_page(request: Request, trading_date: str) -> HTMLResponse:
+    session = get_session()
+    case_data: dict | None = None
+    case_json = ""
+    ai_pct = bond_pct = "—"
+    try:
+        row = session.query(MarketCase).filter(MarketCase.date == trading_date).first()
+        if row:
+            case_data = json.loads(row.case_json)
+            case_json = json.dumps(case_data, indent=2, ensure_ascii=False)
+            attr = case_data.get("attribution") or {}
+            if attr:
+                ai_pct = f"{attr.get('ai', 0) * 100:.0f}%"
+                bond_pct = f"{attr.get('bond', 0) * 100:.0f}%"
+    finally:
+        session.close()
+
+    if not case_data:
+        from src.db.market_case_service import load_case
+        from src.utils.paths import case_json_path
+
+        try:
+            fp = case_json_path(trading_date)
+            if fp.exists():
+                case_data = json.loads(fp.read_text(encoding="utf-8"))
+                case_json = json.dumps(case_data, indent=2, ensure_ascii=False)
+            else:
+                model = load_case(trading_date)
+                dumped = model.model_dump()
+                has_data = (
+                    model.regime.label not in ("Unknown", "Range", "")
+                    or bool(model.hypothesis.id or model.hypothesis.statement)
+                    or any(getattr(model.attribution, k, 0) for k in ("ai", "bond", "macro"))
+                    or model.surprise
+                )
+                if has_data:
+                    case_data = dumped
+                    case_json = json.dumps(case_data, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    if case_data:
+        attr = case_data.get("attribution") or {}
+        if attr:
+            ai_pct = f"{attr.get('ai', 0) * 100:.0f}%"
+            bond_pct = f"{attr.get('bond', 0) * 100:.0f}%"
+
+    return templates.TemplateResponse(
+        request,
+        "case_detail.html",
+        {
+            **_page_context(trading_date, active="cases", current_step=None),
+            "case_data": case_data,
+            "case_json": case_json,
+            "ai_pct": ai_pct,
+            "bond_pct": bond_pct,
+        },
     )
 
 

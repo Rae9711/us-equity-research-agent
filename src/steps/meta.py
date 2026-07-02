@@ -15,14 +15,14 @@ class StepDef:
 
 STEPS: list[StepDef] = [
     StepDef(0, "Step0", "7:45", "数据更新", "Raw Data 采集", "collect_raw"),
-    StepDef(1, "Step1", "8:00", "Morning Research", "P1–P16 晨会研究", "morning_research"),
+    StepDef(1, "Step1", "8:00", "Morning Research", "R0 → P1–P16 → P17 Hypothesis", "morning_research"),
     StepDef(2, "S2", "9:30", "Open", "开盘观察 · 不交易", "open_report"),
     StepDef(3, "S3", "10:00", "Market Update", "Driver 切换 · 重算 Score", "market_update"),
     StepDef(4, "S4", "10:15", "Trading Decision", "建议 only · ADVISORY", "trade_decision"),
     StepDef(5, "S5", "12:00", "Midday Review", "Driver 是否仍成立", "midday_review"),
     StepDef(6, "S6", "14:00", "Afternoon Review", "Trade still valid?", "afternoon_review"),
-    StepDef(7, "S7", "16:10", "Evening Review", "复盘 · Decision Log", "evening_review"),
-    StepDef(8, "S8", "20:00", "Learning", "权重矩阵 · Playbook", "learning"),
+    StepDef(7, "S7", "16:10", "Attribution", "涨跌归因 · Surprise · Decision Log", "evening_review"),
+    StepDef(8, "S8", "20:00", "Learning", "Bayesian · Playbook · 训练行", "learning"),
 ]
 
 STEP_BY_NUM = {s.num: s for s in STEPS}

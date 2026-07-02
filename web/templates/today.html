@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Morning Research — {{ trading_date }}</title>
+  <title>Step 1 — Morning · {{ day.trading_date }}</title>
   <link rel="stylesheet" href="/static/site.css" />
   <link rel="stylesheet" href="/static/today.css" />
 </head>
 <body>
   {% include "nav.html" %}
   <div class="page-wrap">
-    <h1 class="page-title">Morning Research</h1>
-    <p class="muted">
-      交易日 {{ trading_date }}
-      · <a href="/history">历史记录</a>
-      · <a href="/verify?date={{ trading_date }}">核对结论</a>
-    </p>
+    <p class="muted"><a href="/?date={{ day.trading_date }}">← 流程首页</a></p>
+    <h1 class="page-title">Step 1 — Morning Research</h1>
+    <p class="muted">8:00 ET · R0 → P1–P16 → P17 Hypothesis</p>
+
+    {% include "_day_header.html" %}
+    {% include "_step_nav.html" %}
 
     {% if meta %}
     <div class="report-meta">
@@ -24,6 +24,9 @@
       </span>
       {% if meta.bias is not none %}
       <span class="muted">Bias: {{ meta.bias }} · Total: {{ meta.total_score }}</span>
+      {% endif %}
+      {% if meta.get('regime') %}
+      <span class="tag">{{ meta.regime.get('label', '') }}</span>
       {% endif %}
     </div>
     {% endif %}

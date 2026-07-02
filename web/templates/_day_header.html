@@ -1,0 +1,37 @@
+{# Shared day header: date picker + Day N badge + progress #}
+<div class="day-header panel">
+  <form method="get" action="{{ form_action or request.url.path }}" class="day-header-form">
+    {% if form_hidden is defined %}
+    {% for key, val in form_hidden.items() %}
+    <input type="hidden" name="{{ key }}" value="{{ val }}" />
+    {% endfor %}
+    {% endif %}
+    <div class="day-header-row">
+      <div class="day-header-left">
+        {% if day.day_number %}
+        <span class="day-badge">Day {{ day.day_number }}</span>
+        {% elif day.day_label %}
+        <span class="day-badge day-badge-muted">{{ day.day_label }}</span>
+        {% endif %}
+        <label for="trading-date" class="sr-only">交易日</label>
+        <select id="trading-date" name="date" onchange="this.form.submit()">
+          {% for d in days %}
+          <option value="{{ d.date }}" {% if d.date == day.trading_date %}selected{% endif %}>{{ d.date }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="day-header-right">
+        <span class="progress-pill">{{ day.steps_done }}/{{ day.steps_total }} Steps</span>
+        <div class="progress-track" title="{{ day.progress_pct }}%">
+          <div class="progress-fill" style="width: {{ day.progress_pct }}%"></div>
+        </div>
+      </div>
+    </div>
+  </form>
+  <div class="day-quick-links">
+    <a href="/?date={{ day.trading_date }}">流程</a>
+    <a href="/cases/{{ day.trading_date }}">Case</a>
+    <a href="/verify?date={{ day.trading_date }}">核对</a>
+    <span class="muted">Launch {{ day.launch_date }}</span>
+  </div>
+</div>

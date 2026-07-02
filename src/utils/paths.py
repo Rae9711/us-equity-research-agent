@@ -44,3 +44,7 @@ def step_json_path(step_num: int, trading_date: str) -> Path:
 
 def step_report_path(step_num: int, trading_date: str) -> Path:
     return report_dir(trading_date) / f"step{step_num}.md"
+
+
+def case_json_path(trading_date: str) -> Path:
+    return report_dir(trading_date) / "case.json"

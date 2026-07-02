@@ -5,53 +5,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>历史记录 — Daily Trading OS</title>
   <link rel="stylesheet" href="/static/site.css" />
-  <style>
-    .steps-matrix { font-size: 0.75rem; text-align: center; }
-    .steps-matrix a { display: inline-block; min-width: 1.6rem; padding: 0.1rem 0.2rem; border-radius: 4px; }
-    .steps-matrix a.on { background: #dcfce7; color: #166534; font-weight: 600; }
-    .steps-matrix a.off { color: #cbd5e1; pointer-events: none; }
-    .steps-matrix th { font-size: 0.7rem; padding: 0.35rem 0.25rem !important; }
-  </style>
 </head>
 <body>
   {% include "nav.html" %}
   <div class="page-wrap">
     <h1 class="page-title">历史记录</h1>
-    <p class="muted">按交易日查看 Step 0–8 完成情况（点击绿点进入该 Step）</p>
+    <p class="muted">Launch {{ launch_date }} · 点击绿点进入对应 Step · <a href="/cases">Cases</a></p>
 
     {% if stats and stats.verified > 0 %}
-    <div class="panel stats-bar" style="margin-top:1rem;">
+    <div class="panel stats-bar">
       <strong>累计准确率</strong> {{ stats.accuracy_pct }}%
     </div>
     {% endif %}
 
     {% if days %}
-    <div class="panel" style="margin-top:1.25rem;padding:0;overflow-x:auto;">
-      <table class="data-table steps-matrix" style="margin:0;border:none;min-width:720px;">
+    <div class="panel history-table-wrap">
+      <table class="data-table steps-matrix">
         <thead>
           <tr>
-            <th style="text-align:left;min-width:6rem;">交易日</th>
+            <th>Day</th>
+            <th style="text-align:left;">交易日</th>
             <th>Bias</th>
             {% for n in range(9) %}
             <th>S{{ n }}</th>
             {% endfor %}
+            <th style="text-align:left;">Case</th>
             <th style="text-align:left;">核对</th>
           </tr>
         </thead>
         <tbody>
           {% for d in days %}
           <tr>
-            <td style="text-align:left;"><strong>{{ d.date }}</strong></td>
+            <td>{% if d.day_number %}<span class="day-badge day-badge-sm">D{{ d.day_number }}</span>{% else %}—{% endif %}</td>
+            <td style="text-align:left;"><a href="/?date={{ d.date }}"><strong>{{ d.date }}</strong></a></td>
             <td>{{ d.bias or '—' }}</td>
             {% for n in range(9) %}
             <td>
               {% if d.steps.get(n) %}
-              <a class="on" href="/step/{{ n }}?date={{ d.date }}" title="Step {{ n }}">●</a>
+              <a class="step-dot on" href="/step/{{ n }}?date={{ d.date }}" title="Step {{ n }}">●</a>
               {% else %}
-              <span class="off">○</span>
+              <span class="step-dot off">○</span>
               {% endif %}
             </td>
             {% endfor %}
+            <td style="text-align:left;"><a href="/cases/{{ d.date }}">Case</a></td>
             <td style="text-align:left;">
               {% set acc = date_accuracy.get(d.date) %}
               {% if acc and acc.verified > 0 %}{{ acc.accuracy_pct }}%{% else %}—{% endif %}
@@ -63,7 +60,9 @@
       </table>
     </div>
     {% else %}
-    <div class="panel"><p class="empty">暂无历史数据。</p></div>
+    <div class="panel empty-state">
+      <p>暂无历史数据。今天是 <span class="day-badge">Day 1</span>，从 <a href="/">流程首页</a> 开始。</p>
+    </div>
     {% endif %}
   </div>
 </body>

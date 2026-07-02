@@ -1,0 +1,13 @@
+{# Horizontal Step 0–8 navigation #}
+<nav class="step-nav" aria-label="Step 0–8">
+  {% for s in day.timeline %}
+  <a
+    href="/step/{{ s.num }}?date={{ day.trading_date }}"
+    class="step-nav-item {% if s.available %}done{% else %}pending{% endif %}{% if current_step is defined and current_step == s.num %} current{% endif %}"
+    title="Step {{ s.num }} — {{ s.title }}"
+  >
+    <span class="step-nav-num">{{ s.num }}</span>
+    <span class="step-nav-label">{{ s.time }}</span>
+  </a>
+  {% endfor %}
+</nav>

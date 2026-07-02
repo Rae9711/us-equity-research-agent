@@ -1,43 +1,42 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Playbook — Daily Trading OS</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/site.css" />
 </head>
 <body>
-{% include "nav.html" %}
-<main>
-  <h1>Playbook Cases</h1>
-  <p class="subtitle">可复现市场模式 — L3 Case Memory</p>
-  {% if playbook %}
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Case ID</th>
-        <th>日期</th>
-        <th>Regime</th>
-        <th>实际 Driver</th>
-        <th>Lesson</th>
-        <th>Surprise</th>
-      </tr>
-    </thead>
-    <tbody>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <h1 class="page-title">Playbook</h1>
+    <p class="muted">L3 Case Memory · 可复现市场模式（Step 8 自动入库）</p>
+
+    {% if playbook %}
+    <div class="playbook-list">
       {% for p in playbook %}
-      <tr>
-        <td><strong>{{ p.case_id }}</strong></td>
-        <td>{{ p.date }}</td>
-        <td>{{ p.regime }}</td>
-        <td>{{ p.actual_driver }}</td>
-        <td>{{ p.lesson[:80] if p.lesson else '—' }}</td>
-        <td>{{ p.surprise[:80] if p.surprise else '—' }}</td>
-      </tr>
+      <article class="panel playbook-card">
+        <div class="playbook-card-head">
+          <strong>{{ p.case_id }}</strong>
+          <span class="muted">{{ p.date }}</span>
+          <span class="tag">{{ p.regime }}</span>
+        </div>
+        <p><strong>Driver：</strong>{{ p.actual_driver }}</p>
+        {% if p.lesson %}<p><strong>Lesson：</strong>{{ p.lesson }}</p>{% endif %}
+        {% if p.surprise %}<p class="muted"><strong>Surprise：</strong>{{ p.surprise }}</p>{% endif %}
+        {% if p.date and p.date != 'N/A' %}
+        <a href="/cases/{{ p.date }}">查看当日 Case →</a>
+        {% endif %}
+      </article>
       {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p>暂无 Playbook Case。Step 8 Learning 完成后将自动入库。</p>
-  {% endif %}
-</main>
+    </div>
+    {% else %}
+    <div class="panel empty-state">
+      <p><strong>Playbook 还是空的</strong></p>
+      <p class="muted">每天 Step 8 Learning 会把可复现模式写入这里。先跑完几天 pipeline。</p>
+      <a href="/">回到今日流程 →</a>
+    </div>
+    {% endif %}
+  </div>
 </body>
 </html>

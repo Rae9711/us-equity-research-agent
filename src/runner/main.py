@@ -6,7 +6,8 @@ import signal
 import sys
 import time
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
 
@@ -19,7 +20,7 @@ from src.steps.s04_decision import run_step4_trade_decision
 from src.steps.s05_midday import run_step5_midday
 from src.steps.s06_afternoon import run_step6_afternoon
 from src.steps.s07_evening import run_step7_evening
-from src.jobs.step8_learning import run_step8_learning
+from src.runner.catchup import run_startup_catchup
 
 logging.basicConfig(
     level=logging.INFO,
@@ -134,8 +135,21 @@ def _weekly_ml_job() -> None:
         logger.exception("Weekly ML failed")
 
 
-def build_scheduler() -> BlockingScheduler:
-    scheduler = BlockingScheduler(timezone=ET)
+def _job_listener(event) -> None:
+    if event.code == EVENT_JOB_EXECUTED:
+        logger.info("Scheduler executed job: %s", event.job_id)
+    elif event.code == EVENT_JOB_ERROR:
+        logger.error("Scheduler job failed: %s", event.job_id, exc_info=event.exception)
+    elif event.code == EVENT_JOB_MISSED:
+        logger.warning("Scheduler missed job: %s (scheduled=%s)", event.job_id, event.scheduled_run_time)
+
+
+def build_scheduler() -> tuple[BackgroundScheduler, dict[str, object]]:
+    scheduler = BackgroundScheduler(
+        timezone=ET,
+        job_defaults={"coalesce": True, "misfire_grace_time": 3600, "max_instances": 1},
+    )
+    scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
 
     # Phase 0: register jobs; Phase 2+ wire real handlers
     schedule = [
@@ -181,14 +195,14 @@ def build_scheduler() -> BlockingScheduler:
         replace_existing=True,
     )
 
-    return scheduler
+    return scheduler, handlers
 
 
 def main() -> None:
     init_db()
     logger.info("Daily Trading OS runner starting (TZ=%s)", os.environ.get("TZ", "UTC"))
 
-    scheduler = build_scheduler()
+    scheduler, handlers = build_scheduler()
     for job in scheduler.get_jobs():
         logger.info("Scheduled job: %s", job.id)
 
@@ -202,8 +216,12 @@ def main() -> None:
 
     try:
         scheduler.start()
+        logger.info("Scheduler running — waiting for cron triggers (ET)")
+        run_startup_catchup(handlers)
+        while True:
+            time.sleep(3600)
     except (KeyboardInterrupt, SystemExit):
-        pass
+        scheduler.shutdown(wait=False)
 
 
 if __name__ == "__main__":

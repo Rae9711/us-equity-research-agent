@@ -3,39 +3,31 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Step 0 — {{ trading_date }}</title>
+  <title>Step 0 — Raw Data · {{ day.trading_date }}</title>
   <link rel="stylesheet" href="/static/site.css" />
-  <style>
-    .ok { color: #16a34a; }
-    .miss { color: #dc2626; }
-    section { margin: 1.25rem 0; }
-    section h2 { font-size: 1rem; margin-bottom: 0.5rem; }
-    ul { padding-left: 1.2rem; margin: 0.5rem 0; }
-    .badge-yes { background: #dcfce7; color: #166534; }
-    .badge-no { background: #fee2e2; color: #991b1b; }
-  </style>
 </head>
 <body>
   {% include "nav.html" %}
   <div class="page-wrap">
+    <p class="muted"><a href="/?date={{ day.trading_date }}">← 流程首页</a></p>
     <h1 class="page-title">Step 0 — Raw Data</h1>
-    <p class="muted">
-      交易日 {{ trading_date }} · 采集于 {{ collected_at }}
-      · <a href="/history">历史记录</a>
-    </p>
+    <p class="muted">7:45 ET · 采集于 {{ collected_at }}</p>
+
+    {% include "_day_header.html" %}
+    {% include "_step_nav.html" %}
 
     {% if conclusion %}
-    <div class="panel" style="margin-top:1rem;">
-      <span class="badge {{ 'badge-yes' if data_ready else 'badge-no' }}">{{ conclusion.judgment }}</span>
-      <span class="muted" style="margin-left:0.5rem;">{{ conclusion.one_liner }}</span>
+    <div class="panel raw-conclusion">
+      <span class="badge {{ 'badge-ok' if data_ready else 'badge-warn' }}">{{ conclusion.judgment }}</span>
+      <span class="muted">{{ conclusion.one_liner }}</span>
     </div>
     {% endif %}
 
     <div class="panel">
       {% for section, items in checklist.items() %}
-      <section>
+      <section class="raw-section">
         <h2>{{ section | capitalize }}</h2>
-        <ul>
+        <ul class="checklist">
           {% for name, ok in items.items() %}
           <li class="{{ 'ok' if ok else 'miss' }}">{{ '✓' if ok else '✗' }} {{ name }}</li>
           {% endfor %}
@@ -44,9 +36,9 @@
       {% endfor %}
 
       {% if missing %}
-      <section>
+      <section class="raw-section">
         <h2>缺失项</h2>
-        <ul>
+        <ul class="checklist">
           {% for item in missing %}
           <li class="miss">{{ item }}</li>
           {% endfor %}
@@ -54,7 +46,7 @@
       </section>
       {% endif %}
 
-      <p class="muted"><a href="/api/raw/{{ trading_date }}">JSON API</a></p>
+      <p class="muted"><a href="/api/raw/{{ day.trading_date }}">JSON API</a></p>
     </div>
   </div>
 </body>

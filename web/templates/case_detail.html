@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Case {{ trading_date }} — Daily Trading OS</title>
+  <link rel="stylesheet" href="/static/site.css" />
+</head>
+<body>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <p class="muted"><a href="/cases">← 全部 Cases</a> · <a href="/?date={{ day.trading_date }}">今日流程</a></p>
+    <h1 class="page-title">Market Case · {{ trading_date }}</h1>
+    {% if day.day_number %}<p class="muted"><span class="day-badge">Day {{ day.day_number }}</span></p>{% endif %}
+
+    {% include "_day_header.html" %}
+    {% include "_step_nav.html" %}
+
+    {% if case_data %}
+    <div class="case-grid">
+      <div class="panel case-card">
+        <h2>Regime · Hypothesis</h2>
+        <dl class="kv">
+          <dt>R0 Regime</dt><dd>{{ (case_data.regime or {}).get('label', '—') }} ({{ ((case_data.regime or {}).get('confidence', 0) * 100) | round(0) }}%)</dd>
+          <dt>Hypothesis</dt><dd>{{ (case_data.hypothesis or {}).get('statement', '—') }}</dd>
+          <dt>ID</dt><dd><code>{{ (case_data.hypothesis or {}).get('id', '—') }}</code></dd>
+        </dl>
+      </div>
+      <div class="panel case-card">
+        <h2>Labels · Attribution</h2>
+        <dl class="kv">
+          <dt>真正 Driver</dt><dd>{{ (case_data.labels or {}).get('actual_driver', '—') }}</dd>
+          <dt>Hypothesis 结果</dt><dd>{{ (case_data.labels or {}).get('hypothesis_correct', '—') }}</dd>
+          <dt>AI 贡献</dt><dd>{{ ai_pct }}</dd>
+          <dt>Bond</dt><dd>{{ bond_pct }}</dd>
+        </dl>
+      </div>
+      <div class="panel case-card case-card-wide">
+        <h2>Surprise · Lesson</h2>
+        <p><strong>Surprise：</strong>{{ case_data.surprise or '—' }}</p>
+        <p><strong>Lesson：</strong>{{ case_data.lesson or '—' }}</p>
+      </div>
+      <div class="panel case-card case-card-wide">
+        <h2>Evidence / Counter</h2>
+        <div class="two-col">
+          <div>
+            <h3 class="subh">Evidence</h3>
+            <ul>{% for e in (case_data.hypothesis or {}).get('evidence', []) %}<li>{{ e }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul>
+          </div>
+          <div>
+            <h3 class="subh">Counter</h3>
+            <ul>{% for e in (case_data.hypothesis or {}).get('counter_evidence', []) %}<li>{{ e }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul>
+          </div>
+        </div>
+      </div>
+      <div class="panel case-card case-card-wide">
+        <h2>Step 快捷入口</h2>
+        <div class="link-row">
+          {% for s in day.timeline %}
+          <a href="/step/{{ s.num }}?date={{ day.trading_date }}" class="{% if not s.available %}muted{% endif %}">S{{ s.num }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      <details class="panel case-card case-card-wide">
+        <summary>原始 JSON</summary>
+        <pre class="json-block">{{ case_json }}</pre>
+      </details>
+    </div>
+    {% else %}
+    <div class="panel empty-state">
+      <p>该日尚无 Market Case。</p>
+      <p class="muted">等待 Step 8 Learning 完成，或从 <a href="/">流程首页</a> 查看各 Step 进度。</p>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

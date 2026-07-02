@@ -1,0 +1,3 @@
+# Day 1 = first trading day of the Learning Flywheel (v2 deploy).
+# Trading day number is counted from this date (NYSE weekdays only).
+launch_date: "2026-07-02"

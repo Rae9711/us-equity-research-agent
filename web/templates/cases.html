@@ -1,45 +1,56 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Market Cases — Daily Trading OS</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/site.css" />
 </head>
 <body>
-{% include "nav.html" %}
-<main>
-  <h1>Market Cases</h1>
-  <p class="subtitle">每日 Market Case — 结构化 JSON 核心资产</p>
-  {% if cases %}
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>日期</th>
-        <th>Regime (R0)</th>
-        <th>真正 Driver</th>
-        <th>Hypothesis</th>
-        <th>AI 贡献</th>
-        <th>Surprise</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for c in cases %}
-      <tr>
-        <td><a href="/api/cases/{{ c.date }}">{{ c.date }}</a></td>
-        <td>{{ c.regime }}</td>
-        <td>{{ c.actual_driver }}</td>
-        <td class="{% if c.hypothesis_correct == '对' %}correct{% elif c.hypothesis_correct == '错' %}wrong{% else %}partial{% endif %}">
-          {{ c.hypothesis_correct }}
-        </td>
-        <td>{{ "%.0f%%"|format((c.attribution.get('ai', 0) * 100)) if c.attribution else 'N/A' }}</td>
-        <td>{{ c.surprise[:60] if c.surprise else '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p>暂无 Market Case 数据。运行完整 pipeline 后将自动填充。</p>
-  {% endif %}
-</main>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <h1 class="page-title">Market Cases</h1>
+    <p class="muted">每日结构化核心资产 · 从 Day 1（{{ launch_date }}）开始积累</p>
+
+    {% if cases %}
+    <div class="panel" style="padding:0;overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>日期</th>
+            <th>Regime (R0)</th>
+            <th>真正 Driver</th>
+            <th>Hypothesis</th>
+            <th>AI 贡献</th>
+            <th>Surprise</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in cases %}
+          <tr>
+            <td>{% if c.day_number %}<span class="day-badge day-badge-sm">D{{ c.day_number }}</span>{% else %}—{% endif %}</td>
+            <td><strong>{{ c.date }}</strong></td>
+            <td><span class="tag">{{ c.regime }}</span></td>
+            <td>{{ c.actual_driver }}</td>
+            <td>
+              <span class="hyp-badge hyp-{{ c.hypothesis_class }}">{{ c.hypothesis_correct }}</span>
+            </td>
+            <td>{{ c.ai_pct }}</td>
+            <td class="truncate">{{ c.surprise_short }}</td>
+            <td><a href="/cases/{{ c.date }}">详情 →</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="panel empty-state">
+      <p><strong>还没有 Market Case</strong></p>
+      <p class="muted">完成 Step 0 → Morning → 收盘 S7/S8 后会自动写入。今天是 Day 1，从 <a href="/">今日流程</a> 开始。</p>
+    </div>
+    {% endif %}
+  </div>
 </body>
 </html>
