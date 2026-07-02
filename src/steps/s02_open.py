@@ -279,11 +279,14 @@ def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
 
     bond_note = ""
     if "error" not in tnx:
+        chg = tnx.get("change_pct")
         if tnx.get("ticker") == "DGS10":
-            bond_note = f"10Y DGS10 {tnx.get('last')} ({tnx.get('change_pct', 0):+.2f}% vs 前日)"
+            chg_txt = f"{chg:+.2f}%" if chg is not None else "—"
+            bond_note = f"10Y DGS10 {tnx.get('last')} ({chg_txt} vs 前日)"
         else:
-            bond_note = f"10Y proxy (^TNX) {tnx.get('change_pct', 0):+.2f}% vs 昨收"
-        if abs(tnx.get("change_pct") or 0) > 1.5:
+            chg_txt = f"{chg:+.2f}%" if chg is not None else "—"
+            bond_note = f"10Y proxy (^TNX) {chg_txt} vs 昨收"
+        if chg is not None and abs(chg) > 1.5:
             notes.append(f"Bond 突发：{bond_note}")
 
     body_lines = [
