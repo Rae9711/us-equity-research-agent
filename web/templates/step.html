@@ -20,8 +20,10 @@
     {% if conclusion %}
     <div class="report-meta">
       <span class="badge badge-ok">Agent 结论</span>
-      <span><strong>{{ conclusion.judgment }}</strong></span>
+      <strong>{{ conclusion.judgment }}</strong>
+      {% if conclusion.one_liner %}
       <span class="muted">{{ conclusion.one_liner }}</span>
+      {% endif %}
     </div>
     {% endif %}
 

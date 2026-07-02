@@ -24,12 +24,12 @@
       <span class="badge {{ 'badge-ok' if meta.llm_used else 'badge-warn' }}">
         {{ 'LLM 已生成' if meta.llm_used else '仅规则引擎' }}
       </span>
-      {% if meta.bias is not none %}
-      <span class="muted">Bias: {{ meta.bias }} · Total: {{ meta.total_score }}</span>
-      {% endif %}
       {% set r0 = meta.get('r0') or meta.get('regime') %}
       {% if r0 %}
-      <span class="tag">R0 {{ r0.get('label', '') }}</span>
+      <span class="regime-badge">R0 · {{ r0.get('label', '') }}</span>
+      {% endif %}
+      {% if meta.bias is not none %}
+      <span class="muted">Bias {{ meta.bias }} · Total {{ meta.total_score }}</span>
       {% endif %}
     </div>
     {% endif %}
