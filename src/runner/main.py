@@ -20,6 +20,7 @@ from src.steps.s04_decision import run_step4_trade_decision
 from src.steps.s05_midday import run_step5_midday
 from src.steps.s06_afternoon import run_step6_afternoon
 from src.steps.s07_evening import run_step7_evening
+from src.jobs.step8_learning import run_step8_learning
 from src.runner.catchup import run_startup_catchup
 
 logging.basicConfig(
