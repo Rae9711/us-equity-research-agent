@@ -1,0 +1,33 @@
+{% if index_rows %}
+<section class="conclusion-index panel">
+  <div class="conclusion-index-head">
+    <h2 class="section-title">结论总表</h2>
+    <a class="muted" href="/verify?date={{ day.trading_date }}">收盘核对 →</a>
+  </div>
+  <p class="muted conclusion-index-sub">R0 + P1–P17 · 判断 / 置信度 / 一句话</p>
+  <div class="conclusion-index-scroll">
+    <table class="conclusion-index-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Part</th>
+          <th>判断</th>
+          <th>置信度</th>
+          <th>一句话</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in index_rows %}
+        <tr>
+          <td><code>{{ row.part_id }}</code></td>
+          <td>{{ row.label }}</td>
+          <td>{{ row.judgment }}</td>
+          <td>{{ row.confidence }}</td>
+          <td>{{ row.one_liner }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}

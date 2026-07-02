@@ -17,6 +17,8 @@
     {% include "_day_header.html" %}
     {% include "_step_nav.html" %}
 
+    {% include "_conclusion_index.html" %}
+
     {% if meta %}
     <div class="report-meta">
       <span class="badge {{ 'badge-ok' if meta.llm_used else 'badge-warn' }}">
@@ -51,7 +53,7 @@
     </div>
     {% endif %}
 
-    <article class="report-body">{{ report_html | safe }}</article>
+    <article class="report-body skip-index-table">{{ report_html | safe }}</article>
   </div>
 </body>
 </html>

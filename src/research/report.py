@@ -30,12 +30,12 @@ def render_morning_report(
 
     lines.append("## 结论总表")
     lines.append("")
-    lines.append("| Part | 判断 | 置信度 | 一句话 |")
-    lines.append("|------|------|--------|--------|")
+    lines.append("| ID | Part | 判断 | 置信度 | 一句话 |")
+    lines.append("|----|------|------|--------|--------|")
     for pid in MORNING_REPORT_ORDER:
         p = parts.get(pid) or {}
         lines.append(
-            f"| {part_label(pid)} | {p.get('judgment', '—')} | {_conf_str(p.get('confidence'))} | {p.get('one_liner', '—')} |"
+            f"| {pid} | {part_label(pid)} | {p.get('judgment', '—')} | {_conf_str(p.get('confidence'))} | {p.get('one_liner', '—')} |"
         )
     lines.append("")
 

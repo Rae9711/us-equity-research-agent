@@ -20,6 +20,11 @@ def main() -> None:
         action="store_true",
         help="Rules-only mode (no Anthropic call)",
     )
+    parser.add_argument(
+        "--resync-only",
+        action="store_true",
+        help="Re-render report + DB conclusions from existing morning.json",
+    )
     args = parser.parse_args()
 
     init_db()
@@ -28,6 +33,13 @@ def main() -> None:
         from datetime import date
 
         trading_date = date.fromisoformat(args.date)
+
+    if args.resync_only:
+        from src.research.morning import resync_morning_from_disk
+
+        payload = resync_morning_from_disk(trading_date)
+        print(f"Morning resync done — {payload.get('trading_date')}")
+        return
 
     payload = run_morning_research(trading_date, skip_llm=args.skip_llm)
     print(f"Morning research done — Bias: {payload.get('bias')} · LLM: {payload.get('llm_used')}")

@@ -24,6 +24,16 @@ logger = logging.getLogger(__name__)
 RULE_PART_IDS = {"P4", "P5", "P6", "P7", "P9", "P11", "P13"}
 
 
+def _regime_one_liner(label: str) -> str:
+    hints = {
+        "AI Expansion": "当前处于 AI 扩张期，Bond 次要",
+        "Macro Fear": "宏观恐惧主导，Risk-off 优先",
+        "Liquidity Driven": "流动性驱动，Risk Appetite 为主",
+        "Range": "无明显 Regime 信号，按 Range 处理",
+    }
+    return hints.get(label, f"Regime={label}")
+
+
 def _load_raw(trading_date: date) -> dict[str, Any]:
     path = raw_data_path(trading_date.isoformat())
     if not path.exists():
@@ -112,7 +122,7 @@ def run_morning_research(
     parts["R0"] = {
         "judgment": f"Regime：{regime_model.label}",
         "confidence": regime_model.confidence,
-        "one_liner": f"{regime_model.label}，conf={regime_model.confidence:.0%}",
+        "one_liner": _regime_one_liner(regime_model.label),
     }
 
     # Step 1c: P17 Hypothesis (after P1-P16)
@@ -130,7 +140,7 @@ def run_morning_research(
             morning_parts=parts,
         )
         parts["P17"] = {
-            "judgment": f"Hypothesis：{hypothesis_model.id} · 状态：{hypothesis_model.status}",
+            "judgment": f"Hypothesis：{hypothesis_model.id} · {hypothesis_model.status}",
             "confidence": hypothesis_model.confidence,
             "one_liner": hypothesis_model.statement[:100],
             "hypothesis": hypothesis_model.model_dump(),
@@ -138,6 +148,12 @@ def run_morning_research(
         logger.info("P17 Hypothesis: %s (conf=%.2f)", hypothesis_model.id, hypothesis_model.confidence)
     except Exception:
         logger.exception("P17 Hypothesis Engine failed")
+        parts["P17"] = {
+            "judgment": "Hypothesis：N/A · 待验证",
+            "confidence": None,
+            "one_liner": "Hypothesis 引擎未生成",
+            "body_md": "",
+        }
 
     payload: dict[str, Any] = {
         "generated_at": datetime.now(ET).isoformat(),
@@ -176,6 +192,29 @@ def run_morning_research(
         logger.exception("Failed to update Market Case from morning research")
 
     _persist_morning(payload)
+    return payload
+
+
+def resync_morning_from_disk(trading_date: date | None = None) -> dict[str, Any]:
+    """Re-render morning report + conclusions from existing morning.json (no LLM)."""
+    trading_date = trading_date or today_et()
+    date_str = trading_date.isoformat()
+    path = morning_json_path(date_str)
+    if not path.exists():
+        raise FileNotFoundError(f"No morning.json for {date_str}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    parts = payload.get("parts") or {}
+    report_md = render_morning_report(
+        date_str,
+        parts,
+        {
+            "bias": payload.get("bias"),
+            "total": payload.get("total_score"),
+        },
+    )
+    morning_report_path(date_str).write_text(report_md, encoding="utf-8")
+    _persist_morning(payload)
+    logger.info("Resynced morning index for %s from disk", date_str)
     return payload
 
 

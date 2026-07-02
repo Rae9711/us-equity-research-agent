@@ -28,6 +28,7 @@ from src.web.launch import launch_date
 from src.web.labels import unified_about, unified_label
 from src.web.stats import accuracy_by_date, accuracy_for_date, global_accuracy
 from src.web.steps_status import step_available, steps_status
+from src.web.conclusion_index import morning_index_from_parts, morning_index_from_records
 from src.web.verify_order import conclusion_sort_key, sort_conclusions
 from src.web.verify_service import VerifyItem, VerifyPayload, save_verifications
 from web.auth import optional_basic_auth
@@ -338,6 +339,12 @@ def today_report(request: Request, date: str | None = None) -> HTMLResponse:
     if json_path.exists():
         meta = json.loads(json_path.read_text(encoding="utf-8"))
 
+    conclusions = _load_conclusions(trading_date)
+    if meta and meta.get("parts"):
+        index_rows = morning_index_from_parts(meta["parts"])
+    else:
+        index_rows = morning_index_from_records(conclusions)
+
     return templates.TemplateResponse(
         request,
         "today.html",
@@ -345,6 +352,7 @@ def today_report(request: Request, date: str | None = None) -> HTMLResponse:
             **_page_context(trading_date, active="today", current_step=1),
             "report_html": report_html,
             "meta": meta,
+            "index_rows": index_rows,
         },
     )
 
