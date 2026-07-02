@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Step {{ step_num }} — {{ step_def.title }}</title>
+  <link rel="stylesheet" href="/static/site.css" />
+  <link rel="stylesheet" href="/static/today.css" />
+</head>
+<body>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <p class="muted"><a href="/?date={{ trading_date }}">← 流程首页</a> · <a href="/history">历史</a></p>
+    <h1 class="page-title">Step {{ step_num }} — {{ step_def.title }}</h1>
+    <p class="muted">{{ step_def.time_et }} ET · {{ step_def.subtitle }} · 交易日 {{ trading_date }}</p>
+
+    <form method="get" class="date-bar panel">
+      <label for="date">切换日期</label>
+      <select id="date" name="date" onchange="this.form.submit()">
+        {% for d in days %}
+        <option value="{{ d.date }}" {% if d.date == trading_date %}selected{% endif %}>{{ d.date }}</option>
+        {% endfor %}
+      </select>
+      <a href="/verify?date={{ trading_date }}">核对本日结论</a>
+    </form>
+
+    {% if conclusion %}
+    <div class="report-meta">
+      <span class="badge badge-ok">Agent 结论</span>
+      <span><strong>{{ conclusion.judgment }}</strong></span>
+      <span class="muted">{{ conclusion.one_liner }}</span>
+    </div>
+    {% endif %}
+
+    <article class="report-body">{{ report_html | safe }}</article>
+  </div>
+</body>
+</html>

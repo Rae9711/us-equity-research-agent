@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Morning Research — {{ trading_date }}</title>
+  <link rel="stylesheet" href="/static/site.css" />
+  <link rel="stylesheet" href="/static/today.css" />
+</head>
+<body>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <h1 class="page-title">Morning Research</h1>
+    <p class="muted">
+      交易日 {{ trading_date }}
+      · <a href="/history">历史记录</a>
+      · <a href="/verify?date={{ trading_date }}">核对结论</a>
+    </p>
+
+    {% if meta %}
+    <div class="report-meta">
+      <span class="badge {{ 'badge-ok' if meta.llm_used else 'badge-warn' }}">
+        {{ 'LLM 已生成' if meta.llm_used else '仅规则引擎' }}
+      </span>
+      {% if meta.bias is not none %}
+      <span class="muted">Bias: {{ meta.bias }} · Total: {{ meta.total_score }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <article class="report-body">{{ report_html | safe }}</article>
+  </div>
+</body>
+</html>

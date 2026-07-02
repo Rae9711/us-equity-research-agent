@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>结论核对 — {{ today }}</title>
+  <link rel="stylesheet" href="/static/site.css" />
+  <link rel="stylesheet" href="/static/verify.css" />
+</head>
+<body>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <h1 class="page-title">结论核对</h1>
+    <p class="muted">
+      对照 Agent 判断，填写核对（对 / 错 / 部分对）、你的判断与备注
+    </p>
+
+    {% if saved %}
+    <div class="flash flash-ok">已保存核对结果</div>
+    {% endif %}
+
+    <form method="get" action="/verify" class="date-bar panel">
+      <label for="date">交易日</label>
+      <select id="date" name="date" onchange="this.form.submit()">
+        {% for d in days %}
+        <option value="{{ d.date }}" {% if d.date == today %}selected{% endif %}>{{ d.date }}</option>
+        {% endfor %}
+      </select>
+      <a href="/today?date={{ today }}">查看报告</a>
+      {% if day_stats.verified > 0 %}
+      <span class="muted">本日已核对 {{ day_stats.verified }} 条 · 准确率 {{ day_stats.accuracy_pct }}%</span>
+      {% endif %}
+    </form>
+
+    {% if rows %}
+    <form method="post" action="/verify" class="verify-form">
+      <input type="hidden" name="trading_date" value="{{ today }}" />
+
+      {% for r in rows %}
+      <section class="verify-card panel">
+        <header class="verify-card-head">
+          <div>
+            <div class="part-name">{{ part_label(r.part_id) }}</div>
+            <div class="part-about">{{ part_about(r.part_id) }}</div>
+          </div>
+          <select name="v_{{ r.part_id }}" class="verify-select" aria-label="核对">
+            <option value="" {% if not r.verification %}selected{% endif %}>— 未核对 —</option>
+            <option value="对" {% if r.verification == '对' %}selected{% endif %}>对</option>
+            <option value="错" {% if r.verification == '错' %}selected{% endif %}>错</option>
+            <option value="部分对" {% if r.verification == '部分对' %}selected{% endif %}>部分对</option>
+          </select>
+        </header>
+
+        <div class="agent-block">
+          <div class="agent-row"><span class="label">判断</span><span>{{ r.judgment }}</span></div>
+          <div class="agent-row"><span class="label">置信度</span><span>{% if r.confidence is not none %}{{ (r.confidence * 100)|round|int }}%{% else %}N/A{% endif %}</span></div>
+          <div class="agent-row"><span class="label">一句话</span><span>{{ r.one_liner }}</span></div>
+        </div>
+
+        <div class="user-fields">
+          <label>你的判断
+            <textarea name="uj_{{ r.part_id }}" rows="2" placeholder="可选：写下你的看法">{{ r.user_judgment or '' }}</textarea>
+          </label>
+          <label>备注
+            <textarea name="n_{{ r.part_id }}" rows="2" placeholder="可选：复盘笔记">{{ r.notes or '' }}</textarea>
+          </label>
+        </div>
+      </section>
+      {% endfor %}
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">保存全部核对</button>
+      </div>
+    </form>
+    {% else %}
+    <div class="panel">
+      <p class="empty">该日尚无 Agent 结论。请先跑 Morning Research，或从上方选择其他日期。</p>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

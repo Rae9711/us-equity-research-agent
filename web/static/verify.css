@@ -1,0 +1,119 @@
+.date-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.date-bar label { font-size: 0.9rem; font-weight: 600; }
+.date-bar select {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.flash {
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+.flash-ok { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+
+.verify-form { margin-top: 1rem; }
+
+.verify-card {
+  margin-bottom: 1rem;
+  padding: 1rem 1.15rem;
+}
+
+.verify-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.part-name { font-weight: 600; font-size: 0.95rem; }
+.part-about { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; line-height: 1.4; }
+
+.verify-select {
+  min-width: 7rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  background: #fff;
+}
+
+.agent-block {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.agent-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.agent-row:last-child { border-bottom: none; }
+.agent-row .label { color: var(--muted); font-weight: 600; }
+
+.user-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+@media (max-width: 640px) {
+  .user-fields { grid-template-columns: 1fr; }
+}
+
+.user-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.user-fields textarea {
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.form-actions {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(transparent, var(--bg) 20%);
+  padding: 1.25rem 0 0.5rem;
+  text-align: center;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.65rem 1.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:hover { background: var(--accent-dark); }

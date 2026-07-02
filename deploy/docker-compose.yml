@@ -1,0 +1,60 @@
+# Daily Trading OS — production stack on shared VPS
+# Usage (on server):
+#   cd /opt/trading-os/repo
+#   docker compose -p trading-os -f deploy/docker-compose.yml up -d --build
+
+services:
+  trading_web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    image: trading-os-web:${TRADING_OS_TAG:-dev}
+    container_name: trading_web
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: sqlite:////data/trading_os.db
+      TZ: America/New_York
+    ports:
+      - "127.0.0.1:8020:8000"
+    volumes:
+      - trading_os_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  trading_runner:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.runner
+    image: trading-os-runner:${TRADING_OS_TAG:-dev}
+    container_name: trading_runner
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: sqlite:////data/trading_os.db
+      TZ: America/New_York
+    volumes:
+      - trading_os_data:/data
+    restart: unless-stopped
+    depends_on:
+      trading_web:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+networks:
+  default:
+    name: trading_os_net
+
+volumes:
+  trading_os_data:
+    name: trading_os_data

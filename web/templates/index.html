@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Trading OS</title>
+  <link rel="stylesheet" href="/static/site.css" />
+</head>
+<body>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <h1 class="page-title">Daily Trading OS</h1>
+    <p class="muted">美股每日研究流程 · Step 0 → Step 8</p>
+
+    <form method="get" action="/" class="date-bar panel">
+      <label for="date">交易日</label>
+      <select id="date" name="date" onchange="this.form.submit()">
+        {% for d in days %}
+        <option value="{{ d.date }}" {% if d.date == trading_date %}selected{% endif %}>{{ d.date }}</option>
+        {% endfor %}
+      </select>
+      <a href="/history">历史日历</a>
+      <a href="/verify?date={{ trading_date }}">核对结论</a>
+    </form>
+
+    {% if stats and stats.verified > 0 %}
+    <div class="panel stats-bar">
+      <strong>Agent 准确率</strong> {{ stats.accuracy_pct }}%
+      <span class="muted">（{{ stats.correct }}/{{ stats.verified }} 已核对）</span>
+    </div>
+    {% endif %}
+
+    <div class="timeline">
+      {% for s in timeline %}
+      <a class="timeline-item {% if s.available %}done{% else %}pending{% endif %}" href="{{ s.url }}">
+        <div class="timeline-time">{{ s.time }} ET</div>
+        <div class="timeline-body">
+          <div class="timeline-title">Step {{ s.num }} — {{ s.title }}</div>
+          <div class="timeline-sub">{{ s.subtitle }}</div>
+          <div class="timeline-status">
+            {% if s.available %}<span class="badge badge-ok">已生成</span>{% else %}<span class="badge badge-muted">待运行</span>{% endif %}
+          </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+</body>
+</html>

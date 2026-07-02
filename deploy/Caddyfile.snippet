@@ -1,0 +1,13 @@
+# Append this block to /etc/caddy/Caddyfile on the VPS.
+# Do NOT remove existing sites (e.g. alfredaitech.com).
+
+rae-trading.com {
+	encode gzip
+
+	# Optional: uncomment after generating bcrypt hash:
+	# basicauth {
+	#     your_username JDJhJDE0J...
+	# }
+
+	reverse_proxy 127.0.0.1:8020
+}

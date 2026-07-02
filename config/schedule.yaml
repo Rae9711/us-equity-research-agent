@@ -1,0 +1,10 @@
+timezone: America/New_York
+
+# ET schedule — see src/runner/main.py
+jobs:
+  - id: collect_raw
+    at: "7:45"
+    days: mon-fri
+  - id: morning_research
+    at: "8:00"
+    days: mon-fri

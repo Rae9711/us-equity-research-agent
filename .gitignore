@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.venv/
+venv/
+data/trading_os.db
+data/raw/*
+!data/raw/.gitkeep
+data/reports/*
+!data/reports/.gitkeep

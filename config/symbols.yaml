@@ -1,0 +1,57 @@
+market:
+  SPY: SPY
+  QQQ: QQQ
+  TQQQ: TQQQ
+  VIX: ^VIX
+  DXY: DX-Y.NYB
+  TEN_Y_FRED: DGS10
+
+sectors:
+  XLK: XLK
+  SMH: SMH
+  XLF: XLF
+  XLE: XLE
+
+stocks:
+  - NVDA
+  - MSFT
+  - AAPL
+  - AMZN
+  - META
+  - GOOGL
+  - TSLA
+
+fred:
+  DGS10: DGS10
+  DGS2: DGS2
+  FEDFUNDS: FEDFUNDS
+  CPIAUCSL: CPIAUCSL
+  PCEPI: PCEPI
+
+news:
+  primary: polygon
+  polygon_broad_limit: 30
+  polygon_per_ticker_limit: 5
+  polygon_tickers:
+    - SPY
+    - QQQ
+    - NVDA
+    - MSFT
+    - AAPL
+    - TSLA
+  rss:
+    - url: https://feeds.bloomberg.com/markets/news.rss
+      name: Bloomberg
+    - url: https://feeds.a.dj.com/rss/RSSMarketsMain.xml
+      name: WSJ
+
+options:
+  underlying: QQQ
+
+macro_checklist:
+  - id: fed
+    fred_series: FEDFUNDS
+  - id: pce
+    fred_series: PCEPI
+  - id: cpi
+    fred_series: CPIAUCSL
