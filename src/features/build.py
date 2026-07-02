@@ -38,6 +38,25 @@ def _pct_chg(current: float | None, prev: float | None) -> float | None:
     return (current - prev) / abs(prev) * 100.0
 
 
+def _quotes(section: dict[str, Any]) -> dict[str, Any]:
+    return section.get("quotes") or section.get("prices") or {}
+
+
+def _quote(section: dict[str, Any], ticker: str) -> dict[str, Any]:
+    return _quotes(section).get(ticker) or {}
+
+
+def _quote_chg(q: dict[str, Any], prior_q: dict[str, Any] | None = None) -> float | None:
+    chg = _safe_float(q, "change_pct")
+    if chg is not None:
+        return chg
+    cur = _safe_float(q, "close") or _safe_float(q, "current_price")
+    prv = _safe_float(prior_q or {}, "close") or _safe_float(prior_q or {}, "current_price")
+    if prv is None:
+        prv = _safe_float(q, "prev_close")
+    return _pct_chg(cur, prv)
+
+
 def build_features(trading_date: date | None = None) -> FeaturesModel:
     """Build features from raw data files for given trading date."""
     trading_date = trading_date or today_et()
@@ -72,71 +91,65 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
 
     # DGS10 — FRED 10Y treasury rate
     dgs10 = _safe_float(macro, "rates", "DGS10")
-    prior_dgs10 = _safe_float(prior_macro, "rates", "DGS10")
+    if dgs10 is None:
+        dgs10 = _safe_float(market.get("treasury_10y_fred") or {}, "value")
+    if dgs10 is None:
+        dgs10 = _safe_float((macro.get("series") or {}).get("DGS10") or {}, "value")
 
     # VIX
-    vix_prices = market.get("prices", {}).get("^VIX", {})
-    vix = _safe_float(vix_prices, "close") or _safe_float(vix_prices, "current_price")
-    prior_vix_prices = prior_market.get("prices", {}).get("^VIX", {})
-    prior_vix = _safe_float(prior_vix_prices, "close") or _safe_float(prior_vix_prices, "current_price")
-    vix_chg = _pct_chg(vix, prior_vix)
+    vix_q = _quote(market, "^VIX")
+    prior_vix_q = _quote(prior_market, "^VIX")
+    vix = _safe_float(vix_q, "close") or _safe_float(vix_q, "current_price")
+    vix_chg = _quote_chg(vix_q, prior_vix_q)
 
     # QQQ
-    qqq_prices = market.get("prices", {}).get("QQQ", {})
-    qqq_close = _safe_float(qqq_prices, "close") or _safe_float(qqq_prices, "current_price")
-    qqq_open = _safe_float(qqq_prices, "open")
-    prior_qqq_prices = prior_market.get("prices", {}).get("QQQ", {})
-    prior_qqq = _safe_float(prior_qqq_prices, "close") or _safe_float(prior_qqq_prices, "current_price")
-    qqq_chg = _pct_chg(qqq_close, prior_qqq)
+    qqq_q = _quote(market, "QQQ")
+    prior_qqq_q = _quote(prior_market, "QQQ")
+    qqq_close = _safe_float(qqq_q, "close") or _safe_float(qqq_q, "current_price")
+    qqq_open = _safe_float(qqq_q, "open")
+    prior_qqq = _safe_float(prior_qqq_q, "close") or _safe_float(prior_qqq_q, "current_price")
+    if prior_qqq is None:
+        prior_qqq = _safe_float(qqq_q, "prev_close")
+    qqq_chg = _quote_chg(qqq_q, prior_qqq_q)
     qqq_gap = _pct_chg(qqq_open, prior_qqq) if qqq_open and prior_qqq else None
 
     # SPY
-    spy_prices = market.get("prices", {}).get("SPY", {})
-    spy_close = _safe_float(spy_prices, "close") or _safe_float(spy_prices, "current_price")
-    prior_spy_prices = prior_market.get("prices", {}).get("SPY", {})
-    prior_spy = _safe_float(prior_spy_prices, "close") or _safe_float(prior_spy_prices, "current_price")
-    spy_chg = _pct_chg(spy_close, prior_spy)
+    spy_q = _quote(market, "SPY")
+    prior_spy_q = _quote(prior_market, "SPY")
+    spy_chg = _quote_chg(spy_q, prior_spy_q)
 
     # DXY (dollar)
-    dxy_prices = market.get("prices", {}).get("DX-Y.NYB", {})
-    dxy = _safe_float(dxy_prices, "close") or _safe_float(dxy_prices, "current_price")
-    prior_dxy_prices = prior_market.get("prices", {}).get("DX-Y.NYB", {})
-    prior_dxy = _safe_float(prior_dxy_prices, "close") or _safe_float(prior_dxy_prices, "current_price")
-    dxy_chg = _pct_chg(dxy, prior_dxy)
+    dxy_q = _quote(market, "DX-Y.NYB")
+    prior_dxy_q = _quote(prior_market, "DX-Y.NYB")
+    dxy = _safe_float(dxy_q, "close") or _safe_float(dxy_q, "current_price")
+    dxy_chg = _quote_chg(dxy_q, prior_dxy_q)
 
     # SMH (semiconductor ETF)
-    smh_prices = sector.get("prices", {}).get("SMH", {})
-    smh_close = _safe_float(smh_prices, "close") or _safe_float(smh_prices, "current_price")
-    prior_smh_prices = prior_sector.get("prices", {}).get("SMH", {})
-    prior_smh = _safe_float(prior_smh_prices, "close") or _safe_float(prior_smh_prices, "current_price")
-    smh_chg = _pct_chg(smh_close, prior_smh)
+    smh_q = _quote(sector, "SMH")
+    prior_smh_q = _quote(prior_sector, "SMH")
+    smh_chg = _quote_chg(smh_q, prior_smh_q)
 
     # NVDA
-    nvda_prices = stocks.get("prices", {}).get("NVDA", {})
-    nvda_close = _safe_float(nvda_prices, "close") or _safe_float(nvda_prices, "current_price")
-    prior_nvda_prices = prior_stocks.get("prices", {}).get("NVDA", {})
-    prior_nvda = _safe_float(prior_nvda_prices, "close") or _safe_float(prior_nvda_prices, "current_price")
-    nvda_chg = _pct_chg(nvda_close, prior_nvda)
+    nvda_q = _quote(stocks, "NVDA")
+    prior_nvda_q = _quote(prior_stocks, "NVDA")
+    nvda_chg = _quote_chg(nvda_q, prior_nvda_q)
 
     # Oil (XLE as proxy)
-    xle_prices = sector.get("prices", {}).get("XLE", {})
-    xle_close = _safe_float(xle_prices, "close") or _safe_float(xle_prices, "current_price")
-    prior_xle_prices = prior_sector.get("prices", {}).get("XLE", {})
-    prior_xle = _safe_float(prior_xle_prices, "close") or _safe_float(prior_xle_prices, "current_price")
-    oil_chg = _pct_chg(xle_close, prior_xle)
+    xle_q = _quote(sector, "XLE")
+    prior_xle_q = _quote(prior_sector, "XLE")
+    oil_chg = _quote_chg(xle_q, prior_xle_q)
 
     # Breadth proxy: ratio of up-moving Mag7 stocks
     mag7 = ["NVDA", "MSFT", "AAPL", "AMZN", "META", "GOOGL", "TSLA"]
     up_count = 0
     valid_count = 0
     for sym in mag7:
-        cur_p = stocks.get("prices", {}).get(sym, {})
-        prv_p = prior_stocks.get("prices", {}).get(sym, {})
-        cur = _safe_float(cur_p, "close") or _safe_float(cur_p, "current_price")
-        prv = _safe_float(prv_p, "close") or _safe_float(prv_p, "current_price")
-        if cur is not None and prv is not None and prv != 0:
+        cur_p = _quote(stocks, sym)
+        prv_p = _quote(prior_stocks, sym)
+        chg = _quote_chg(cur_p, prv_p)
+        if chg is not None:
             valid_count += 1
-            if cur > prv:
+            if chg > 0:
                 up_count += 1
     breadth_proxy = (up_count / valid_count) if valid_count > 0 else None
 

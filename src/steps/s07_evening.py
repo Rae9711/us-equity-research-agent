@@ -145,6 +145,9 @@ def _assess_hypothesis(
     if not morning_driver:
         return "N/A"
 
+    if actual_driver == "Unknown":
+        return "N/A"
+
     morning_driver_lower = morning_driver.lower()
     actual_lower = actual_driver.lower()
 
