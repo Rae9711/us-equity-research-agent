@@ -4,7 +4,7 @@ from typing import Any
 
 from src.research.format_body import normalize_body_md
 from src.research.format_scenarios import format_scenario_body
-from src.research.parts_meta import PART_ORDER, part_about, part_label
+from src.research.parts_meta import MORNING_REPORT_ORDER, part_about, part_label
 
 
 def _conf_str(conf: Any) -> str:
@@ -32,7 +32,7 @@ def render_morning_report(
     lines.append("")
     lines.append("| Part | 判断 | 置信度 | 一句话 |")
     lines.append("|------|------|--------|--------|")
-    for pid in PART_ORDER:
+    for pid in MORNING_REPORT_ORDER:
         p = parts.get(pid) or {}
         lines.append(
             f"| {part_label(pid)} | {p.get('judgment', '—')} | {_conf_str(p.get('confidence'))} | {p.get('one_liner', '—')} |"
@@ -43,10 +43,12 @@ def render_morning_report(
     lines.append("以下为各 Part 展开说明；结论摘要见上表。")
     lines.append("")
 
-    for pid in PART_ORDER:
+    for pid in MORNING_REPORT_ORDER:
         p = parts.get(pid) or {}
         if pid in ("P15", "P16"):
             body = format_scenario_body(p.get("body_md") or "", part_id=pid)
+        elif pid == "P17":
+            body = _format_hypothesis_body(p.get("hypothesis") or {})
         else:
             body = normalize_body_md(p.get("body_md") or "")
 
@@ -65,4 +67,29 @@ def render_morning_report(
             "",
         ]
 
+    return "\n".join(lines)
+
+
+def _format_hypothesis_body(hypothesis: dict[str, Any]) -> str:
+    if not hypothesis:
+        return "_Hypothesis 未生成_"
+    lines = [
+        f"**Hypothesis ID**：`{hypothesis.get('id', '—')}`",
+        "",
+        f"**陈述**：{hypothesis.get('statement', '—')}",
+        "",
+        f"**状态**：{hypothesis.get('status', '待验证')}",
+        "",
+        "**Evidence**",
+        "",
+    ]
+    for item in hypothesis.get("evidence") or []:
+        lines.append(f"- {item}")
+    if not hypothesis.get("evidence"):
+        lines.append("- —")
+    lines += ["", "**Counter-evidence**", ""]
+    for item in hypothesis.get("counter_evidence") or []:
+        lines.append(f"- {item}")
+    if not hypothesis.get("counter_evidence"):
+        lines.append("- —")
     return "\n".join(lines)

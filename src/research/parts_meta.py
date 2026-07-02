@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 PART_ORDER = [f"P{i}" for i in range(1, 17)]
+MORNING_REPORT_ORDER = ["R0"] + PART_ORDER + ["P17"]
 
 # title: 表格与章节标题；about: 这个 Part 是干什么的
 PART_META: dict[str, dict[str, str]] = {
+    "R0": {
+        "title": "Regime Engine",
+        "about": "决策级市场时代（AI Expansion / Macro Fear / …），先于 P1–P16",
+    },
     "Step0": {
         "title": "数据更新",
         "about": "Step 0 Raw Data 是否就绪，缺失项有哪些",
@@ -71,6 +76,10 @@ PART_META: dict[str, dict[str, str]] = {
     "P16": {
         "title": "交易计划 Trading Plan",
         "about": "IF-THEN 执行计划，每行：Scenario X：若 条件 → 行动（买 Call / 放弃 / 不追）",
+    },
+    "P17": {
+        "title": "Hypothesis",
+        "about": "可验证假设：Evidence / Counter / 状态（待验证 → 盘中更新）",
     },
 }
 

@@ -191,7 +191,7 @@ def _persist_morning(payload: dict[str, Any]) -> None:
                 message=f"Bias: {payload.get('bias')} · Total: {payload.get('total_score')}",
             )
         )
-        for pid in PART_ORDER:
+        for pid in ["R0"] + PART_ORDER + ["P17"]:
             part = payload["parts"].get(pid) or {}
             existing = (
                 session.query(ConclusionRecord)

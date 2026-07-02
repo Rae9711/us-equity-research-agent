@@ -25,9 +25,29 @@
       {% if meta.bias is not none %}
       <span class="muted">Bias: {{ meta.bias }} · Total: {{ meta.total_score }}</span>
       {% endif %}
-      {% if meta.get('regime') %}
-      <span class="tag">{{ meta.regime.get('label', '') }}</span>
+      {% set r0 = meta.get('r0') or meta.get('regime') %}
+      {% if r0 %}
+      <span class="tag">R0 {{ r0.get('label', '') }}</span>
       {% endif %}
+    </div>
+    {% endif %}
+
+    {% if meta and meta.get('hypothesis') %}
+    {% set hyp = meta.hypothesis %}
+    <div class="hypothesis-panel">
+      <h2 class="section-title">P17 Hypothesis</h2>
+      <p><code>{{ hyp.get('id', '—') }}</code> · {{ hyp.get('status', '待验证') }} · conf {{ ((hyp.get('confidence', 0) * 100) | round(0)) }}%</p>
+      <p><strong>{{ hyp.get('statement', '—') }}</strong></p>
+      <div class="hypothesis-cols">
+        <div>
+          <h3>Evidence</h3>
+          <ul>{% for e in hyp.get('evidence', []) %}<li>{{ e }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul>
+        </div>
+        <div>
+          <h3>Counter-evidence</h3>
+          <ul>{% for e in hyp.get('counter_evidence', []) %}<li>{{ e }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul>
+        </div>
+      </div>
     </div>
     {% endif %}
 

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-PART_SORT_ORDER = ["Step0"] + [f"P{i}" for i in range(1, 17)] + [f"S{i}" for i in range(2, 9)]
+PART_SORT_ORDER = (
+    ["Step0", "R0"]
+    + [f"P{i}" for i in range(1, 17)]
+    + ["P17"]
+    + [f"S{i}" for i in range(2, 9)]
+)
 
 
 def conclusion_sort_key(part_id: str) -> tuple[int, int, str]:
