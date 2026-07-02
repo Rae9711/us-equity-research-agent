@@ -10,3 +10,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/reports/*
 !data/reports/.gitkeep
+!data/reports/backtest/
+!data/reports/backtest/*.md
+!data/reports/TODAY/
+!data/reports/TODAY/*.md
