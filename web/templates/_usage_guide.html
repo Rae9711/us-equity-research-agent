@@ -1,0 +1,65 @@
+<div class="usage-guide" id="usage-guide">
+  <button type="button" class="usage-guide-toggle" id="usage-guide-toggle" aria-expanded="true" aria-controls="usage-guide-body">
+    <span class="usage-guide-toggle-icon" aria-hidden="true">▼</span>
+    <span class="usage-guide-toggle-label">使用说明</span>
+    <span class="usage-guide-toggle-hint muted">点击展开 / 收起</span>
+  </button>
+  <div class="usage-guide-body" id="usage-guide-body">
+    <ul class="usage-guide-list">
+      <li><strong>这是什么？</strong>每日美股交易<strong>研究助手</strong>，整理 Morning 与盘中分析。<strong>不会自动下单</strong>，只供你阅读和决策参考。</li>
+      <li><strong>每天怎么用？</strong>
+        <ul>
+          <li><strong>约 8:00</strong> — 读 Morning（首页「决策卡」或 Morning 页）</li>
+          <li><strong>盘中</strong> — 按 Step 2–8 跟进更新</li>
+          <li><strong>收盘后</strong> — 去「核对」填实际结果 → 再看「准确率」</li>
+        </ul>
+      </li>
+      <li><strong>导航栏各页：</strong>
+        <ul>
+          <li><strong>今日流程</strong> — 当天总览与时间线</li>
+          <li><strong>Morning</strong> — Step 1 完整晨间报告</li>
+          <li><strong>准确率</strong> — 历史预测命中统计</li>
+          <li><strong>Cases</strong> — 市场案例库</li>
+          <li><strong>Playbook</strong> — 交易规则与 playbook</li>
+          <li><strong>历史</strong> — 浏览往日记录</li>
+          <li><strong>核对</strong> — 收盘后填写实际走势</li>
+        </ul>
+      </li>
+      <li><strong>休市日：</strong>NYSE 休市时没有当日决策，请点「上一交易日」查看最近一份报告。</li>
+      <li><strong>学习闭环：</strong>你在「核对」页填写的数据会帮助 Agent 越学越准。</li>
+      <li><strong>决策卡（首页 5 行）：</strong>
+        <ul>
+          <li><strong>Driver</strong> — 今天市场由什么驱动</li>
+          <li><strong>Bias</strong> — 偏多 / 偏空 / 中性</li>
+          <li><strong>Trade · Wait · No Trade</strong> — 建议做、等、还是不做</li>
+          <li><strong>失效条件</strong> — 什么情况说明判断作废</li>
+          <li><strong>今日只盯</strong> — 盘中只需关注这两个变量</li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</div>
+<script>
+(function () {
+  var KEY = 'dtos-usage-guide-collapsed';
+  var root = document.getElementById('usage-guide');
+  var toggle = document.getElementById('usage-guide-toggle');
+  var body = document.getElementById('usage-guide-body');
+  if (!root || !toggle || !body) return;
+
+  function setCollapsed(collapsed) {
+    root.classList.toggle('is-collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.querySelector('.usage-guide-toggle-icon').textContent = collapsed ? '▶' : '▼';
+    try { localStorage.setItem(KEY, collapsed ? '1' : '0'); } catch (e) {}
+  }
+
+  var stored = null;
+  try { stored = localStorage.getItem(KEY); } catch (e) {}
+  if (stored === '1') setCollapsed(true);
+
+  toggle.addEventListener('click', function () {
+    setCollapsed(!root.classList.contains('is-collapsed'));
+  });
+})();
+</script>
