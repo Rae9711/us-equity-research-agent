@@ -1,9 +1,6 @@
 """S7 Attribution Engine — decomposes QQQ daily move into driver contributions.
 
-Non-LLM. Uses regression-style heuristic:
-- Collect returns of proxy instruments for each driver bucket
-- Weight by correlation heuristic
-- Normalize to sum = 1.0
+Non-LLM. Supports split attribution when multiple drivers contributed (e.g. NFP 40% + Chip 60%).
 """
 
 from __future__ import annotations
@@ -14,7 +11,7 @@ from datetime import date
 from typing import Any
 
 from src.schemas.market_case import AttributionModel, FeaturesModel
-from src.utils.paths import raw_data_path
+from src.utils.paths import morning_json_path, raw_data_path
 from src.utils.trading_calendar import today_et
 
 logger = logging.getLogger(__name__)
@@ -34,51 +31,113 @@ def _safe_float(d: dict, *keys: str, default: float = 0.0) -> float:
         return default
 
 
-def _pct_chg(cur: float | None, prev: float | None) -> float:
-    if cur is None or prev is None or prev == 0:
+def _load_morning_driver(date_str: str) -> str:
+    path = morning_json_path(date_str)
+    if not path.exists():
+        return ""
+    try:
+        morning = json.loads(path.read_text(encoding="utf-8"))
+        return ((morning.get("parts") or {}).get("P10") or {}).get("judgment", "")
+    except Exception:
+        return ""
+
+
+def _macro_release_signal(date_str: str) -> float:
+    path = raw_data_path(date_str)
+    if not path.exists():
         return 0.0
-    return (cur - prev) / abs(prev) * 100.0
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0.0
+    macro = raw.get("macro") or {}
+    if macro.get("nfp_release_today"):
+        return 1.0
+    from src.research.rules import catalysts_on_date
+
+    calendar = macro.get("economic_calendar") or []
+    catalysts = catalysts_on_date(calendar, date_str)
+    if catalysts:
+        return 0.85
+    return 0.0
 
 
 def compute_attribution(
     trading_date: date | None = None,
     features: FeaturesModel | None = None,
-) -> tuple[AttributionModel, str, str]:
+) -> tuple[AttributionModel, str, str, dict[str, float]]:
     """
-    Returns (attribution, actual_driver, surprise_hint).
+    Returns (attribution, actual_driver, surprise_hint, driver_splits).
 
-    Attribution weights sum to 1.0.
-    actual_driver: the bucket with largest share.
-    surprise_hint: text description of biggest mismatch vs expected.
+    When multiple drivers are active, driver_splits sums to ~1.0 with named keys.
     """
     trading_date = trading_date or today_et()
     date_str = trading_date.isoformat()
 
-    # Pull raw scores for each bucket
-    ai_score = _ai_driver_score(features) if features else 0.0
-    bond_score = _bond_driver_score(features) if features else 0.0
-    oil_score = _oil_driver_score(features) if features else 0.0
-    macro_score = _macro_driver_score(features) if features else 0.0
+    ai_score = abs(_ai_driver_score(features)) if features else 0.0
+    bond_score = abs(_bond_driver_score(features)) if features else 0.0
+    oil_score = abs(_oil_driver_score(features)) if features else 0.0
+    macro_score = abs(_macro_driver_score(features)) if features else 0.0
 
-    scores = {
-        "ai": abs(ai_score),
-        "bond": abs(bond_score),
-        "oil": abs(oil_score),
-        "macro": abs(macro_score),
-    }
-    total = sum(scores.values())
+    macro_release = _macro_release_signal(date_str)
+    if macro_release > 0:
+        macro_score = max(macro_score, macro_release * 3.0)
 
-    if total < 0.001:
-        # No signal — equal distribution
-        attr = AttributionModel(ai=0.25, bond=0.25, oil=0.25, macro=0.15, other=0.10)
-        return attr, "Unknown", "No clear driver signals detected"
+    chip_active = bool(
+        features
+        and ai_score > 1.5
+        and (
+            (features.smh_chg is not None and features.smh_chg <= -2.0)
+            or (features.nvda_chg is not None and features.nvda_chg <= -2.0)
+        )
+    )
+    nfp_active = macro_release >= 0.85 or "nfp" in _load_morning_driver(date_str).lower()
 
-    other_frac = 0.05
-    scale = (1.0 - other_frac) / total
-    ai_w = scores["ai"] * scale
-    bond_w = scores["bond"] * scale
-    oil_w = scores["oil"] * scale
-    macro_w = scores["macro"] * scale
+    named: dict[str, float] = {}
+    if nfp_active and chip_active:
+        nfp_w = 0.40
+        chip_w = 0.60
+        named = {"NFP": nfp_w, "AI Chip Selloff": chip_w}
+        macro_w = nfp_w
+        ai_w = chip_w
+        bond_w = bond_score * 0.05
+        oil_w = oil_score * 0.05
+        other_frac = 0.0
+        actual_driver = "NFP + AI Chip Selloff"
+    else:
+        scores = {
+            "ai": ai_score,
+            "bond": bond_score,
+            "oil": oil_score,
+            "macro": macro_score,
+        }
+        total = sum(scores.values())
+        if total < 0.001:
+            attr = AttributionModel(
+                ai=0.25, bond=0.25, oil=0.25, macro=0.15, other=0.10, splits={}
+            )
+            return attr, "Unknown", "No clear driver signals detected", {}
+
+        other_frac = 0.05
+        scale = (1.0 - other_frac) / total
+        ai_w = scores["ai"] * scale
+        bond_w = scores["bond"] * scale
+        oil_w = scores["oil"] * scale
+        macro_w = scores["macro"] * scale
+        top = max(scores, key=lambda k: scores[k])
+        driver_map = {
+            "ai": "AI/Semiconductor",
+            "bond": "Bond/Rates",
+            "oil": "Oil/Geo",
+            "macro": "Macro",
+        }
+        actual_driver = driver_map.get(top, top)
+        if nfp_active:
+            actual_driver = "NFP"
+            named = {"NFP": macro_w + ai_w * 0.1}
+        elif chip_active:
+            actual_driver = "AI Chip Selloff"
+            named = {"AI Chip Selloff": ai_w + macro_w * 0.1}
 
     attr = AttributionModel(
         ai=round(ai_w, 3),
@@ -86,15 +145,11 @@ def compute_attribution(
         oil=round(oil_w, 3),
         macro=round(macro_w, 3),
         other=round(other_frac, 3),
+        splits={k: round(v, 3) for k, v in named.items()},
     )
 
-    actual_driver = max(scores, key=lambda k: scores[k])
-    driver_map = {"ai": "AI/Semiconductor", "bond": "Bond/Rates", "oil": "Oil/Geo", "macro": "Macro"}
-    actual_driver_label = driver_map.get(actual_driver, actual_driver)
-
-    surprise = _generate_surprise_hint(attr, features)
-
-    return attr, actual_driver_label, surprise
+    surprise = _generate_surprise_hint(attr, features, named)
+    return attr, actual_driver, surprise, named
 
 
 def _ai_driver_score(f: FeaturesModel) -> float:
@@ -104,17 +159,14 @@ def _ai_driver_score(f: FeaturesModel) -> float:
     if f.smh_chg is not None:
         score += f.smh_chg * 1.2
     if f.qqq_chg is not None and f.spy_chg is not None:
-        # QQQ outperformance vs SPY is AI signal
         score += (f.qqq_chg - f.spy_chg) * 2.0
     return score
 
 
 def _bond_driver_score(f: FeaturesModel) -> float:
     score = 0.0
-    if f.dgs10 is not None:
-        # High rates = negative for tech
-        if f.dgs10 > 4.5:
-            score += (f.dgs10 - 4.5) * 8.0
+    if f.dgs10 is not None and f.dgs10 > 4.5:
+        score += (f.dgs10 - 4.5) * 8.0
     return score
 
 
@@ -133,11 +185,19 @@ def _macro_driver_score(f: FeaturesModel) -> float:
     return score
 
 
-def _generate_surprise_hint(attr: AttributionModel, f: FeaturesModel | None) -> str:
+def _generate_surprise_hint(
+    attr: AttributionModel,
+    f: FeaturesModel | None,
+    splits: dict[str, float],
+) -> str:
     if f is None:
         return "No intraday data available for surprise assessment"
 
     surprises = []
+    if splits.get("NFP") and splits.get("AI Chip Selloff"):
+        surprises.append(
+            f"Split attribution: NFP {splits['NFP']:.0%} + Chip Selloff {splits['AI Chip Selloff']:.0%}"
+        )
 
     if attr.bond < 0.10 and f.dgs10 is not None and f.dgs10 > 4.6:
         surprises.append(f"Bond mattered less than expected despite 10Y={f.dgs10:.2f}%")

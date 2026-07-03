@@ -2,6 +2,8 @@ market:
   SPY: SPY
   QQQ: QQQ
   TQQQ: TQQQ
+  DIA: DIA
+  ES: ES=F
   VIX: ^VIX
   DXY: DX-Y.NYB
   TEN_Y_FRED: DGS10
@@ -27,6 +29,10 @@ fred:
   FEDFUNDS: FEDFUNDS
   CPIAUCSL: CPIAUCSL
   PCEPI: PCEPI
+  PAYEMS: PAYEMS
+  UNRATE: UNRATE
+  AHETPI: AHETPI
+  ICSA: ICSA
 
 news:
   primary: polygon
@@ -62,3 +68,11 @@ macro_checklist:
     fred_series: PCEPI
   - id: cpi
     fred_series: CPIAUCSL
+  - id: nfp_payrolls
+    fred_series: PAYEMS
+  - id: unemployment_rate
+    fred_series: UNRATE
+  - id: avg_hourly_earnings
+    fred_series: AHETPI
+  - id: initial_claims
+    fred_series: ICSA

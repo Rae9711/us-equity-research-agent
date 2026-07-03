@@ -47,10 +47,12 @@ class AttributionModel(BaseModel):
     oil: float = 0.0
     macro: float = 0.0
     other: float = 0.0
+    splits: dict[str, float] = Field(default_factory=dict)
 
 
 class LabelsModel(BaseModel):
     actual_driver: Optional[str] = None
+    driver_splits: dict[str, float] = Field(default_factory=dict)
     hypothesis_correct: Optional[str] = None  # 对 | 错 | 部分对
     scenario_primary: Optional[str] = None  # A | B | C — morning P15 pick
     scenario_actual: Optional[str] = None  # A | B | C | none

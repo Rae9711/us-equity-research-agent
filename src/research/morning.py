@@ -21,7 +21,7 @@ from src.utils.trading_calendar import ET, today_et
 
 logger = logging.getLogger(__name__)
 
-RULE_PART_IDS = {"P4", "P5", "P6", "P7", "P8", "P9", "P11", "P13"}
+RULE_PART_IDS = {"P1", "P2", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P13", "P15"}
 
 
 def _is_missing(part: dict[str, Any]) -> bool:
@@ -38,7 +38,7 @@ def _is_missing(part: dict[str, Any]) -> bool:
 
 def _regime_one_liner(label: str) -> str:
     hints = {
-        "AI Expansion": "当前处于 AI 扩张期，Bond 次要",
+        "AI Expansion": "AI 扩张 Regime；Macro 数据日可暂时 dominate 日内 Driver",
         "Macro Fear": "宏观恐惧主导，Risk-off 优先",
         "Liquidity Driven": "流动性驱动，Risk Appetite 为主",
         "Range": "无明显 Regime 信号，按 Range 处理",

@@ -23,9 +23,7 @@ logger = logging.getLogger(__name__)
 _BACKTEST_DIR = Path(os.environ.get("DATA_ROOT", "/data")) / "reports" / "backtest"
 
 
-def _is_trading_day(d: date) -> bool:
-    """Weekend check (NYSE holiday check excluded — MVP)."""
-    return d.weekday() < 5
+from src.utils.trading_calendar import is_trading_day as _is_trading_day
 
 
 def _trading_days_window(end_date: date, days: int) -> list[date]:

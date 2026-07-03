@@ -25,6 +25,8 @@ def collect_market() -> dict[str, Any]:
     checklist = {
         "SPY": _quote_ok(quotes, cfg["market"]["SPY"]),
         "QQQ": _quote_ok(quotes, cfg["market"]["QQQ"]),
+        "DIA": _quote_ok(quotes, cfg["market"]["DIA"]),
+        "ES_futures": _quote_ok(quotes, cfg["market"]["ES"]),
         "TQQQ": _quote_ok(quotes, cfg["market"]["TQQQ"]),
         "VIX": _quote_ok(quotes, cfg["market"]["VIX"]),
         "DXY": _quote_ok(quotes, cfg["market"]["DXY"]),

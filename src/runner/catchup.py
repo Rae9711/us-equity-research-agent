@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from pytz import timezone
 
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import is_trading_day, nyse_holiday, today_et
 from src.web.steps_status import step_available
 
 logger = logging.getLogger("runner.catchup")
@@ -53,8 +53,9 @@ def _scheduled_et(day: datetime, hour: int, minute: int) -> datetime:
 def run_startup_catchup(handlers: dict[str, Callable[[], None]]) -> None:
     """Run missed jobs for today when runner restarts mid-session."""
     now = _now_et()
-    if now.weekday() >= 5:
-        logger.info("Startup catch-up skipped: weekend (%s ET)", now.strftime("%A"))
+    if not is_trading_day(now.date()):
+        reason = nyse_holiday(now.date()) or "weekend"
+        logger.info("Startup catch-up skipped: NYSE closed (%s, %s)", now.strftime("%A"), reason)
         return
 
     date_str = today_et().isoformat()

@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path, raw_dir, reports_dir
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import is_trading_day, today_et
 from src.web.launch import launch_date, trading_day_number
 from src.web.steps_status import steps_status
 
@@ -58,7 +58,7 @@ def list_trading_days() -> list[dict]:
     today_str = today_et().isoformat()
     if not any(d["date"] == today_str for d in days):
         t = today_et()
-        if t >= launch_date() and t.weekday() < 5:
+        if t >= launch_date() and is_trading_day(t):
             days.insert(0, _day_entry(today_str))
 
     return days

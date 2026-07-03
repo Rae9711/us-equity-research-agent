@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
 
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import count_trading_days, is_trading_day, today_et
 
 _CONFIG = Path(__file__).resolve().parents[2] / "config" / "launch.yaml"
 
@@ -21,27 +21,25 @@ def launch_date() -> date:
     return today_et()
 
 
-def _is_weekday(d: date) -> bool:
-    return d.weekday() < 5
-
-
 def trading_day_number(trading_date: str | date) -> int | None:
-    """1-based NYSE weekday count from launch_date. None if before launch."""
+    """1-based NYSE session count from launch_date. None if before launch or holiday."""
     d = trading_date if isinstance(trading_date, date) else date.fromisoformat(trading_date)
     start = launch_date()
     if d < start:
         return None
-    n = 0
-    cur = start
-    while cur <= d:
-        if _is_weekday(cur):
-            n += 1
-        cur += timedelta(days=1)
-    return n
+    if not is_trading_day(d):
+        return None
+    return count_trading_days(start, d)
 
 
 def launch_label(trading_date: str | date) -> str:
-    n = trading_day_number(trading_date)
+    d = trading_date if isinstance(trading_date, date) else date.fromisoformat(trading_date)
+    from src.utils.trading_calendar import nyse_holiday
+
+    holiday = nyse_holiday(d)
+    if holiday:
+        return "NYSE 休市"
+    n = trading_day_number(d)
     if n is None:
         return "预热"
     return f"Day {n}"

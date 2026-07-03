@@ -93,7 +93,15 @@ def _trigger_score(trigger: str, features: FeaturesModel, raw: dict[str, Any] | 
             continue
         matched: float | None = None
 
-        if re.search(r"nvda|英伟达", c):
+        if re.search(r"nfp|非农|employment|payroll", c):
+            qqq = features.qqq_chg
+            smh = features.smh_chg
+            if "弱" in c or "低于" in c or "下行" in c:
+                matched = 1.0 if (qqq is not None and qqq > 0) or (smh is not None and smh < 0) else 0.0
+            elif "强" in c or "高于" in c:
+                matched = 1.0 if qqq is not None and qqq < 0 else 0.0
+
+        elif re.search(r"nvda|英伟达", c):
             nvda = features.nvda_chg
             smh = features.smh_chg
             if nvda is not None:

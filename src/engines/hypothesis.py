@@ -65,17 +65,30 @@ def _select_primary_driver(
     morning_parts: dict,
 ) -> str:
     """Pick the single primary driver for today's hypothesis."""
+    p10 = (morning_parts.get("P10") or {}).get("judgment", "")
+    if "NFP" in p10:
+        return "NFP"
+    if "Chip" in p10 or "Semiconductor" in p10:
+        return "AI Chip Selloff"
+
+    p13 = (morning_parts.get("P13") or {}).get("catalysts") or []
+    for c in p13:
+        if c.get("name") == "NFP":
+            return "NFP"
+
+    p3 = (morning_parts.get("P3") or {}).get("judgment", "")
+    if "Employment" in p3 or "Nonfarm" in p3 or "NFP" in p3 or "ADP" in p3:
+        return "NFP"
+    if "FOMC" in p3 and "FOMC" in p10:
+        return "Fed"
+    if "CPI" in p3 or "PCE" in p3:
+        return "Inflation"
+
     if regime.label == "AI Expansion":
+        if features.smh_chg is not None and features.smh_chg <= -3:
+            return "AI Chip Selloff"
         return "AI/Semiconductor"
     if regime.label == "Macro Fear":
-        # Check if specific macro event dominates
-        p3 = (morning_parts.get("P3") or {}).get("judgment", "")
-        if "Employment" in p3 or "Nonfarm" in p3 or "ADP" in p3:
-            return "Employment"
-        if "Fed" in p3 or "FOMC" in p3:
-            return "Fed"
-        if "CPI" in p3 or "PCE" in p3:
-            return "Inflation"
         return "Macro"
     if regime.label == "Liquidity Driven":
         return "Risk Appetite"
@@ -83,8 +96,12 @@ def _select_primary_driver(
 
 
 def _build_statement(driver: str, regime: RegimeModel, bias: str) -> str:
+    if driver == "NFP":
+        return "弱 NFP 能否抵消 AI 抛售？（Macro 利率利好 vs 半导体风险）"
+    if driver == "AI Chip Selloff":
+        return "AI Chip Selloff dominates today despite macro tailwinds?"
     if driver == "AI/Semiconductor":
-        return f"AI/Semiconductor leads index today; macro is secondary variable"
+        return "AI/Semiconductor leads index today; macro is secondary variable"
     if driver == "Employment":
         return f"Employment data is today's primary market driver under {regime.label} regime"
     if driver == "Fed":

@@ -49,7 +49,9 @@ def store_case(case: MarketCaseModel) -> str | None:
         "attribution": {
             "ai": case.attribution.ai,
             "bond": case.attribution.bond,
+            "splits": case.attribution.splits,
         },
+        "driver_splits": (case.labels.driver_splits if case.labels else {}),
     }
 
     session = get_session()

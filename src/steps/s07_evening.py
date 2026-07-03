@@ -28,7 +28,7 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
     logger.info("Step 7 Evening Review for %s", date_str)
 
     features = build_features(trading_date)
-    attr, actual_driver, surprise_hint = compute_attribution(trading_date, features)
+    attr, actual_driver, surprise_hint, driver_splits = compute_attribution(trading_date, features)
 
     # Load morning hypothesis to check correctness
     morning: dict[str, Any] = {}
@@ -69,9 +69,25 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
     trade_instrument = s4.get("instrument")
 
     # Build attribution summary text
-    attr_summary = (
-        f"AI {attr.ai:.0%} · Bond {attr.bond:.0%} · "
-        f"Oil {attr.oil:.0%} · Macro {attr.macro:.0%} · Other {attr.other:.0%}"
+    split_txt = (
+        " · ".join(f"{k} {v:.0%}" for k, v in driver_splits.items())
+        if driver_splits
+        else ""
+    )
+    if driver_splits:
+        attr_summary = split_txt
+    else:
+        attr_summary = (
+            f"AI {attr.ai:.0%} · Bond {attr.bond:.0%} · "
+            f"Oil {attr.oil:.0%} · Macro {attr.macro:.0%} · Other {attr.other:.0%}"
+        )
+
+    lesson = _build_lesson(
+        actual_driver=actual_driver,
+        driver_splits=driver_splits,
+        features=features,
+        morning=morning,
+        hypothesis_correct=hypothesis_correct,
     )
 
     body_lines = [
@@ -109,6 +125,7 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         f"| Field | Value |",
         f"|-------|-------|",
         f"| Today's Driver | {actual_driver} |",
+        f"| Driver Splits | {split_txt if driver_splits else '—'} |",
         f"| Hypothesis | {hyp_id} · {hypothesis_correct} |",
         f"| Scenario (P15) | 预测 {scenario_primary or 'N/A'} → 实际 {scenario_actual} · {'命中' if scenario_correct else '未命中'} |",
         f"| Attribution | {attr_summary} |",
@@ -144,8 +161,10 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         extra={
             "attribution": attr.model_dump(),
             "actual_driver": actual_driver,
+            "driver_splits": driver_splits,
             "hypothesis_correct": hypothesis_correct,
             "surprise": surprise_hint,
+            "lesson": lesson,
             "scenario_primary": scenario_primary,
             "scenario_actual": scenario_actual,
             "scenario_correct": scenario_correct,
@@ -159,12 +178,14 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         "attribution": attr.model_dump(),
         "labels": {
             "actual_driver": actual_driver,
+            "driver_splits": driver_splits,
             "hypothesis_correct": hypothesis_correct,
             "scenario_primary": scenario_primary,
             "scenario_actual": scenario_actual,
             "scenario_correct": scenario_correct,
         },
         "surprise": surprise_hint,
+        "lesson": lesson,
         "intraday": {
             **(load_case(date_str).intraday or {}),
             "s7": {"actual_driver": actual_driver, "attribution": attr.model_dump()},
@@ -172,6 +193,44 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
     })
 
     return payload
+
+
+def _build_lesson(
+    *,
+    actual_driver: str,
+    driver_splits: dict[str, float],
+    features: Any,
+    morning: dict[str, Any],
+    hypothesis_correct: str,
+) -> str:
+    regime = (morning.get("r0") or {}).get("label") or "AI Expansion"
+    smh = features.smh_chg
+    qqq = features.qqq_chg
+    parts: list[str] = []
+
+    if driver_splits.get("NFP") and driver_splits.get("AI Chip Selloff"):
+        parts.append(
+            "当长期 AI Expansion Regime 与短期 Macro 利率利好（弱 NFP）冲突时，"
+            "半导体风险仍可主导 Nasdaq；Dow/价值股可因利率改善走强"
+        )
+    elif "Chip" in actual_driver or "Semiconductor" in actual_driver:
+        parts.append(
+            "AI Expansion Regime 下，单日 SMH/NVDA 抛售可压过 Macro 利好，"
+            "指数分化（Dow+ / QQQ-）比「大盘涨跌」更有信息量"
+        )
+    elif "NFP" in actual_driver:
+        parts.append("NFP 日优先看 Macro Driver 链条：数据 → 利率 → 成长/价值轮动")
+
+    if smh is not None and qqq is not None and smh <= -3 and qqq <= -0.5:
+        parts.append(f"SMH {smh:.1f}% + QQQ {qqq:.1f}%：半导体拖累纳指")
+
+    if hypothesis_correct == "错":
+        parts.append("Morning Hypothesis 被 Chip/Macro 冲突推翻——复盘 P10/P15 权重")
+
+    if not parts:
+        parts.append(f"{regime} 背景下 {actual_driver} 主导；关注 Regime vs Driver 分离")
+
+    return "；".join(parts)
 
 
 def _assess_hypothesis(

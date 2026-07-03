@@ -120,7 +120,10 @@ def scheduled_event_configs_for_date(
 ) -> list[dict[str, Any]]:
     """Yaml event configs scheduled on trading_date per P13 / economic calendar."""
     if isinstance(trading_date, date):
+        d = trading_date
         trading_date = trading_date.isoformat()
+    else:
+        d = date.fromisoformat(trading_date)
     cfg = cfg or load_macro_release_config()
     by_id = event_config_by_id(cfg)
     seen: set[str] = set()
@@ -132,6 +135,15 @@ def scheduled_event_configs_for_date(
                 continue
             seen.add(event_id)
             out.append(by_id[event_id])
+
+    # BLS holiday move: NFP bundle on employment_situation_date
+    from src.utils.trading_calendar import employment_situation_date
+
+    if employment_situation_date(d.year, d.month) == d:
+        for event_id in ("NFP", "UNRATE"):
+            if event_id not in seen and event_id in by_id:
+                seen.add(event_id)
+                out.append(by_id[event_id])
     return out
 
 

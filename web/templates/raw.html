@@ -29,7 +29,19 @@
         <h2>{{ section | capitalize }}</h2>
         <ul class="checklist">
           {% for name, ok in items.items() %}
-          <li class="{{ 'ok' if ok else 'miss' }}">{{ '✓' if ok else '✗' }} {{ name }}</li>
+          <li class="{{ 'ok' if ok else 'miss' }}">{{ '✓' if ok else '✗' }}
+            {% if section == 'macro' and name == 'economic_calendar' %}经济日历
+            {% elif section == 'macro' and name == 'nonfarm_countdown' %}NFP 倒计时
+            {% elif section == 'macro' and name == 'nfp_release_day' %}NFP 发布日
+            {% elif section == 'macro' and name == 'unemployment_rate' %}失业率 UNRATE
+            {% elif section == 'macro' and name == 'avg_hourly_earnings' %}平均时薪 AHETPI
+            {% elif section == 'macro' and name == 'initial_claims' %}初请 ICSA
+            {% elif section == 'market' and name == 'DIA' %}Dow (DIA)
+            {% elif section == 'market' and name == 'ES_futures' %}ES 期货
+            {% elif section == 'market' and name == 'DXY' %}美元 DXY
+            {% elif section == 'market' and name == '10Y' %}10Y 国债
+            {% else %}{{ name }}{% endif %}
+          </li>
           {% endfor %}
         </ul>
       </section>

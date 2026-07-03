@@ -27,6 +27,7 @@ from src.steps.s06_afternoon import run_step6_afternoon
 from src.steps.s07_evening import run_step7_evening
 from src.jobs.step8_learning import run_step8_learning
 from src.runner.catchup import run_startup_catchup
+from src.utils.trading_calendar import is_trading_day, nyse_holiday, today_et
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,7 +42,18 @@ def _placeholder_job(step_id: str) -> None:
     logger.info("Job %s — Phase 0 placeholder (not implemented yet)", step_id)
 
 
+def _skip_if_holiday(job_name: str) -> bool:
+    d = today_et()
+    if is_trading_day(d):
+        return False
+    label = nyse_holiday(d) or "non-trading day"
+    logger.info("Job %s skipped: NYSE closed (%s)", job_name, label)
+    return True
+
+
 def _collect_raw_job() -> None:
+    if _skip_if_holiday("collect_raw"):
+        return
     logger.info("Job collect_raw — Step 0 data collection starting")
     try:
         payload = run_step0()
@@ -55,6 +67,8 @@ def _collect_raw_job() -> None:
 
 
 def _morning_research_job() -> None:
+    if _skip_if_holiday("morning_research"):
+        return
     logger.info("Job morning_research — Step 1 starting")
     try:
         payload = run_morning_research()
@@ -69,6 +83,8 @@ def _morning_research_job() -> None:
 
 
 def _open_report_job() -> None:
+    if _skip_if_holiday("open_report"):
+        return
     logger.info("Job open_report — Step 2 starting")
     try:
         payload = run_step2_open()
@@ -78,6 +94,8 @@ def _open_report_job() -> None:
 
 
 def _market_update_job() -> None:
+    if _skip_if_holiday("market_update"):
+        return
     logger.info("Job market_update — Step 3 starting")
     try:
         payload = run_step3_market_update()
@@ -87,6 +105,8 @@ def _market_update_job() -> None:
 
 
 def _trade_decision_job() -> None:
+    if _skip_if_holiday("trade_decision"):
+        return
     logger.info("Job trade_decision — Step 4 starting")
     try:
         payload = run_step4_trade_decision()
@@ -96,6 +116,8 @@ def _trade_decision_job() -> None:
 
 
 def _midday_review_job() -> None:
+    if _skip_if_holiday("midday_review"):
+        return
     logger.info("Job midday_review — Step 5 starting")
     try:
         payload = run_step5_midday()
@@ -105,6 +127,8 @@ def _midday_review_job() -> None:
 
 
 def _afternoon_review_job() -> None:
+    if _skip_if_holiday("afternoon_review"):
+        return
     logger.info("Job afternoon_review — Step 6 starting")
     try:
         payload = run_step6_afternoon()
@@ -114,6 +138,8 @@ def _afternoon_review_job() -> None:
 
 
 def _evening_review_job() -> None:
+    if _skip_if_holiday("evening_review"):
+        return
     logger.info("Job evening_review — Step 7 starting")
     try:
         payload = run_step7_evening()
@@ -123,6 +149,8 @@ def _evening_review_job() -> None:
 
 
 def _learning_job() -> None:
+    if _skip_if_holiday("learning"):
+        return
     logger.info("Job learning — Step 8 starting")
     try:
         payload = run_step8_learning()
@@ -133,6 +161,8 @@ def _learning_job() -> None:
 
 def _macro_release_poll_job(slot: str) -> None:
     """L1 · 轮询该 slot 时段的宏观数据（+2/+5/+10 min 分别调用）。"""
+    if _skip_if_holiday(f"macro_release_poll[{slot}]"):
+        return
     logger.info("Job macro_release_poll[%s] starting", slot)
     try:
         payload = persist_releases()

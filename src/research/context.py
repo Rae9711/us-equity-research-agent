@@ -78,6 +78,7 @@ def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
         "market": {
             "SPY": _quote(raw, "SPY"),
             "QQQ": _quote(raw, "QQQ"),
+            "DIA": _quote(raw, "DIA"),
             "TQQQ": _quote(raw, "TQQQ"),
             "VIX": _quote(raw, "^VIX"),
             "DXY": _quote(raw, "DX-Y.NYB"),
@@ -87,6 +88,8 @@ def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
             "series": macro_series,
             "calendar": calendar[:12],
             "nonfarm_days_until": (raw.get("macro") or {}).get("nonfarm_days_until"),
+            "nfp_release_today": (raw.get("macro") or {}).get("nfp_release_today"),
+            "employment_situation_date": (raw.get("macro") or {}).get("employment_situation_date"),
         },
         "sectors": sectors,
         "mag7": mag7,

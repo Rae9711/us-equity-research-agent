@@ -8,7 +8,9 @@
     {% endif %}
     <div class="day-header-row">
       <div class="day-header-left">
-        {% if day.is_today and day.day_number %}
+        {% if day.is_holiday %}
+        <span class="day-badge day-badge-muted">NYSE 休市{% if day.holiday_label %} · {{ day.holiday_label }}{% endif %}</span>
+        {% elif day.is_today and day.day_number %}
         <span class="day-badge day-badge-today">今日 Day {{ day.day_number }}</span>
         {% elif day.day_number %}
         <span class="day-badge">Day {{ day.day_number }}</span>
@@ -23,10 +25,14 @@
         </select>
       </div>
       <div class="day-header-right">
+        {% if day.is_holiday %}
+        <span class="progress-pill muted">非交易日 · 无 Step 进度</span>
+        {% else %}
         <span class="progress-pill">{{ day.steps_done }}/{{ day.steps_total }} Steps</span>
         <div class="progress-track" title="{{ day.progress_pct }}%">
           <div class="progress-fill" style="width: {{ day.progress_pct }}%"></div>
         </div>
+        {% endif %}
       </div>
     </div>
   </form>

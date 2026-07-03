@@ -13,8 +13,23 @@ import yaml
 logger = logging.getLogger(__name__)
 
 _THEME_KEYWORDS: dict[str, list[str]] = {
-    "ai": ["ai", "nvidia", "semiconductor", "chip", "gpu", "openai", "anthropic"],
-    "macro": ["fed", "fomc", "cpi", "inflation", "jobs", "payroll", "treasury", "rate", "gdp"],
+    "ai": [
+        "ai",
+        "nvidia",
+        "semiconductor",
+        "semiconductors",
+        "chip",
+        "chips",
+        "gpu",
+        "sox",
+        "smh",
+        "openai",
+        "anthropic",
+        "foundry",
+        "tsmc",
+        "asml",
+    ],
+    "macro": ["fed", "fomc", "cpi", "inflation", "jobs", "payroll", "nfp", "nonfarm", "treasury", "rate", "gdp"],
     "oil": ["oil", "opec", "crude", "energy", "gasoline"],
     "risk": ["selloff", "rally", "volatility", "vix", "risk-off", "risk on"],
 }
@@ -101,15 +116,22 @@ def extract_news_signals(raw_news: dict[str, Any] | None) -> dict[str, Any]:
         )
 
     theme_counts = {k: 0 for k in _THEME_KEYWORDS}
+    _APPLE_NOISE = ("aapl", "apple")
     bearish = 0
     bullish = 0
     for article in articles:
         text = _headline_text(article)
         if not text.strip():
             continue
+        ai_weight = 2 if any(k in text for k in ("semiconductor", "chip", "nvidia", "sox", "smh")) else 1
+        if any(k in text for k in _APPLE_NOISE) and not any(
+            k in text for k in ("semiconductor", "chip", "nvidia", "sox", "smh", "ai ")
+        ):
+            ai_weight = 0
         for theme, kws in _THEME_KEYWORDS.items():
-            if any(kw in text for kw in kws):
-                theme_counts[theme] += 1
+            hits = sum(1 for kw in kws if kw in text)
+            if hits:
+                theme_counts[theme] += hits * (ai_weight if theme == "ai" else 1)
         sentiment = str(article.get("sentiment") or "").lower()
         if sentiment == "negative":
             bearish += 1
