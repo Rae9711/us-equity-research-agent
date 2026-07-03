@@ -79,7 +79,8 @@ VPS 环境变量 `/opt/trading-os/.env`：
 ```text
 ANTHROPIC_API_KEY=sk-ant-...
 POLYGON_API_KEY=...
-FRED_API_KEY=...
+FRED_API_KEY=...          # 可选但推荐；无 key 时宏观轮询降级（rate-limited）
+BLS_API_KEY=              # 可选；NFP/失业率 BLS 兜底
 TZ=America/New_York
 APP_BASE_URL=https://rae-trading.com
 ```

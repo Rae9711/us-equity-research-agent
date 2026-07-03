@@ -11,6 +11,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
 
+from src.collectors.macro_releases import (
+    load_macro_release_config,
+    persist_releases,
+    scheduled_release_slots,
+)
 from src.collectors.step0 import run_step0
 from src.db import init_db
 from src.research.morning import run_morning_research
@@ -126,6 +131,24 @@ def _learning_job() -> None:
         logger.exception("Step 8 learning failed")
 
 
+def _macro_release_poll_job(slot: str) -> None:
+    """L1 · 轮询该 slot 时段的宏观数据（+2/+5/+10 min 分别调用）。"""
+    logger.info("Job macro_release_poll[%s] starting", slot)
+    try:
+        payload = persist_releases()
+        counts = payload.get("counts", {})
+        logger.info(
+            "macro_release_poll[%s] done: released=%s waiting=%s missing=%s surprise=%s",
+            slot,
+            counts.get("released"),
+            counts.get("waiting"),
+            counts.get("missing"),
+            counts.get("surprise"),
+        )
+    except Exception:
+        logger.exception("macro_release_poll[%s] failed", slot)
+
+
 def _weekly_ml_job() -> None:
     logger.info("Job weekly_ml starting")
     try:
@@ -196,7 +219,39 @@ def build_scheduler() -> tuple[BackgroundScheduler, dict[str, object]]:
         replace_existing=True,
     )
 
+    _register_macro_release_polls(scheduler)
+
     return scheduler, handlers
+
+
+def _register_macro_release_polls(scheduler: BackgroundScheduler) -> None:
+    """给每个宏观发布时段（8:30/10:00/14:00 ...）注册 +2/+5/+10 分钟三次轮询。"""
+    try:
+        cfg = load_macro_release_config()
+    except Exception:
+        logger.exception("load_macro_release_config failed; skip macro polling")
+        return
+
+    slots = scheduled_release_slots(cfg)
+    if not slots:
+        logger.info("No macro release slots configured; skip macro polling jobs")
+        return
+
+    offsets = cfg.get("poll_offsets_min", [2, 5, 10])
+    for hour, minute in slots:
+        for offset in offsets:
+            total = hour * 60 + minute + int(offset)
+            h = (total // 60) % 24
+            m = total % 60
+            slot_label = f"{hour:02d}{minute:02d}+{int(offset)}"
+            job_id = f"macro_poll_{slot_label}"
+            scheduler.add_job(
+                _macro_release_poll_job,
+                CronTrigger(day_of_week="mon-fri", hour=h, minute=m, timezone=ET),
+                id=job_id,
+                replace_existing=True,
+                args=[slot_label],
+            )
 
 
 def main() -> None:

@@ -10,6 +10,8 @@ from typing import Any
 from src.db import ConclusionRecord, MarketCase
 from src.db.session import get_session
 from src.utils.paths import morning_json_path, raw_data_path, reports_dir, step_json_path
+from src.collectors.macro_releases import load_releases, releases_file_path
+from src.utils.news_signals import detect_high_signal_news
 from src.utils.driver_match import driver_hit
 
 # Driver keyword → tradable symbols (vs QQQ benchmark)
@@ -571,4 +573,124 @@ def build_relative_strength(trading_date: str, driver: str) -> dict[str, Any] | 
         "driver": driver,
         "symbols": symbols,
         "rows": rows,
+    }
+
+
+def _format_release_value(value: Any, unit: str | None = None) -> str:
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+        if unit in ("%", "percent"):
+            return f"{v:.1f}%"
+        if abs(v) >= 1000:
+            return f"{v:,.0f}"
+        if abs(v) >= 100:
+            return f"{v:.1f}"
+        return f"{v:.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _surprise_display(surprise_pct: float | None, direction: str | None) -> dict[str, str]:
+    if surprise_pct is None:
+        return {"text": "—", "class": "flat", "arrow": ""}
+    arrow = "⬆️" if surprise_pct > 0 else "⬇️" if surprise_pct < 0 else ""
+    # inflation: higher surprise = bad (red); growth/labor: higher = good (green)
+    if direction == "inflation":
+        css = "surprise-bad" if surprise_pct > 0 else "surprise-good" if surprise_pct < 0 else "flat"
+    else:
+        css = "surprise-good" if surprise_pct > 0 else "surprise-bad" if surprise_pct < 0 else "flat"
+    return {"text": f"{surprise_pct:+.1f}% {arrow}".strip(), "class": css, "arrow": arrow}
+
+
+def _status_icon(status: str) -> str:
+    return {"released": "✅", "waiting": "⏳", "missing": "❌"}.get(status, "⏳")
+
+
+def _status_hint(status: str) -> str:
+    if status == "missing":
+        return "fallback to news"
+    return ""
+
+
+def build_catalyst_status(trading_date: str) -> dict[str, Any]:
+    """今日催化剂状态表（L1 macro releases）。"""
+    snap = load_releases(trading_date)
+    releases = list((snap or {}).get("releases") or [])
+
+    qqq_chg = _qqq_chg_for_date(trading_date)
+    market_default = f"QQQ {qqq_chg:+.1f}%" if qqq_chg is not None else "—"
+
+    rows: list[dict[str, Any]] = []
+    for r in releases:
+        status = str(r.get("status") or "waiting")
+        surprise = _surprise_display(r.get("surprise_pct"), r.get("direction"))
+        row_class = surprise["class"] if r.get("surprise_flag") else ""
+        rows.append(
+            {
+                "event": r.get("label") or r.get("event"),
+                "scheduled_et": r.get("scheduled_et") or "—",
+                "status": status,
+                "status_icon": _status_icon(status),
+                "status_hint": _status_hint(status),
+                "actual": _format_release_value(r.get("actual"), r.get("unit")),
+                "consensus": _format_release_value(r.get("consensus"), r.get("unit")),
+                "prior": _format_release_value(r.get("prior"), r.get("unit")),
+                "surprise": surprise["text"],
+                "surprise_class": surprise["class"],
+                "row_class": row_class,
+                "market_impact": r.get("market_impact") or market_default,
+                "source": r.get("source"),
+            }
+        )
+
+    counts = (snap or {}).get("counts") or {}
+    return {
+        "rows": rows,
+        "has_data": bool(rows),
+        "has_snapshot": releases_file_path(trading_date).exists(),
+        "generated_at": (snap or {}).get("generated_at"),
+        "counts": counts,
+        "qqq_chg": qqq_chg,
+    }
+
+
+def build_breaking_signals(trading_date: str) -> dict[str, Any]:
+    """L2 突发信号 — 从 Step 3 或现场检测。"""
+    signals: list[dict[str, Any]] = []
+
+    s3_path = step_json_path(3, trading_date)
+    if s3_path.exists():
+        try:
+            s3 = json.loads(s3_path.read_text(encoding="utf-8"))
+            signals = list(s3.get("breaking_news_signals") or [])
+        except Exception:
+            pass
+
+    if not signals:
+        try:
+            from src.collectors.news import collect_intraday_news
+            from src.utils.trading_calendar import market_open_et
+            from datetime import date as date_type
+
+            d = date_type.fromisoformat(trading_date)
+            bundle = collect_intraday_news(since=market_open_et(d))
+            headlines = [
+                {"title": h.get("title"), "published_utc": h.get("published_utc"), "url": h.get("url")}
+                for h in (bundle.get("polygon") or [])[:30]
+            ]
+            signals = detect_high_signal_news(headlines)
+        except Exception:
+            signals = []
+
+    high = [s for s in signals if s.get("severity") == "high"]
+    medium = [s for s in signals if s.get("severity") == "medium"]
+
+    return {
+        "signals": signals[:12],
+        "high": high[:8],
+        "medium": medium[:6],
+        "has_signals": bool(signals),
+        "has_high": bool(high),
     }

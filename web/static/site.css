@@ -306,6 +306,42 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .rs-table td, .rs-table th { text-align: center; }
 .rs-table td:first-child, .rs-table th:first-child { text-align: left; }
 
+/* —— Catalyst / Breaking signals —— */
+.catalyst-panel { margin-top: 0; }
+.catalyst-ts { font-size: 0.78rem; }
+.catalyst-table td, .catalyst-table th { font-size: 0.82rem; text-align: center; }
+.catalyst-table td:first-child, .catalyst-table th:first-child { text-align: left; }
+.catalyst-status { white-space: nowrap; }
+.status-hint { display: block; font-size: 0.7rem; }
+.catalyst-released { color: #16a34a; }
+.catalyst-waiting { color: #d97706; }
+.catalyst-missing { color: #dc2626; }
+.surprise-good { color: #16a34a; font-weight: 600; }
+.surprise-bad { color: #dc2626; font-weight: 600; }
+.catalyst-row.surprise-good { background: rgba(22, 163, 74, 0.06); }
+.catalyst-row.surprise-bad { background: rgba(220, 38, 38, 0.06); }
+.catalyst-impact { font-size: 0.78rem; max-width: 14rem; }
+
+.breaking-panel { margin-top: 0; }
+.breaking-hint { margin: -0.25rem 0 0.65rem; font-size: 0.8rem; }
+.breaking-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.breaking-item {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.5rem;
+  padding: 0.45rem 0.55rem; border-radius: 8px; border: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.breaking-item.severity-high { border-color: #fecaca; background: #fef2f2; }
+.breaking-item.severity-medium { border-color: #fde68a; background: #fffbeb; }
+.breaking-badge {
+  font-size: 0.65rem; font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 4px;
+  background: #0f172a; color: #fff;
+}
+.breaking-item.severity-medium .breaking-badge { background: #d97706; }
+.breaking-theme { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
+.breaking-kw { font-weight: 600; color: #7c3aed; }
+.breaking-title { flex: 1 1 12rem; }
+.breaking-time { font-size: 0.72rem; }
+
 .hyp-accuracy-panel { margin-top: 0; }
 .accuracy-metrics-panel { margin-top: 0; }
 .accuracy-metrics-grid {

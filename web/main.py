@@ -30,6 +30,8 @@ from src.web.stats import accuracy_by_date, accuracy_for_date, global_accuracy
 from src.web.steps_status import step_available, steps_status
 from src.web.conclusion_index import morning_index_from_parts, morning_index_from_records
 from src.web.homepage import (
+    build_breaking_signals,
+    build_catalyst_status,
     build_decision_card,
     build_relative_strength,
     directional_accuracy_series,
@@ -114,6 +116,8 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
     rel_strength = None
     if decision_card:
         rel_strength = build_relative_strength(trading_date, decision_card["driver"])
+    catalyst_status = build_catalyst_status(trading_date)
+    breaking_signals = build_breaking_signals(trading_date)
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -127,6 +131,8 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
             "driver_accuracy": driver_accuracy,
             "directional_accuracy": directional_accuracy,
             "relative_strength": rel_strength,
+            "catalyst_status": catalyst_status,
+            "breaking_signals": breaking_signals,
         },
     )
 

@@ -1,0 +1,78 @@
+# 突发新闻关键词 · L2 关键词检测配置
+#
+# severity: "high" | "medium" | "low"
+# theme: 用于 UI 分组与 Driver 提示
+# patterns: 正则片段（大小写不敏感）；每条独立 OR
+
+high_signal:
+  fed:
+    severity: high
+    patterns:
+      - "Powell said"
+      - "Powell says"
+      - "Fed'?s [A-Z][a-z]+ said"
+      - "FOMC (decision|statement|minutes)"
+      - "rate cut"
+      - "rate hike"
+      - "hawkish"
+      - "dovish"
+      - "SEP release"
+      - "dot plot"
+
+  macro_release:
+    severity: high
+    patterns:
+      - "CPI came in"
+      - "CPI (rose|fell|jumped|slowed)"
+      - "PCE .* (rose|fell|surged)"
+      - "PPI (rose|fell)"
+      - "jobs report"
+      - "NFP .*"
+      - "nonfarm payrolls"
+      - "jobless claims"
+      - "GDP grew"
+      - "retail sales (rose|fell|jumped)"
+      - "ISM .*"
+
+  geopolitics:
+    severity: high
+    patterns:
+      - "ceasefire"
+      - "sanction"
+      - "sanctions"
+      - "airstrike"
+      - "attack on"
+      - "invasion"
+      - "conflict escalat"
+      - "nuclear"
+      - "OPEC .* cut"
+
+trade:
+  severity: medium
+  theme: trade
+  patterns:
+    - "tariff"
+    - "tariffs"
+    - "trade deal"
+    - "export ban"
+    - "chip ban"
+    - "export controls"
+
+earnings:
+  severity: medium
+  theme: earnings
+  patterns:
+    - "beat estimates"
+    - "beat expectations"
+    - "missed estimates"
+    - "missed expectations"
+    - "guidance cut"
+    - "guidance raised"
+    - "guidance lowered"
+    - "profit warning"
+
+# 兜底：任意含 "breaking:" 或 "urgent:" 的头条按 high 处理
+force_high_signal_prefixes:
+  - "breaking:"
+  - "urgent:"
+  - "just in:"

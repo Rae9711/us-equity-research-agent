@@ -1,0 +1,112 @@
+# 宏观数据发布日历 · L1 实时抓取配置
+#
+# 每个事件包含：
+#   fred_id     : FRED series ID（首选，免费）
+#   bls_id      : BLS series ID（NFP/失业率兜底）
+#   scheduled_et: 常规发布时间 (HH:MM ET)
+#   unit        : 数据单位提示（用于 UI 展示）
+#   surprise_threshold_pct: 触发 Step 3 复评的 surprise 阈值（%）
+#   market_impact_default: 通用市场影响提示（fallback，当 LLM 未产出时用）
+#   direction   : 数据方向（"inflation"|"growth"|"labor"），用于 UI 颜色规则
+#
+# consensus_default 只作为极端 fallback；正式的一致预期应由 morning research
+# / 手工配置 / 外部 calendar API 提供（后续接入）。
+
+events:
+  - id: CPI
+    label: CPI (Headline YoY)
+    fred_id: CPIAUCSL
+    scheduled_et: "08:30"
+    unit: "index"
+    surprise_threshold_pct: 0.2
+    direction: inflation
+    market_impact_default: "CPI 意外偏高 → 收益率上行、成长股承压；偏低相反"
+
+  - id: PCE
+    label: PCE Price Index
+    fred_id: PCEPI
+    scheduled_et: "08:30"
+    unit: "index"
+    surprise_threshold_pct: 0.2
+    direction: inflation
+    market_impact_default: "PCE 意外偏高 → Fed 更鹰、贵金属/成长承压"
+
+  - id: PPI
+    label: PPI
+    fred_id: PPIACO
+    scheduled_et: "08:30"
+    unit: "index"
+    surprise_threshold_pct: 0.3
+    direction: inflation
+    market_impact_default: "PPI 高于预期 → 通胀传导预期升温"
+
+  - id: RETAIL_SALES
+    label: Retail Sales
+    fred_id: RSAFS
+    scheduled_et: "08:30"
+    unit: "USD Mil"
+    surprise_threshold_pct: 0.5
+    direction: growth
+    market_impact_default: "零售超预期 → 消费韧性 → 收益率上行 + 顺周期偏强"
+
+  - id: JOBLESS_CLAIMS
+    label: Initial Jobless Claims
+    fred_id: ICSA
+    scheduled_et: "08:30"
+    unit: "persons"
+    surprise_threshold_pct: 5.0
+    direction: labor
+    market_impact_default: "初请骤增 → 就业转弱 → 降息预期 → 债券偏强"
+
+  - id: GDP
+    label: GDP QoQ (Advance/2nd/Final)
+    fred_id: GDP
+    scheduled_et: "08:30"
+    unit: "USD Bil"
+    surprise_threshold_pct: 0.3
+    direction: growth
+    market_impact_default: "GDP 意外强 → 收益率+ 美元+；弱则相反"
+
+  - id: ISM_MFG
+    label: ISM Manufacturing PMI
+    fred_id: NAPM
+    scheduled_et: "10:00"
+    unit: "index"
+    surprise_threshold_pct: 1.0
+    direction: growth
+    market_impact_default: "ISM > 50 且超预期 → 顺周期偏强、油/铜偏强"
+
+  - id: JOLTS
+    label: JOLTS Job Openings
+    fred_id: JTSJOL
+    scheduled_et: "10:00"
+    unit: "K persons"
+    surprise_threshold_pct: 3.0
+    direction: labor
+    market_impact_default: "JOLTS 强 → 劳动力紧俏 → Fed 更鹰"
+
+  - id: NFP
+    label: Nonfarm Payrolls
+    fred_id: PAYEMS
+    bls_id: CES0000000001
+    scheduled_et: "08:30"
+    unit: "K persons"
+    surprise_threshold_pct: 10.0
+    direction: labor
+    market_impact_default: "NFP 大超预期 → 收益率+、金价压、成长承压"
+
+  - id: UNRATE
+    label: Unemployment Rate
+    fred_id: UNRATE
+    bls_id: LNS14000000
+    scheduled_et: "08:30"
+    unit: "%"
+    surprise_threshold_pct: 0.1
+    direction: labor
+    market_impact_default: "失业率意外上行 → 降息预期 → 债券+"
+
+# 三次轮询（相对 scheduled_et 的分钟偏移），够礼貌又能覆盖官方延迟
+poll_offsets_min: [2, 5, 10]
+
+# FRED 观测窗口：抓 series 最近 N 条以做同比/环比对比
+observation_history: 6
