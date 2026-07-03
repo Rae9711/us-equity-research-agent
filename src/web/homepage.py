@@ -384,7 +384,7 @@ def _labeled_trading_dates() -> list[str]:
 
 
 def driver_accuracy_series() -> dict[str, Any]:
-    """Cumulative P10 driver vs S7 actual_driver hit rate (fuzzy match)."""
+    """Cumulative P10 driver vs S7 actual_driver hit rate (fuzzy match) — 市场归因对比."""
     points: list[dict[str, Any]] = []
     cum_correct = 0
     cum_total = 0
@@ -404,6 +404,95 @@ def driver_accuracy_series() -> dict[str, Any]:
                 "hit": hit,
                 "morning_driver": morning_driver[:80],
                 "actual_driver": actual,
+                "cumulative_accuracy": round(cum_correct / cum_total * 100, 1),
+                "n": cum_total,
+            }
+        )
+
+    return {
+        "points": points,
+        "total_labeled": cum_total,
+        "accuracy_pct": round(cum_correct / cum_total * 100, 1) if cum_total else None,
+        "correct": cum_correct,
+        "sufficient": cum_total >= 2,
+    }
+
+
+def _p10_verification_for_date(trading_date: date_type) -> str | None:
+    session = get_session()
+    try:
+        row = (
+            session.query(ConclusionRecord)
+            .filter(
+                ConclusionRecord.trading_date == trading_date,
+                ConclusionRecord.part_id == "P10",
+            )
+            .first()
+        )
+        return row.verification if row and row.verification else None
+    finally:
+        session.close()
+
+
+def _case_labels_for_date(date_str: str) -> dict[str, Any]:
+    session = get_session()
+    try:
+        row = session.query(MarketCase).filter(MarketCase.date == date_str).first()
+        if row:
+            try:
+                data = json.loads(row.case_json)
+                return dict(data.get("labels") or {})
+            except Exception:
+                pass
+    finally:
+        session.close()
+    return {}
+
+
+def agent_driver_accuracy_series() -> dict[str, Any]:
+    """
+    Agent Driver 判断质量 — P10 vs verify-corrected driver when P10 is 错/部分对,
+    otherwise P10 vs S7 actual_driver when verify says 对.
+    """
+    from src.web.verify_learning import reference_driver_for_agent_quality
+
+    points: list[dict[str, Any]] = []
+    cum_correct = 0
+    cum_total = 0
+
+    for date_str in _labeled_trading_dates():
+        morning_driver = _morning_p10_driver(date_str)
+        if not morning_driver:
+            continue
+
+        trading_date = date_type.fromisoformat(date_str)
+        p10_ver = _p10_verification_for_date(trading_date)
+        if not p10_ver:
+            continue
+
+        case_labels = _case_labels_for_date(date_str)
+        s7_actual = _actual_driver_for_date(date_str)
+        reference = reference_driver_for_agent_quality(
+            trading_date,
+            date_str,
+            p10_ver,
+            case_labels,
+            s7_actual,
+        )
+        if not reference:
+            continue
+
+        hit = driver_hit(morning_driver, reference)
+        cum_total += 1
+        if hit:
+            cum_correct += 1
+        points.append(
+            {
+                "date": date_str,
+                "hit": hit,
+                "morning_driver": morning_driver[:80],
+                "reference_driver": reference,
+                "p10_verification": p10_ver,
                 "cumulative_accuracy": round(cum_correct / cum_total * 100, 1),
                 "n": cum_total,
             }

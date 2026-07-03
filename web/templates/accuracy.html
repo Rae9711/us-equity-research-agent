@@ -10,13 +10,13 @@
   {% include "nav.html" %}
   <div class="page-wrap">
     <h1 class="page-title">Agent 准确率</h1>
-    <p class="muted">累计命中率 · Driver / 方向 / P17 Hypothesis / P15 Scenario · P17/P15 优先采用 /verify 人工标注</p>
+    <p class="muted">累计命中率 · 市场归因 / Agent Driver / 方向 / P17 Hypothesis / P15 Scenario · P17/P15/P10 优先采用 /verify 人工标注</p>
 
     <section class="panel accuracy-metrics-panel">
       <div class="accuracy-metrics-grid">
         <div class="accuracy-metric-card">
-          <h3 class="accuracy-metric-title">Driver 命中率</h3>
-          <p class="muted accuracy-metric-desc">Morning P10 Driver vs S7 实际 Driver（模糊匹配）</p>
+          <h3 class="accuracy-metric-title">市场归因对比</h3>
+          <p class="muted accuracy-metric-desc">Driver 命中率 · Morning P10 vs S7 实际 Driver（模糊匹配）</p>
           {% if driver_accuracy.sufficient %}
           <div class="hyp-accuracy-summary">
             <strong>{{ driver_accuracy.accuracy_pct }}%</strong>
@@ -28,6 +28,24 @@
           {% else %}
           <div class="empty-state compact">
             <p class="muted">需 ≥2 日 S7 归因数据。</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">Agent Driver 判断质量</h3>
+          <p class="muted accuracy-metric-desc">P10 vs /verify 纠正 Driver（错/部分对）或 vs S7（对）</p>
+          {% if agent_driver_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ agent_driver_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ agent_driver_accuracy.correct }}/{{ agent_driver_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="agentDriverAccuracyChart" aria-label="Agent driver judgment quality"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 P10 /verify 标注。</p>
           </div>
           {% endif %}
         </div>
@@ -86,7 +104,7 @@
         </div>
       </div>
 
-      {% if driver_accuracy.sufficient or directional_accuracy.sufficient or hypothesis_accuracy.sufficient or scenario_accuracy.sufficient %}
+      {% if driver_accuracy.sufficient or agent_driver_accuracy.sufficient or directional_accuracy.sufficient or hypothesis_accuracy.sufficient or scenario_accuracy.sufficient %}
       <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
       <script>
         (function () {
@@ -119,6 +137,7 @@
             });
           }
           lineChart('driverAccuracyChart', {{ driver_accuracy.points | tojson }}, '#059669', 'rgba(5, 150, 105, 0.12)');
+          lineChart('agentDriverAccuracyChart', {{ agent_driver_accuracy.points | tojson }}, '#0d9488', 'rgba(13, 148, 136, 0.12)');
           lineChart('directionalAccuracyChart', {{ directional_accuracy.points | tojson }}, '#d97706', 'rgba(217, 119, 6, 0.12)');
           lineChart('hypAccuracyChart', {{ hypothesis_accuracy.points | tojson }}, '#2563eb', 'rgba(37, 99, 235, 0.12)');
           lineChart('scenarioAccuracyChart', {{ scenario_accuracy.points | tojson }}, '#7c3aed', 'rgba(124, 58, 237, 0.12)');
