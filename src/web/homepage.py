@@ -218,6 +218,12 @@ def _watch_variables(morning: dict[str, Any], driver: str) -> list[str]:
 
 def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     """Build 一页纸决策卡 from morning JSON (+ Step 4 if available)."""
+    d = date_type.fromisoformat(trading_date)
+    from src.utils.trading_calendar import is_trading_day
+
+    if not is_trading_day(d):
+        return None
+
     morning = load_morning(trading_date)
     if not morning:
         return None
@@ -239,6 +245,72 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "watch_variables": _watch_variables(morning, driver),
         "hypothesis": hypothesis_line[:200],
         "has_morning": True,
+    }
+
+
+def build_holiday_news_brief(trading_date: str) -> dict[str, Any]:
+    """Lightweight news snapshot for NYSE closed days — no trade decisions."""
+    from src.utils.trading_calendar import is_trading_day, prior_trading_day
+
+    d = date_type.fromisoformat(trading_date)
+    if is_trading_day(d):
+        return {"has_data": False, "headline_count": 0, "headlines": []}
+
+    def _from_raw(raw: dict[str, Any], source_date: str, source_label: str) -> dict[str, Any]:
+        news = raw.get("news") or {}
+        polygon = news.get("polygon") or []
+        rss = news.get("rss") or []
+        headlines: list[dict[str, str | None]] = []
+        for article in polygon[:5]:
+            title = article.get("title")
+            if title:
+                headlines.append(
+                    {"title": str(title), "url": article.get("url"), "source": "polygon"}
+                )
+        for article in rss[:3]:
+            title = article.get("title")
+            if title:
+                headlines.append(
+                    {
+                        "title": str(title),
+                        "url": article.get("link"),
+                        "source": str(article.get("source") or "rss"),
+                    }
+                )
+        total = len(polygon) + len(rss)
+        return {
+            "source_date": source_date,
+            "source_label": source_label,
+            "headline_count": total,
+            "headlines": headlines,
+            "has_data": total > 0,
+        }
+
+    holiday_raw = raw_data_path(trading_date)
+    if holiday_raw.exists():
+        try:
+            raw = json.loads(holiday_raw.read_text(encoding="utf-8"))
+            brief = _from_raw(raw, trading_date, "休市日 Raw")
+            if brief["has_data"]:
+                return brief
+        except Exception:
+            pass
+
+    prior = prior_trading_day(d)
+    prior_raw = raw_data_path(prior.isoformat())
+    if prior_raw.exists():
+        try:
+            raw = json.loads(prior_raw.read_text(encoding="utf-8"))
+            return _from_raw(raw, prior.isoformat(), "上一交易日 Raw")
+        except Exception:
+            pass
+
+    return {
+        "source_date": prior.isoformat(),
+        "source_label": "无快照",
+        "headline_count": 0,
+        "headlines": [],
+        "has_data": False,
     }
 
 

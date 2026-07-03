@@ -193,6 +193,15 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .timeline-item.pending { border-left: 4px solid #e2e8f0; opacity: 0.92; }
 .timeline-item.holiday { border-left: 4px solid #cbd5e1; opacity: 0.75; pointer-events: none; cursor: default; }
 
+.holiday-panel { border-left: 4px solid #94a3b8; }
+.holiday-panel .section-title-inline { margin-bottom: 0.35rem; }
+.holiday-nav { margin-top: 1rem; }
+.holiday-news { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.holiday-news-title { font-size: 0.95rem; margin: 0 0 0.35rem; font-weight: 600; }
+.holiday-headlines { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+.holiday-headlines li { margin: 0.35rem 0; font-size: 0.9rem; }
+.holiday-news-empty { margin-top: 1rem; }
+
 .step-nav-item.holiday { opacity: 0.55; }
 
 .timeline-time {

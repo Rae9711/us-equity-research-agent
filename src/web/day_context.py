@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import date
 
 from src.steps.meta import STEPS
-from src.utils.trading_calendar import is_trading_day, nyse_holiday, today_et
+from src.utils.trading_calendar import (
+    is_trading_day,
+    next_trading_day,
+    nyse_holiday,
+    prior_trading_day,
+    today_et,
+)
 from src.web.launch import launch_date, launch_label, trading_day_number
 from src.web.steps_status import steps_status
 
@@ -44,6 +50,8 @@ def day_summary(trading_date: str) -> dict:
         "is_today": trading_date == today_et().isoformat(),
         "is_holiday": is_holiday,
         "holiday_label": holiday,
+        "prior_trading_date": prior_trading_day(d).isoformat(),
+        "next_trading_date": next_trading_day(d).isoformat(),
         "day_label": launch_label(trading_date),
         "day_number": trading_day_number(trading_date),
         "steps_done": done if not is_holiday else 0,

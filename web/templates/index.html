@@ -21,7 +21,41 @@
 
     {% include "_day_header.html" %}
 
-    {% if decision_card %}
+    {% if day.is_holiday %}
+    <section class="panel holiday-panel">
+      <h2 class="section-title-inline">NYSE 休市 · 无交易日决策</h2>
+      <p class="muted">
+        {% if day.holiday_label %}{{ day.holiday_label }} · {% endif %}
+        今日不运行 Morning / Steps，无 Driver、Hypothesis 或 RS 表。
+      </p>
+      <div class="holiday-nav link-row">
+        <a href="/?date={{ day.prior_trading_date }}">← 上一交易日 {{ day.prior_trading_date }}</a>
+        <a href="/?date={{ day.next_trading_date }}">下一交易日 {{ day.next_trading_date }} 预览 →</a>
+      </div>
+      {% if holiday_news and holiday_news.has_data %}
+      <div class="holiday-news">
+        <h3 class="holiday-news-title">休市新闻摘要</h3>
+        <p class="muted">
+          来自 {{ holiday_news.source_label }}（{{ holiday_news.source_date }}）· {{ holiday_news.headline_count }} 条
+          · 仅供参考，非交易决策
+        </p>
+        <ul class="holiday-headlines">
+          {% for h in holiday_news.headlines %}
+          <li>
+            {% if h.url %}
+            <a href="{{ h.url }}" target="_blank" rel="noopener">{{ h.title }}</a>
+            {% else %}
+            {{ h.title }}
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% elif holiday_news %}
+      <p class="muted holiday-news-empty">暂无新闻快照 · 可查看上一交易日 Morning 获取完整上下文</p>
+      {% endif %}
+    </section>
+    {% elif decision_card %}
     <section class="panel decision-card">
       <div class="decision-card-head">
         <h2 class="section-title-inline">Morning 一页纸 · 决策卡</h2>
@@ -100,14 +134,22 @@
     {% endif %}
 
     <div class="panel hub-links">
-      <strong>今日快捷入口</strong>
+      <strong>{% if day.is_holiday %}休市快捷入口{% else %}今日快捷入口{% endif %}</strong>
       <div class="link-row" style="margin-top:0.5rem;">
+        {% if not day.is_holiday %}
         <a href="/step/0?date={{ day.trading_date }}">Step 0 数据</a>
         <a href="/step/1?date={{ day.trading_date }}">Morning</a>
         <a href="/cases/{{ day.trading_date }}">Market Case</a>
+        {% else %}
+        <a href="/?date={{ day.prior_trading_date }}">上一交易日流程</a>
+        <a href="/step/1?date={{ day.prior_trading_date }}">上一交易日 Morning</a>
+        <a href="/cases/{{ day.prior_trading_date }}">上一交易日 Case</a>
+        {% endif %}
         <a href="/playbook">Playbook</a>
         <a href="/history">历史矩阵</a>
+        {% if not day.is_holiday %}
         <a href="/verify?date={{ day.trading_date }}">核对</a>
+        {% endif %}
       </div>
     </div>
 

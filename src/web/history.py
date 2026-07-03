@@ -58,7 +58,7 @@ def list_trading_days() -> list[dict]:
     today_str = today_et().isoformat()
     if not any(d["date"] == today_str for d in days):
         t = today_et()
-        if t >= launch_date() and is_trading_day(t):
+        if t >= launch_date():
             days.insert(0, _day_entry(today_str))
 
     return days

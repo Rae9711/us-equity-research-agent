@@ -34,6 +34,7 @@ from src.web.homepage import (
     build_breaking_signals,
     build_catalyst_status,
     build_decision_card,
+    build_holiday_news_brief,
     build_relative_strength,
     directional_accuracy_series,
     driver_accuracy_series,
@@ -112,10 +113,16 @@ def health() -> JSONResponse:
 @app.get("/", response_class=HTMLResponse, dependencies=_AUTH)
 def index(request: Request, date: str | None = None) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
-    decision_card = build_decision_card(trading_date)
+    day = day_summary(trading_date)
+    decision_card = None
     rel_strength = None
-    if decision_card:
-        rel_strength = build_relative_strength(trading_date, decision_card["driver"])
+    holiday_news = None
+    if not day["is_holiday"]:
+        decision_card = build_decision_card(trading_date)
+        if decision_card:
+            rel_strength = build_relative_strength(trading_date, decision_card["driver"])
+    else:
+        holiday_news = build_holiday_news_brief(trading_date)
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -125,6 +132,7 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
             "form_action": "/",
             "decision_card": decision_card,
             "relative_strength": rel_strength,
+            "holiday_news": holiday_news,
         },
     )
 
