@@ -21,6 +21,134 @@
 
     {% include "_day_header.html" %}
 
+    {% if decision_card %}
+    <section class="panel decision-card">
+      <div class="decision-card-head">
+        <h2 class="section-title-inline">Morning 一页纸 · 决策卡</h2>
+        <a class="muted" href="/step/1?date={{ day.trading_date }}">完整 Morning →</a>
+      </div>
+      <div class="decision-grid">
+        <div class="decision-field">
+          <span class="decision-label">Driver</span>
+          <span class="decision-value">{{ decision_card.driver }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">Bias</span>
+          <span class="decision-value">{{ decision_card.bias }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">Trade · Wait · No Trade</span>
+          {% set ta = decision_card.trade_action %}
+          <span class="decision-value">
+            <span class="trade-badge trade-{{ ta | lower | replace(' ', '-') }}">{{ ta }}</span>
+          </span>
+        </div>
+        <div class="decision-field decision-field-wide">
+          <span class="decision-label">失效条件</span>
+          <span class="decision-value">{{ decision_card.invalidation }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">今日只盯 · 变量 1</span>
+          <span class="decision-value">{{ decision_card.watch_variables[0] }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">今日只盯 · 变量 2</span>
+          <span class="decision-value">{{ decision_card.watch_variables[1] }}</span>
+        </div>
+      </div>
+      <div class="decision-hypothesis">
+        <span class="decision-label">Hypothesis (P17)</span>
+        <span class="decision-value">{{ decision_card.hypothesis }}</span>
+      </div>
+    </section>
+
+    {% if relative_strength %}
+    <section class="panel rs-panel">
+      <h2 class="section-title-inline">Tradable 相对强弱 · vs {{ relative_strength.benchmark }} ({{ relative_strength.benchmark_chg }}%)</h2>
+      <p class="muted rs-driver-hint">Driver「{{ relative_strength.driver }}」→ {{ relative_strength.symbols | join(', ') }}</p>
+      <table class="data-table rs-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>日涨跌</th>
+            <th>vs QQQ</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in relative_strength.rows %}
+          <tr>
+            <td><strong>{{ row.symbol }}</strong></td>
+            <td>{% if row.change_pct is not none %}{{ row.change_pct }}%{% else %}—{% endif %}</td>
+            <td class="rs-vs rs-{{ row.direction }}">
+              {% if row.vs_qqq is not none %}{{ row.vs_qqq_display }}{% else %}—{% endif %}
+            </td>
+            <td class="rs-arrow rs-{{ row.direction }}">
+              {% if row.direction == 'up' %}▲{% elif row.direction == 'down' %}▼{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+    {% elif day.steps.get(1) %}
+    <div class="panel empty-state">
+      <p>该日 Morning 数据暂不可用，无法生成决策卡。</p>
+      <p class="muted"><a href="/step/1?date={{ day.trading_date }}">查看 Step 1</a></p>
+    </div>
+    {% endif %}
+
+    <section class="panel hyp-accuracy-panel">
+      <h2 class="section-title-inline">P17 Hypothesis 命中率</h2>
+      {% if hypothesis_accuracy.sufficient %}
+      <div class="hyp-accuracy-summary">
+        <strong>{{ hypothesis_accuracy.accuracy_pct }}%</strong>
+        <span class="muted">（{{ hypothesis_accuracy.correct }}/{{ hypothesis_accuracy.total_labeled }} 日已标注 · 累计历史准确率）</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="hypAccuracyChart" aria-label="Hypothesis cumulative accuracy"></canvas>
+      </div>
+      <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+      <script>
+        (function () {
+          const pts = {{ hypothesis_accuracy.points | tojson }};
+          const ctx = document.getElementById('hypAccuracyChart');
+          if (!ctx || !pts.length) return;
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: pts.map(p => p.date),
+              datasets: [{
+                label: '累计准确率 %',
+                data: pts.map(p => p.cumulative_accuracy),
+                borderColor: '#2563eb',
+                backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                fill: true,
+                tension: 0.25,
+                pointRadius: 3,
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                x: { ticks: { maxRotation: 45, minRotation: 45 } }
+              },
+              plugins: { legend: { display: false } }
+            }
+          });
+        })();
+      </script>
+      {% else %}
+      <div class="empty-state">
+        <p>Hypothesis 标注数据不足（需 ≥2 个交易日）。</p>
+        <p class="muted">完成 S7 Evening 或 <a href="/verify?date={{ day.trading_date }}">核对 P17</a> 后自动累计。</p>
+      </div>
+      {% endif %}
+    </section>
+
     {% if stats and stats.verified > 0 %}
     <div class="panel stats-bar">
       <strong>Agent 准确率</strong> {{ stats.accuracy_pct }}%

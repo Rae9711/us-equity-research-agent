@@ -29,6 +29,11 @@ from src.web.labels import unified_about, unified_label
 from src.web.stats import accuracy_by_date, accuracy_for_date, global_accuracy
 from src.web.steps_status import step_available, steps_status
 from src.web.conclusion_index import morning_index_from_parts, morning_index_from_records
+from src.web.homepage import (
+    build_decision_card,
+    build_relative_strength,
+    hypothesis_accuracy_series,
+)
 from src.web.verify_order import conclusion_sort_key, sort_conclusions
 from src.web.verify_service import VerifyItem, VerifyPayload, save_verifications
 from web.auth import optional_basic_auth
@@ -100,6 +105,11 @@ def health() -> JSONResponse:
 @app.get("/", response_class=HTMLResponse, dependencies=_AUTH)
 def index(request: Request, date: str | None = None) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
+    decision_card = build_decision_card(trading_date)
+    hyp_accuracy = hypothesis_accuracy_series()
+    rel_strength = None
+    if decision_card:
+        rel_strength = build_relative_strength(trading_date, decision_card["driver"])
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -108,6 +118,9 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
             "active": "home",
             "stats": global_accuracy(),
             "form_action": "/",
+            "decision_card": decision_card,
+            "hypothesis_accuracy": hyp_accuracy,
+            "relative_strength": rel_strength,
         },
     )
 
