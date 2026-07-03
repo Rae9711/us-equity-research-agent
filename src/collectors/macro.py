@@ -54,6 +54,10 @@ def collect_macro() -> dict[str, Any]:
                 "release_name": row.get("release_name"),
                 "date": row.get("date"),
             }
+            # Preserve consensus fields if a future calendar source provides them
+            for field in ("consensus", "forecast", "estimate", "expected"):
+                if row.get(field) is not None:
+                    entry[field] = row.get(field)
             calendar.append(entry)
             if "employment situation" in name or "nonfarm" in name:
                 d = _days_until(str(row.get("date", "")), date.today())

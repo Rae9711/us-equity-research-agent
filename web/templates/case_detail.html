@@ -34,7 +34,8 @@
             <th>实际值</th>
             <th>Consensus</th>
             <th>Surprise</th>
-            <th>市场反应</th>
+            <th>典型影响（参考）</th>
+            <th>实测反应</th>
           </tr>
         </thead>
         <tbody>
@@ -49,7 +50,8 @@
             <td>{{ row.actual }}</td>
             <td>{{ row.consensus }}</td>
             <td class="surprise-cell {{ row.surprise_class }}">{{ row.surprise }}</td>
-            <td class="muted catalyst-impact">{{ row.market_impact }}</td>
+            <td class="muted catalyst-impact">{{ row.typical_impact }}</td>
+            <td class="catalyst-measured">{{ row.measured_reaction }}</td>
           </tr>
           {% endfor %}
         </tbody>

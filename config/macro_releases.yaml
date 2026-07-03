@@ -9,8 +9,9 @@
 #   market_impact_default: 通用市场影响提示（fallback，当 LLM 未产出时用）
 #   direction   : 数据方向（"inflation"|"growth"|"labor"），用于 UI 颜色规则
 #
-# consensus_default 只作为极端 fallback；正式的一致预期应由 morning research
-# / 手工配置 / 外部 calendar API 提供（后续接入）。
+# consensus_default: placeholder 一致预期，用于 FRED actual 到位后自动算 surprise_pct。
+# 发布日前应手工更新，或后续接入 calendar / Bloomberg consensus API。
+# 单位须与 FRED series 一致（index level / % / K persons / USD Mil 等）。
 
 events:
   - id: CPI
@@ -18,6 +19,7 @@ events:
     fred_id: CPIAUCSL
     scheduled_et: "08:30"
     unit: "index"
+    consensus_default: 315.5
     surprise_threshold_pct: 0.2
     direction: inflation
     market_impact_default: "CPI 意外偏高 → 收益率上行、成长股承压；偏低相反"
@@ -27,6 +29,7 @@ events:
     fred_id: PCEPI
     scheduled_et: "08:30"
     unit: "index"
+    consensus_default: 126.3
     surprise_threshold_pct: 0.2
     direction: inflation
     market_impact_default: "PCE 意外偏高 → Fed 更鹰、贵金属/成长承压"
@@ -36,6 +39,7 @@ events:
     fred_id: PPIACO
     scheduled_et: "08:30"
     unit: "index"
+    consensus_default: 258.0
     surprise_threshold_pct: 0.3
     direction: inflation
     market_impact_default: "PPI 高于预期 → 通胀传导预期升温"
@@ -45,6 +49,7 @@ events:
     fred_id: RSAFS
     scheduled_et: "08:30"
     unit: "USD Mil"
+    consensus_default: 720000
     surprise_threshold_pct: 0.5
     direction: growth
     market_impact_default: "零售超预期 → 消费韧性 → 收益率上行 + 顺周期偏强"
@@ -54,6 +59,7 @@ events:
     fred_id: ICSA
     scheduled_et: "08:30"
     unit: "persons"
+    consensus_default: 225000
     surprise_threshold_pct: 5.0
     direction: labor
     market_impact_default: "初请骤增 → 就业转弱 → 降息预期 → 债券偏强"
@@ -63,6 +69,7 @@ events:
     fred_id: GDP
     scheduled_et: "08:30"
     unit: "USD Bil"
+    consensus_default: 29500
     surprise_threshold_pct: 0.3
     direction: growth
     market_impact_default: "GDP 意外强 → 收益率+ 美元+；弱则相反"
@@ -72,6 +79,7 @@ events:
     fred_id: NAPM
     scheduled_et: "10:00"
     unit: "index"
+    consensus_default: 49.5
     surprise_threshold_pct: 1.0
     direction: growth
     market_impact_default: "ISM > 50 且超预期 → 顺周期偏强、油/铜偏强"
@@ -81,6 +89,7 @@ events:
     fred_id: JTSJOL
     scheduled_et: "10:00"
     unit: "K persons"
+    consensus_default: 7600
     surprise_threshold_pct: 3.0
     direction: labor
     market_impact_default: "JOLTS 强 → 劳动力紧俏 → Fed 更鹰"
@@ -91,6 +100,7 @@ events:
     bls_id: CES0000000001
     scheduled_et: "08:30"
     unit: "K persons"
+    consensus_default: 175
     surprise_threshold_pct: 10.0
     direction: labor
     market_impact_default: "NFP 大超预期 → 收益率+、金价压、成长承压"
@@ -101,6 +111,7 @@ events:
     bls_id: LNS14000000
     scheduled_et: "08:30"
     unit: "%"
+    consensus_default: 4.1
     surprise_threshold_pct: 0.1
     direction: labor
     market_impact_default: "失业率意外上行 → 降息预期 → 债券+"

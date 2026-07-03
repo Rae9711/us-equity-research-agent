@@ -55,6 +55,9 @@ def _extract_catalysts(calendar: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "name": label,
                 "release": release,
                 "date": event.get("date"),
+                "consensus": event.get("consensus"),
+                "forecast": event.get("forecast"),
+                "estimate": event.get("estimate"),
             }
         )
     return out

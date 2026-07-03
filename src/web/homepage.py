@@ -637,6 +637,22 @@ def _consensus_value(release: dict[str, Any], event_cfg: dict[str, Any]) -> floa
         return None
 
 
+def _format_measured_reaction(reaction: dict[str, Any] | None) -> str:
+    if not reaction:
+        return "—"
+    parts: list[str] = []
+    for sym in ("QQQ", "SMH"):
+        val = reaction.get(sym)
+        if val:
+            parts.append(f"{sym} {val}")
+    if not parts:
+        return "—"
+    text = " · ".join(parts)
+    if reaction.get("source") == "daily":
+        return f"{text} (日涨跌)"
+    return text
+
+
 def build_catalyst_status(trading_date: str) -> dict[str, Any]:
     """今日催化剂状态表（仅经济日历当日 scheduled 的宏观发布）。"""
     cfg = load_macro_release_config()
@@ -670,7 +686,6 @@ def build_catalyst_status(trading_date: str) -> dict[str, Any]:
         }
 
     qqq_chg = _qqq_chg_for_date(trading_date)
-    market_default = f"QQQ {qqq_chg:+.1f}%" if qqq_chg is not None else "—"
 
     rows: list[dict[str, Any]] = []
     for event_cfg in scheduled:
@@ -704,7 +719,12 @@ def build_catalyst_status(trading_date: str) -> dict[str, Any]:
                 "surprise": surprise["text"],
                 "surprise_class": surprise["class"],
                 "row_class": row_class,
-                "market_impact": r.get("market_impact") or event_cfg.get("market_impact_default") or market_default,
+                "typical_impact": r.get("market_impact") or event_cfg.get("market_impact_default") or "—",
+                "measured_reaction": (
+                    _format_measured_reaction(r.get("measured_reaction"))
+                    if status == "released"
+                    else "—"
+                ),
                 "source": r.get("source"),
             }
         )

@@ -21,6 +21,7 @@ import yaml
 from pytz import timezone
 
 from src.collectors.fred_client import FredClient
+from src.collectors.release_market_reaction import compute_measured_reaction
 from src.research.rules import catalysts_on_date
 from src.utils.paths import data_root, morning_json_path, raw_data_path, raw_dir
 from src.utils.trading_calendar import today_et
@@ -55,6 +56,29 @@ _CATALYST_LABEL_TO_EVENT_IDS: dict[str, list[str]] = {
     "ISM Mfg": ["ISM_MFG"],
     "JOLTS": ["JOLTS"],
 }
+
+# Match yaml event id → economic_calendar release_name keywords (FRED calendar)
+_EVENT_ID_CALENDAR_KEYWORDS: dict[str, list[str]] = {
+    "CPI": ["consumer price index", "cpi"],
+    "PCE": ["personal income", "pce"],
+    "PPI": ["producer price index", "ppi"],
+    "RETAIL_SALES": ["retail sales"],
+    "JOBLESS_CLAIMS": ["jobless claims", "initial claims"],
+    "GDP": ["gross domestic product", "gdp"],
+    "ISM_MFG": ["ism manufacturing"],
+    "JOLTS": ["jolts"],
+    "NFP": ["employment situation", "nonfarm"],
+    "UNRATE": ["employment situation", "unemployment"],
+}
+
+_CONSENSUS_FIELDS = (
+    "consensus",
+    "forecast",
+    "estimate",
+    "expected",
+    "prior_consensus",
+    "consensus_estimate",
+)
 
 
 def event_config_by_id(cfg: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
@@ -170,6 +194,45 @@ def _bls_latest(series_id: str) -> dict[str, Any] | None:
     }
 
 
+def _consensus_from_calendar_entry(entry: dict[str, Any]) -> float | None:
+    for field in _CONSENSUS_FIELDS:
+        val = _safe_float(entry.get(field))
+        if val is not None:
+            return val
+    return None
+
+
+def _consensus_for_event(
+    event: dict[str, Any],
+    target_date: date,
+) -> tuple[float | None, str | None]:
+    """Consensus from Step 0 economic_calendar, else yaml consensus_default."""
+    event_id = str(event.get("id") or "")
+    date_str = target_date.isoformat()
+    raw_path = raw_data_path(date_str)
+    if raw_path.exists():
+        try:
+            raw = json.loads(raw_path.read_text(encoding="utf-8"))
+            calendar = (raw.get("macro") or {}).get("economic_calendar") or []
+            keywords = _EVENT_ID_CALENDAR_KEYWORDS.get(event_id, [])
+            for entry in calendar:
+                if str(entry.get("date") or "") != date_str:
+                    continue
+                name = str(entry.get("release_name") or "").lower()
+                if not keywords or not any(kw in name for kw in keywords):
+                    continue
+                consensus = _consensus_from_calendar_entry(entry)
+                if consensus is not None:
+                    return consensus, "economic_calendar"
+        except Exception:  # noqa: BLE001
+            pass
+
+    default = _safe_float(event.get("consensus_default"))
+    if default is not None:
+        return default, "yaml_default"
+    return None, None
+
+
 def _surprise_pct(actual: float | None, consensus: float | None) -> float | None:
     if actual is None or consensus is None or consensus == 0:
         return None
@@ -194,6 +257,8 @@ def fetch_release(
     target_date: date | None = None,
     *,
     history: int = 6,
+    consensus: float | None = None,
+    consensus_source: str | None = None,
 ) -> dict[str, Any] | None:
     """抓取单条宏观事件；返回统一结构或 None（获取不到任何值）。
 
@@ -215,7 +280,8 @@ def fetch_release(
         "unit": event.get("unit"),
         "direction": event.get("direction"),
         "actual": None,
-        "consensus": _safe_float(event.get("consensus_default")),
+        "consensus": consensus if consensus is not None else _safe_float(event.get("consensus_default")),
+        "consensus_source": consensus_source,
         "prior": None,
         "surprise_pct": None,
         "observation_date": None,
@@ -284,17 +350,38 @@ def check_todays_releases(target_date: date | None = None) -> list[dict[str, Any
 
     for event in events:
         release: dict[str, Any] | None = None
+        consensus_val, consensus_src = _consensus_for_event(event, target_date)
         try:
-            release = fetch_release(event, target_date=target_date, history=history)
+            release = fetch_release(
+                event,
+                target_date=target_date,
+                history=history,
+                consensus=consensus_val,
+                consensus_source=consensus_src,
+            )
         except Exception:
             logger.exception("宏观事件 %s 抓取抛错", event.get("id"))
 
         status = _status_for(release, event.get("scheduled_et", ""), target_date)
         threshold = float(event.get("surprise_threshold_pct") or 0)
+        actual = (release or {}).get("actual")
+        consensus_num = (release or {}).get("consensus") if release else consensus_val
         surprise = (release or {}).get("surprise_pct")
+        if surprise is None and actual is not None and consensus_num is not None:
+            surprise = _surprise_pct(actual, consensus_num)
         surprise_flag = bool(
             surprise is not None and abs(surprise) >= threshold and threshold > 0
         )
+
+        measured_reaction: dict[str, Any] | None = None
+        if status == "released":
+            try:
+                measured_reaction = compute_measured_reaction(
+                    target_date,
+                    str(event.get("scheduled_et") or ""),
+                )
+            except Exception:
+                logger.exception("实测反应计算失败 %s", event.get("id"))
 
         item = {
             "event": event.get("id"),
@@ -302,7 +389,8 @@ def check_todays_releases(target_date: date | None = None) -> list[dict[str, Any
             "scheduled_et": event.get("scheduled_et"),
             "status": status,
             "actual": (release or {}).get("actual"),
-            "consensus": (release or {}).get("consensus"),
+            "consensus": (release or {}).get("consensus") if release else consensus_val,
+            "consensus_source": (release or {}).get("consensus_source") or consensus_src,
             "prior": (release or {}).get("prior"),
             "surprise_pct": surprise,
             "observation_date": (release or {}).get("observation_date"),
@@ -313,6 +401,7 @@ def check_todays_releases(target_date: date | None = None) -> list[dict[str, Any
             "surprise_flag": surprise_flag,
             "surprise_threshold_pct": threshold,
             "market_impact": (release or {}).get("market_impact") or event.get("market_impact_default"),
+            "measured_reaction": measured_reaction,
         }
         results.append(item)
 
