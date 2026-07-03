@@ -16,7 +16,9 @@
     </p>
 
     {% if saved %}
-    <div class="flash flash-ok">已保存核对结果</div>
+    <div class="flash flash-ok">
+      已保存{% if learned %} · Learning 已在 Step 8 更新（Bayesian / Playbook / training_rows）{% else %} · Learning 将在有 S7 数据后于 Step 8 更新{% endif %}
+    </div>
     {% endif %}
 
     <form method="get" action="/verify" class="date-bar panel">

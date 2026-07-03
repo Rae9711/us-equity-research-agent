@@ -145,8 +145,8 @@ Agent 每完成一个 Part / Step，**必须**输出结构化 **结论**块，�
 | `hypothesis` | P17 | 盘中验证对象 |
 | `morning` / `intraday` | P1–S6 | 决策轨迹 |
 | `attribution` | S7 | 谁真正推动了涨跌 |
-| `labels` | `/verify` + S7 | 监督学习 Label |
-| `surprise` / `lesson` | S7–S8 | Playbook 入库 |
+| `labels` | `/verify` + S7 | 监督学习 Label（**verify 优先于 S7 自动**） |
+| `surprise` / `lesson` | S7–S8 + `/verify` | Playbook 入库（核对纠正写入 `lesson`） |
 | `bayesian_drivers` | S8 | 次日 Morning 先验 |
 
 完整 Schema 见 [IMPLEMENTATION-PLAN.md § Market Case](IMPLEMENTATION-PLAN.md#二market-case核心数据模型)。
@@ -160,7 +160,9 @@ Agent 每完成一个 Part / Step，**必须**输出结构化 **结论**块，�
 | **L1 Rules** | Regime 绑定的 if-then（YAML） | 每日晨会 |
 | **L2 Statistical** | XGBoost + SHAP | 每周（数据 ≥60 天） |
 | **L3 Case Memory** | Playbook 相似 Market Case 检索 | 每日晨会 + 日终 |
-| **L4 Bayesian** | Driver 后验每日更新 | Step 8 |
+| **L4 Bayesian** | Driver 后验每日更新 | Step 8（S7 核对为错且无纠正 Driver 时跳过） |
+
+**`/verify` 保存后**：立即将 P17/P15/S7 核对写入 Market Case `labels`，提取核对纠正为 Playbook `lesson`，并重跑 Step 8（Bayesian · Playbook · `training_rows`）。
 
 **Learning 学什么：** 在何种 Regime 下，哪些 Driver 对结果贡献多大——不是单纯「猜明天涨跌」。
 

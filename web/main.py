@@ -180,6 +180,7 @@ def verify_form(
     request: Request,
     date: str | None = None,
     saved: int | None = None,
+    learned: int | None = None,
 ) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
     rows = _load_conclusions(trading_date)
@@ -197,6 +198,7 @@ def verify_form(
             "part_label": unified_label,
             "part_about": unified_about,
             "saved": saved == 1,
+            "learned": learned == 1,
             "day_stats": day_stats,
             "scenario_labels": scenario_labels,
         },
@@ -228,9 +230,10 @@ async def verify_submit(request: Request) -> RedirectResponse:
             )
         )
 
-    save_verifications(day, items)
+    save_result = save_verifications(day, items)
+    learned = 1 if save_result.learning_refreshed else 0
     return RedirectResponse(
-        url=f"/verify?date={trading_date}&saved=1",
+        url=f"/verify?date={trading_date}&saved=1&learned={learned}",
         status_code=303,
     )
 
@@ -238,8 +241,15 @@ async def verify_submit(request: Request) -> RedirectResponse:
 @app.post("/api/verify", dependencies=_AUTH)
 def api_verify_submit(payload: VerifyPayload) -> JSONResponse:
     day = date_type.fromisoformat(payload.trading_date)
-    updated = save_verifications(day, payload.items)
-    return JSONResponse({"ok": True, "updated": updated})
+    result = save_verifications(day, payload.items)
+    return JSONResponse(
+        {
+            "ok": True,
+            "updated": result.updated,
+            "learning_refreshed": result.learning_refreshed,
+            "learning_summary": result.learning_summary,
+        }
+    )
 
 
 def _load_raw(trading_date: str) -> dict:

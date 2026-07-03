@@ -10,7 +10,7 @@
   {% include "nav.html" %}
   <div class="page-wrap">
     <h1 class="page-title">Agent 准确率</h1>
-    <p class="muted">累计命中率 · Driver / 方向 / P17 Hypothesis / P15 Scenario</p>
+    <p class="muted">累计命中率 · Driver / 方向 / P17 Hypothesis / P15 Scenario · P17/P15 优先采用 /verify 人工标注</p>
 
     <section class="panel accuracy-metrics-panel">
       <div class="accuracy-metrics-grid">
@@ -52,7 +52,7 @@
 
         <div class="accuracy-metric-card">
           <h3 class="accuracy-metric-title">P17 Hypothesis 命中率</h3>
-          <p class="muted accuracy-metric-desc">Hypothesis 验证结果</p>
+          <p class="muted accuracy-metric-desc">Hypothesis 验证结果（/verify P17 覆盖 S7 自动标签）</p>
           {% if hypothesis_accuracy.sufficient %}
           <div class="hyp-accuracy-summary">
             <strong>{{ hypothesis_accuracy.accuracy_pct }}%</strong>
@@ -69,7 +69,7 @@
         </div>
         <div class="accuracy-metric-card">
           <h3 class="accuracy-metric-title">P15 Scenario 命中率</h3>
-          <p class="muted accuracy-metric-desc">Morning 最可能 Scenario vs S7 实际演绎（自动检测）</p>
+          <p class="muted accuracy-metric-desc">Morning 最可能 Scenario vs 实际演绎（/verify P15 覆盖 S7 自动检测）</p>
           {% if scenario_accuracy.sufficient %}
           <div class="hyp-accuracy-summary">
             <strong>{{ scenario_accuracy.accuracy_pct }}%</strong>

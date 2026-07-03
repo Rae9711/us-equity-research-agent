@@ -28,14 +28,22 @@ def run_step8_learning(trading_date: date | None = None) -> dict[str, Any]:
 
     case = load_case(date_str)
 
-    # 1. Bayesian Driver Update
+    # 1. Bayesian Driver Update (verify overrides S7 driver when user corrected S7)
     attr_dict = case.attribution.model_dump() if case.attribution else {}
-    actual_driver = (case.labels.actual_driver or "Unknown") if case.labels else "Unknown"
+    from src.web.verify_learning import bayesian_driver_for_date
 
-    prior_weights, posterior_weights = update_weights(attr_dict, actual_driver)
+    actual_driver, run_bayesian = bayesian_driver_for_date(
+        trading_date,
+        (case.labels.actual_driver or "Unknown") if case.labels else "Unknown",
+    )
+    if run_bayesian:
+        prior_weights, posterior_weights = update_weights(attr_dict, actual_driver)
+    else:
+        prior_weights = load_weights()
+        posterior_weights = prior_weights
     big_driver, big_delta = max_delta(prior_weights, posterior_weights)
 
-    # 2. Playbook Case Storage
+    # 2. Playbook Case Storage (includes human verify lessons in case.lesson)
     playbook_case_id = store_case(case) if (case.lesson or case.surprise) else None
 
     # 3. Training Row

@@ -419,34 +419,51 @@ def driver_accuracy_series() -> dict[str, Any]:
 
 
 def _scenario_labels_for_date(date_str: str) -> dict[str, Any] | None:
+    labels: dict[str, Any] | None = None
     session = get_session()
     try:
         row = session.query(MarketCase).filter(MarketCase.date == date_str).first()
         if row:
             try:
                 data = json.loads(row.case_json)
-                labels = data.get("labels") or {}
-                if labels.get("scenario_actual") is not None:
-                    return labels
+                case_labels = data.get("labels") or {}
+                if case_labels.get("scenario_actual") is not None:
+                    labels = dict(case_labels)
             except Exception:
                 pass
+
+        if labels is None:
+            step7_path = step_json_path(7, date_str)
+            if step7_path.exists():
+                try:
+                    s7 = json.loads(step7_path.read_text(encoding="utf-8"))
+                    extra = s7.get("extra") or {}
+                    if extra.get("scenario_actual") is not None or s7.get("scenario_actual") is not None:
+                        labels = {
+                            "scenario_primary": extra.get("scenario_primary") or s7.get("scenario_primary"),
+                            "scenario_actual": extra.get("scenario_actual") or s7.get("scenario_actual"),
+                            "scenario_correct": extra.get("scenario_correct", s7.get("scenario_correct")),
+                        }
+                except Exception:
+                    pass
+
+        day = date_type.fromisoformat(date_str)
+        p15 = (
+            session.query(ConclusionRecord)
+            .filter(
+                ConclusionRecord.trading_date == day,
+                ConclusionRecord.part_id == "P15",
+            )
+            .first()
+        )
+        if p15 and p15.verification and p15.verification not in ("", "N/A"):
+            if labels is None:
+                labels = {}
+            labels["scenario_correct"] = p15.verification == "对"
     finally:
         session.close()
 
-    step7_path = step_json_path(7, date_str)
-    if step7_path.exists():
-        try:
-            s7 = json.loads(step7_path.read_text(encoding="utf-8"))
-            extra = s7.get("extra") or {}
-            if extra.get("scenario_actual") is not None or s7.get("scenario_actual") is not None:
-                return {
-                    "scenario_primary": extra.get("scenario_primary") or s7.get("scenario_primary"),
-                    "scenario_actual": extra.get("scenario_actual") or s7.get("scenario_actual"),
-                    "scenario_correct": extra.get("scenario_correct", s7.get("scenario_correct")),
-                }
-        except Exception:
-            pass
-    return None
+    return labels
 
 
 def scenario_accuracy_series() -> dict[str, Any]:
