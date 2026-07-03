@@ -135,6 +135,122 @@ a:hover { color: var(--accent-dark); text-decoration: underline; }
   margin-bottom: 0.15rem;
 }
 
+.usage-guide-intro {
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.usage-guide-lead {
+  margin: 0 0 0.35rem;
+}
+
+.usage-guide-lead:last-child {
+  margin-bottom: 0;
+}
+
+.usage-guide-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.usage-guide-details {
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.usage-guide-details[open] {
+  background: #fff;
+}
+
+.usage-guide-details > summary {
+  padding: 0.4rem 0.65rem;
+  font-weight: 600;
+  font-size: 0.84rem;
+  color: var(--accent-dark);
+  cursor: pointer;
+  list-style: none;
+}
+
+.usage-guide-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.usage-guide-details > summary::before {
+  content: '▶';
+  display: inline-block;
+  width: 0.85rem;
+  font-size: 0.68rem;
+  margin-right: 0.25rem;
+  transition: transform 0.15s ease;
+}
+
+.usage-guide-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.usage-guide-details > summary:hover {
+  background: #eff6ff;
+  border-radius: 6px;
+}
+
+.usage-guide-details > .usage-guide-list,
+.usage-guide-details > .usage-guide-steps,
+.usage-guide-details > p,
+.usage-guide-details > .usage-guide-example {
+  margin: 0;
+  padding: 0 0.75rem 0.55rem 1.1rem;
+}
+
+.usage-guide-steps {
+  padding-left: 2rem;
+  font-size: inherit;
+  line-height: 1.55;
+}
+
+.usage-guide-steps li {
+  margin-bottom: 0.3rem;
+}
+
+.usage-guide-pages li {
+  margin-bottom: 0.35rem;
+}
+
+.usage-guide-note {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+}
+
+.usage-guide-example {
+  background: #eff6ff;
+  border-radius: 4px;
+  padding: 0.5rem 0.65rem !important;
+  margin-top: 0.25rem !important;
+}
+
+.usage-guide-dl {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.usage-guide-dl dt {
+  font-weight: 600;
+  color: var(--accent-dark);
+  margin-top: 0.35rem;
+}
+
+.usage-guide-dl dt:first-child {
+  margin-top: 0;
+}
+
+.usage-guide-dl dd {
+  margin: 0.1rem 0 0;
+  color: var(--text);
+}
+
 .page-wrap {
   max-width: 960px;
   margin: 0 auto;

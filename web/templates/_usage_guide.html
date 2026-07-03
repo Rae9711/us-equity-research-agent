@@ -5,38 +5,89 @@
     <span class="usage-guide-toggle-hint muted">点击展开 / 收起</span>
   </button>
   <div class="usage-guide-body" id="usage-guide-body">
-    <ul class="usage-guide-list">
-      <li><strong>这是什么？</strong>每日美股交易<strong>研究助手</strong>，整理 Morning 与盘中分析。<strong>不会自动下单</strong>，只供你阅读和决策参考。</li>
-      <li><strong>每天怎么用？</strong>
-        <ul>
-          <li><strong>约 8:00</strong> — 读 Morning（首页「决策卡」或 Morning 页）</li>
-          <li><strong>盘中</strong> — 按 Step 2–8 跟进更新</li>
-          <li><strong>收盘后</strong> — 去「核对」填实际结果 → 再看「准确率」</li>
+
+    {# ── 1. 30秒看懂（展开后首屏） ── #}
+    <div class="usage-guide-intro">
+      <p class="usage-guide-lead"><strong>30 秒看懂：</strong>这不是炒股 App，也<strong>不会帮你下单</strong>。它每天自动做一套「晨会 → 盘中检查 → 收盘复盘」的研究报告，供你阅读和决策参考。</p>
+      <p class="usage-guide-lead">你唯一必须做的事：<strong>每个交易日收盘后花约 5 分钟去<a href="/verify">核对</a></strong>——告诉系统今天猜对了还是猜错了。核对越多，Agent 才会越用越准。</p>
+    </div>
+
+    {# ── 2–7. 嵌套折叠，避免页面过长 ── #}
+    <div class="usage-guide-sections">
+
+      <details class="usage-guide-details">
+        <summary>我能用它做什么？</summary>
+        <ul class="usage-guide-list">
+          <li>你可以<strong>开盘前</strong>知道今天该盯什么（Driver）、偏多还是偏空（Bias）、该不该交易（Trade / Wait / No Trade）。</li>
+          <li>你可以<strong>盘中（9:30–16:00）</strong>按需点 Step 2–6，检查「早上猜的对不对」——不用每一步都看，有变化时再打开。</li>
+          <li>你可以<strong>收盘后（约 16:10）</strong>看 Step 7 复盘，知道「今天到底谁推动了涨跌」。</li>
+          <li>你可以<strong>回顾历史相似日子</strong>——在 <a href="/cases">Cases</a> 找类似场景，在 <a href="/playbook">Playbook</a> 看可复用的交易规则。</li>
+          <li>你可以<strong>看 Agent 猜对了几次</strong>——<a href="/accuracy">准确率</a>页会汇总历史命中情况。</li>
         </ul>
-      </li>
-      <li><strong>导航栏各页：</strong>
-        <ul>
-          <li><strong>今日流程</strong> — 当天总览与时间线</li>
-          <li><strong>Morning</strong> — Step 1 完整晨间报告</li>
-          <li><strong>准确率</strong> — 历史预测命中统计</li>
-          <li><strong>Cases</strong> — 市场案例库</li>
-          <li><strong>Playbook</strong> — 交易规则与 playbook</li>
-          <li><strong>历史</strong> — 浏览往日记录</li>
-          <li><strong>核对</strong> — 收盘后填写实际走势</li>
+      </details>
+
+      <details class="usage-guide-details">
+        <summary>第一次来？按这个顺序走（Day 1 新手路径）</summary>
+        <ol class="usage-guide-steps">
+          <li>打开<a href="/">首页（今日流程）</a> → 看时间线里哪些 Step 已经变绿（已完成）。</li>
+          <li><strong>约 8:00 后</strong>点 <a href="/step/1">Morning</a> → 读首页「决策卡」5 行 + Hypothesis，了解今天的主线判断。</li>
+          <li><strong>9:30–16:00</strong>按需点 Step 2–6（不用全看；市场有变化或你想验证时再打开）。</li>
+          <li><strong>约 16:10 后</strong>看 Step 7 收盘复盘，了解今天实际发生了什么。</li>
+          <li><strong>必做：</strong>去<a href="/verify">核对</a>页填写实际结果 → 点保存。这是让系统变准的关键一步。</li>
+          <li>有空再看看 <a href="/accuracy">准确率</a> 和 <a href="/cases">Cases</a>，建立对 Agent 水平的直觉。</li>
+        </ol>
+      </details>
+
+      <details class="usage-guide-details">
+        <summary>每个页面一句话</summary>
+        <ul class="usage-guide-list usage-guide-pages">
+          <li><a href="/">今日流程</a> — <span class="muted">随时看</span> · 当天总览、决策卡、Step 时间线，你的「控制台」。</li>
+          <li><a href="/step/1">Morning</a> — <span class="muted">开盘前（约 8:00）</span> · Step 1 完整晨间报告，比首页决策卡更详细。</li>
+          <li><a href="/accuracy">准确率</a> — <span class="muted">收盘核对之后</span> · 历史预测命中统计，看 Agent 靠不靠谱。</li>
+          <li><a href="/cases">Cases</a> — <span class="muted">想回顾时</span> · 按日归档的市场案例，找「今天像哪一天」。</li>
+          <li><a href="/playbook">Playbook</a> — <span class="muted">想复盘规则时</span> · 从案例中提炼的可复用交易模式。</li>
+          <li><a href="/history">历史</a> — <span class="muted">查往日时</span> · 浏览过去任意交易日的报告与 Step 进度。</li>
+          <li><a href="/verify">核对</a> — <span class="muted">每个交易日收盘后（必做）</span> · 填实际走势，教 Agent 哪里猜对、哪里猜错。</li>
         </ul>
-      </li>
-      <li><strong>休市日：</strong>NYSE 休市时没有当日决策，请点「上一交易日」查看最近一份报告。</li>
-      <li><strong>学习闭环：</strong>你在「核对」页填写的数据会帮助 Agent 越学越准。</li>
-      <li><strong>决策卡（首页 5 行）：</strong>
-        <ul>
-          <li><strong>Driver</strong> — 今天市场由什么驱动</li>
-          <li><strong>Bias</strong> — 偏多 / 偏空 / 中性</li>
-          <li><strong>Trade · Wait · No Trade</strong> — 建议做、等、还是不做</li>
-          <li><strong>失效条件</strong> — 什么情况说明判断作废</li>
-          <li><strong>今日只盯</strong> — 盘中只需关注这两个变量</li>
+      </details>
+
+      <details class="usage-guide-details">
+        <summary>决策卡怎么读？（举例）</summary>
+        <p class="muted usage-guide-note">首页「Morning 一页纸 · 决策卡」每天 5 行 + Hypothesis。下面是一个<strong>假例子</strong>，帮你理解每行含义：</p>
+        <div class="usage-guide-example">
+          <dl class="usage-guide-dl">
+            <dt>Driver</dt>
+            <dd>「CPI 公布 + 美联储讲话」→ 今天市场由什么驱动，决定你该盯哪类新闻和数据。</dd>
+            <dt>Bias</dt>
+            <dd>「偏空」→ Agent 认为大盘方向略偏下跌；不是让你做空，而是帮你校准预期。</dd>
+            <dt>Trade · Wait · No Trade</dt>
+            <dd>「Wait」→ 建议先观望、等信号明确再动手。<strong>Trade</strong> = 有值得做的机会；<strong>Wait</strong> = 方向不明，别急着进；<strong>No Trade</strong> = 今天不适合交易。这只是研究参考，<strong>下单仍由你自己决定</strong>。</dd>
+            <dt>失效条件</dt>
+            <dd>「SPY 突破前高 580」→ 如果出现这种情况，上面的 Bias 判断作废，需要重新评估。</dd>
+            <dt>今日只盯 · 变量 1 / 2</dt>
+            <dd>「10Y 收益率」「VIX」→ 盘中只需关注这两个变量，不用盯全盘。</dd>
+            <dt>Hypothesis</dt>
+            <dd>「若 CPI 低于预期，成长股反弹；若高于预期，利率敏感板块承压。」→ 今天最核心的可验证猜想，盘中和收盘后都可以对照。</dd>
+          </dl>
+        </div>
+      </details>
+
+      <details class="usage-guide-details">
+        <summary>休市 / 周末</summary>
+        <p>NYSE 休市日（周末、法定假日）<strong>没有当日报告</strong>，这是正常的——系统不会生成 Driver、决策卡或 Step 更新。</p>
+        <p>此时请点首页的<strong>「上一交易日」</strong>链接，查看最近一份完整报告。休市期间的新闻摘要（如有）仅供参考，不构成交易决策。</p>
+      </details>
+
+      <details class="usage-guide-details">
+        <summary>常见问题</summary>
+        <ul class="usage-guide-list">
+          <li><strong>Agent 猜错了怎么办？</strong> → 去<a href="/verify">核对</a>页标错。你每一次核对都是在教它，不是投诉。</li>
+          <li><strong>要多久才会变准？</strong> → 至少需要约 <strong>2 周</strong>的核对数据，Agent 才能从反馈中学习并调整。</li>
+          <li><strong>和 ChatGPT 有什么区别？</strong> → 这里是<strong>结构化</strong>的每日流程（固定 Step + 决策卡），<strong>可核对</strong>（你知道它猜对几次），而且会<strong>从你的核对中学习</strong>，而不是每次从零开始聊天。</li>
         </ul>
-      </li>
-    </ul>
+      </details>
+
+    </div>
   </div>
 </div>
 <script>
