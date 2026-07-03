@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.steps.meta import STEPS
+from src.utils.trading_calendar import today_et
 from src.web.launch import launch_date, launch_label, trading_day_number
 from src.web.steps_status import steps_status
 
@@ -30,6 +31,7 @@ def day_summary(trading_date: str) -> dict:
     return {
         "trading_date": trading_date,
         "launch_date": launch_date().isoformat(),
+        "is_today": trading_date == today_et().isoformat(),
         "day_label": launch_label(trading_date),
         "day_number": trading_day_number(trading_date),
         "steps_done": done,
