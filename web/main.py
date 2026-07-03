@@ -30,6 +30,7 @@ from src.web.stats import accuracy_by_date, accuracy_for_date, global_accuracy
 from src.web.steps_status import step_available, steps_status
 from src.web.conclusion_index import morning_index_from_parts, morning_index_from_records
 from src.web.homepage import (
+    agent_driver_accuracy_series,
     build_breaking_signals,
     build_catalyst_status,
     build_decision_card,
@@ -139,6 +140,7 @@ def accuracy_page(request: Request) -> HTMLResponse:
             "stats": global_accuracy(),
             "hypothesis_accuracy": hypothesis_accuracy_series(),
             "driver_accuracy": driver_accuracy_series(),
+            "agent_driver_accuracy": agent_driver_accuracy_series(),
             "directional_accuracy": directional_accuracy_series(),
             "scenario_accuracy": scenario_accuracy_series(),
         },
