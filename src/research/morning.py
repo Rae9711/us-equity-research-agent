@@ -21,7 +21,19 @@ from src.utils.trading_calendar import ET, today_et
 
 logger = logging.getLogger(__name__)
 
-RULE_PART_IDS = {"P4", "P5", "P6", "P7", "P9", "P11", "P13"}
+RULE_PART_IDS = {"P4", "P5", "P6", "P7", "P8", "P9", "P11", "P13"}
+
+
+def _is_missing(part: dict[str, Any]) -> bool:
+    """True when a Part has no usable judgment/one_liner content."""
+    if not part:
+        return True
+    judgment = str(part.get("judgment") or "").strip()
+    one_liner = str(part.get("one_liner") or "").strip()
+    body = str(part.get("body_md") or "").strip()
+    if judgment in ("", "—", "-", "N/A") and one_liner in ("", "—", "-", "N/A") and not body:
+        return True
+    return False
 
 
 def _regime_one_liner(label: str) -> str:
@@ -108,15 +120,23 @@ def run_morning_research(
             skip_llm = True
 
     parts = _merge_parts(llm_parts, rule_bundle.get("parts") or {})
-    if skip_llm and not llm_parts:
-        for pid in PART_ORDER:
-            if pid not in parts:
-                parts[pid] = {
-                    "judgment": "N/A",
-                    "confidence": None,
-                    "one_liner": "LLM 未运行或失败",
-                    "body_md": "",
-                }
+    # Guarantee every Part has a non-empty row even when the LLM failed or
+    # returned partial output — the rule engine already fills P4/P5/P6/P7/P8/
+    # P9/P11/P13, so this only covers the narrative Parts (P1/P2/P3/P10/P12/
+    # P14/P15/P16).
+    fallback_reason = (
+        "LLM 未运行或失败，仅规则引擎输出"
+        if skip_llm or not llm_parts
+        else "LLM 未返回该 Part，已回填占位"
+    )
+    for pid in PART_ORDER:
+        if _is_missing(parts.get(pid) or {}):
+            parts[pid] = {
+                "judgment": "N/A",
+                "confidence": None,
+                "one_liner": fallback_reason,
+                "body_md": "",
+            }
 
     # Add R0 as a part for display purposes
     parts["R0"] = {

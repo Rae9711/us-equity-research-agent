@@ -2,6 +2,63 @@ from __future__ import annotations
 
 from typing import Any
 
+# Mapping from macro release keywords → short catalyst label used in P13.
+# Order matters: first match wins to prefer specific labels (e.g. "FOMC minutes"
+# before generic "FOMC").
+_CATALYST_KEYWORDS: list[tuple[str, str]] = [
+    ("fomc minutes", "FOMC Minutes"),
+    ("federal open market committee", "FOMC"),
+    ("fomc", "FOMC"),
+    ("employment situation", "NFP"),
+    ("nonfarm", "NFP"),
+    ("consumer price index", "CPI"),
+    ("cpi", "CPI"),
+    ("producer price index", "PPI"),
+    ("personal income and outlays", "PCE"),
+    ("pce", "PCE"),
+    ("retail sales", "Retail Sales"),
+    ("ism manufacturing", "ISM Mfg"),
+    ("ism services", "ISM Services"),
+    ("gross domestic product", "GDP"),
+    ("gdp", "GDP"),
+    ("jolts", "JOLTS"),
+    ("adp", "ADP"),
+]
+
+
+def _extract_catalysts(calendar: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pick major macro releases from Step 0 economic_calendar.
+
+    Returns a de-duplicated list preserving calendar order. Each entry:
+    {"name": "CPI", "release": "Consumer Price Index", "date": "2026-07-15"}
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for event in calendar or []:
+        release = str(event.get("release_name") or "").strip()
+        if not release:
+            continue
+        lowered = release.lower()
+        label: str | None = None
+        for needle, tag in _CATALYST_KEYWORDS:
+            if needle in lowered:
+                label = tag
+                break
+        if not label:
+            continue
+        key = f"{label}|{event.get('date')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "name": label,
+                "release": release,
+                "date": event.get("date"),
+            }
+        )
+    return out
+
 
 def _pct(q: dict[str, Any]) -> float | None:
     v = q.get("change_pct")
@@ -108,20 +165,66 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     buy_options = "Yes" if iv_level in ("Low", "Medium") else "No"
 
     calendar = (raw.get("macro") or {}).get("economic_calendar") or []
-    catalyst_today = False
-    for event in calendar:
-        name = str(event.get("release_name") or "").lower()
-        if any(k in name for k in ("employment", "cpi", "pce", "fomc", "fed")):
-            catalyst_today = True
-            break
+    catalysts = _extract_catalysts(calendar)
+    catalyst_today = bool(catalysts)
+
+    stock_quotes = (raw.get("stocks") or {}).get("quotes") or {}
+    smh = sector_quotes.get("SMH") or {}
+    xlk = sector_quotes.get("XLK") or {}
+    nvda = stock_quotes.get("NVDA") or {}
 
     ai_score = 0
-    smh = sector_quotes.get("SMH") or {}
-    nvda = ((raw.get("stocks") or {}).get("quotes") or {}).get("NVDA") or {}
-    if _pct(smh) is not None and _pct(smh) > 0:
+    smh_pct = _pct(smh)
+    nvda_pct = _pct(nvda)
+    if smh_pct is not None and smh_pct > 0:
         ai_score += 1
-    if _pct(nvda) is not None and _pct(nvda) > 0:
+    if nvda_pct is not None and nvda_pct > 0:
         ai_score += 1
+
+    mag7_syms = ["NVDA", "MSFT", "AAPL", "AMZN", "META", "GOOGL", "TSLA"]
+    mag7_rows: list[dict[str, Any]] = []
+    for sym in mag7_syms:
+        q = stock_quotes.get(sym) or {}
+        pct = _pct(q)
+        if pct is None:
+            continue
+        mag7_rows.append({"symbol": sym, "change_pct": pct})
+    mag7_rows.sort(key=lambda r: r["change_pct"], reverse=True)
+    mag7_up = sum(1 for r in mag7_rows if r["change_pct"] > 0)
+    mag7_total = len(mag7_rows)
+    mag7_breadth = (mag7_up / mag7_total) if mag7_total else None
+    mag7_avg = (
+        sum(r["change_pct"] for r in mag7_rows) / mag7_total
+        if mag7_total
+        else None
+    )
+
+    ai_signals = 0
+    ai_signals += 1 if smh_pct is not None and smh_pct > 0 else -1 if smh_pct is not None and smh_pct < 0 else 0
+    ai_signals += 1 if nvda_pct is not None and nvda_pct > 0 else -1 if nvda_pct is not None and nvda_pct < 0 else 0
+    if mag7_breadth is not None:
+        if mag7_breadth >= 0.6:
+            ai_signals += 1
+        elif mag7_breadth <= 0.4:
+            ai_signals -= 1
+    if mag7_avg is not None:
+        if mag7_avg > 0.3:
+            ai_signals += 1
+        elif mag7_avg < -0.3:
+            ai_signals -= 1
+
+    if ai_signals >= 2:
+        ai_stance = "Bullish"
+    elif ai_signals <= -2:
+        ai_stance = "Bearish"
+    else:
+        ai_stance = "Neutral"
+
+    ai_leaders = [r for r in mag7_rows if r["change_pct"] > 0][:3]
+    ai_laggers = [r for r in reversed(mag7_rows) if r["change_pct"] < 0][:2]
+
+    def _fmt_row(r: dict[str, Any]) -> str:
+        return f"{r['symbol']} {r['change_pct']:+.2f}%"
 
     scores = {
         "Macro": 0,
@@ -178,6 +281,19 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             ),
             "scores": {},
         },
+        "P8": _build_p8(
+            ai_stance=ai_stance,
+            ai_signals=ai_signals,
+            smh_pct=smh_pct,
+            nvda_pct=nvda_pct,
+            xlk_pct=_pct(xlk),
+            mag7_rows=mag7_rows,
+            mag7_breadth=mag7_breadth,
+            mag7_avg=mag7_avg,
+            ai_leaders=ai_leaders,
+            ai_laggers=ai_laggers,
+            fmt_row=_fmt_row,
+        ),
         "P9": {
             "judgment": f"买期权：{buy_options} · 0DTE：{zero_dte}",
             "confidence": None,
@@ -199,16 +315,101 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             "total": total,
             "bias": bias,
         },
-        "P13": {
-            "judgment": f"Edge：{'YES' if catalyst_today else 'NO'}",
-            "confidence": 0.6 if catalyst_today else None,
-            "one_liner": (
-                "今日有重大宏观催化剂"
-                if catalyst_today
-                else "今天无 CPI/PCE/FOMC 等重大数据，无明显 Edge"
-            ),
-            "body_md": f"Do we have an edge today? {'YES' if catalyst_today else 'NO'}",
-            "scores": {},
-        },
+        "P13": _build_p13(catalysts),
     }
     return {"parts": parts, "scores": scores, "total": total, "bias": bias}
+
+
+def _build_p13(catalysts: list[dict[str, Any]]) -> dict[str, Any]:
+    if not catalysts:
+        return {
+            "judgment": "Edge：NO",
+            "confidence": None,
+            "one_liner": "今天无 CPI/PCE/FOMC 等重大数据，无明显 Edge",
+            "body_md": "- **Edge**：NO\n- **催化剂**：无重大宏观数据",
+            "catalysts": [],
+            "scores": {},
+        }
+
+    labels = [c["name"] for c in catalysts]
+    unique_labels: list[str] = []
+    seen: set[str] = set()
+    for lbl in labels:
+        if lbl not in seen:
+            seen.add(lbl)
+            unique_labels.append(lbl)
+
+    def _fmt_when(date_str: str | None) -> str:
+        return f" · {date_str}" if date_str else ""
+
+    body_lines = ["- **Edge**：YES", "- **今日催化剂**："]
+    for c in catalysts:
+        body_lines.append(f"  - {c['name']} — {c['release']}{_fmt_when(c.get('date'))}")
+
+    label_summary = "、".join(unique_labels)
+    one_liner = f"今日有 {label_summary} 等宏观催化剂"
+
+    return {
+        "judgment": f"Edge：YES · {label_summary}",
+        "confidence": 0.65,
+        "one_liner": one_liner,
+        "body_md": "\n".join(body_lines),
+        "catalysts": catalysts,
+        "scores": {},
+    }
+
+
+def _build_p8(
+    *,
+    ai_stance: str,
+    ai_signals: int,
+    smh_pct: float | None,
+    nvda_pct: float | None,
+    xlk_pct: float | None,
+    mag7_rows: list[dict[str, Any]],
+    mag7_breadth: float | None,
+    mag7_avg: float | None,
+    ai_leaders: list[dict[str, Any]],
+    ai_laggers: list[dict[str, Any]],
+    fmt_row,
+) -> dict[str, Any]:
+    def _pct_str(v: float | None) -> str:
+        return f"{v:+.2f}%" if v is not None else "N/A"
+
+    if mag7_rows:
+        leader_txt = "、".join(fmt_row(r) for r in ai_leaders) or "无领涨"
+        lagger_txt = "、".join(fmt_row(r) for r in ai_laggers) or "无明显拖累"
+    else:
+        leader_txt = lagger_txt = "数据缺失"
+
+    stance_hint = {
+        "Bullish": "AI 主题偏多",
+        "Bearish": "AI 主题偏空",
+        "Neutral": "AI 主题中性",
+    }[ai_stance]
+
+    one_liner = f"{stance_hint}：SMH {_pct_str(smh_pct)} · NVDA {_pct_str(nvda_pct)}"
+    body_lines = [
+        f"- **AI 判断**：{ai_stance}",
+        f"- **SMH 半导体**：{_pct_str(smh_pct)}",
+        f"- **XLK 科技**：{_pct_str(xlk_pct)}",
+        f"- **NVDA**：{_pct_str(nvda_pct)}",
+    ]
+    if mag7_rows:
+        breadth_pct = f"{(mag7_breadth or 0) * 100:.0f}%"
+        avg_pct = _pct_str(mag7_avg)
+        body_lines += [
+            f"- **Mag7 广度**：{breadth_pct} 上涨（均值 {avg_pct}）",
+            f"- **领涨**：{leader_txt}",
+            f"- **拖累**：{lagger_txt}",
+        ]
+    else:
+        body_lines.append("- **Mag7**：数据缺失")
+
+    return {
+        "judgment": f"AI 主题：{ai_stance}",
+        "confidence": 0.6 if mag7_rows else 0.4,
+        "one_liner": one_liner,
+        "body_md": "\n".join(body_lines),
+        "scores": {"ai_stance_signals": ai_signals},
+    }
