@@ -99,53 +99,101 @@
     </div>
     {% endif %}
 
-    <section class="panel hyp-accuracy-panel">
-      <h2 class="section-title-inline">P17 Hypothesis 命中率</h2>
-      {% if hypothesis_accuracy.sufficient %}
-      <div class="hyp-accuracy-summary">
-        <strong>{{ hypothesis_accuracy.accuracy_pct }}%</strong>
-        <span class="muted">（{{ hypothesis_accuracy.correct }}/{{ hypothesis_accuracy.total_labeled }} 日已标注 · 累计历史准确率）</span>
+    <section class="panel accuracy-metrics-panel">
+      <h2 class="section-title-inline">Agent 准确率</h2>
+      <div class="accuracy-metrics-grid">
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">Driver 命中率</h3>
+          <p class="muted accuracy-metric-desc">Morning P10 Driver vs S7 实际 Driver（模糊匹配）</p>
+          {% if driver_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ driver_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ driver_accuracy.correct }}/{{ driver_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="driverAccuracyChart" aria-label="Driver cumulative hit rate"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 S7 归因数据。</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">方向准确率</h3>
+          <p class="muted accuracy-metric-desc">Bias 方向 vs QQQ 日涨跌</p>
+          {% if directional_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ directional_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ directional_accuracy.correct }}/{{ directional_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="directionalAccuracyChart" aria-label="Directional cumulative accuracy"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 Bias + QQQ 行情。</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">P17 Hypothesis 命中率</h3>
+          <p class="muted accuracy-metric-desc">Hypothesis 验证结果</p>
+          {% if hypothesis_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ hypothesis_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ hypothesis_accuracy.correct }}/{{ hypothesis_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="hypAccuracyChart" aria-label="Hypothesis cumulative accuracy"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 P17 标注。</p>
+          </div>
+          {% endif %}
+        </div>
       </div>
-      <div class="chart-wrap">
-        <canvas id="hypAccuracyChart" aria-label="Hypothesis cumulative accuracy"></canvas>
-      </div>
+
+      {% if driver_accuracy.sufficient or directional_accuracy.sufficient or hypothesis_accuracy.sufficient %}
       <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
       <script>
         (function () {
-          const pts = {{ hypothesis_accuracy.points | tojson }};
-          const ctx = document.getElementById('hypAccuracyChart');
-          if (!ctx || !pts.length) return;
-          new Chart(ctx, {
-            type: 'line',
-            data: {
-              labels: pts.map(p => p.date),
-              datasets: [{
-                label: '累计准确率 %',
-                data: pts.map(p => p.cumulative_accuracy),
-                borderColor: '#2563eb',
-                backgroundColor: 'rgba(37, 99, 235, 0.12)',
-                fill: true,
-                tension: 0.25,
-                pointRadius: 3,
-              }]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              scales: {
-                y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
-                x: { ticks: { maxRotation: 45, minRotation: 45 } }
+          function lineChart(canvasId, pts, color, bgColor) {
+            const ctx = document.getElementById(canvasId);
+            if (!ctx || !pts.length) return;
+            new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: pts.map(p => p.date),
+                datasets: [{
+                  label: '累计准确率 %',
+                  data: pts.map(p => p.cumulative_accuracy),
+                  borderColor: color,
+                  backgroundColor: bgColor,
+                  fill: true,
+                  tension: 0.25,
+                  pointRadius: 2,
+                }]
               },
-              plugins: { legend: { display: false } }
-            }
-          });
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                  x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } }
+                },
+                plugins: { legend: { display: false } }
+              }
+            });
+          }
+          lineChart('driverAccuracyChart', {{ driver_accuracy.points | tojson }}, '#059669', 'rgba(5, 150, 105, 0.12)');
+          lineChart('directionalAccuracyChart', {{ directional_accuracy.points | tojson }}, '#d97706', 'rgba(217, 119, 6, 0.12)');
+          lineChart('hypAccuracyChart', {{ hypothesis_accuracy.points | tojson }}, '#2563eb', 'rgba(37, 99, 235, 0.12)');
         })();
       </script>
-      {% else %}
-      <div class="empty-state">
-        <p>Hypothesis 标注数据不足（需 ≥2 个交易日）。</p>
-        <p class="muted">完成 S7 Evening 或 <a href="/verify?date={{ day.trading_date }}">核对 P17</a> 后自动累计。</p>
-      </div>
       {% endif %}
     </section>
 

@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from src.schemas.market_case import FeaturesModel
+from src.utils.news_signals import extract_news_signals
 from src.utils.paths import raw_data_path
 from src.utils.trading_calendar import prior_trading_day, today_et
 
@@ -153,6 +154,8 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
                 up_count += 1
     breadth_proxy = (up_count / valid_count) if valid_count > 0 else None
 
+    news_signals = extract_news_signals(raw.get("news"))
+
     return FeaturesModel(
         dgs10=dgs10,
         vix=vix,
@@ -165,4 +168,5 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
         dxy_chg=dxy_chg,
         breadth_proxy=breadth_proxy,
         qqq_gap=qqq_gap,
+        **news_signals,
     )

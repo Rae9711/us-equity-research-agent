@@ -307,6 +307,29 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .rs-table td:first-child, .rs-table th:first-child { text-align: left; }
 
 .hyp-accuracy-panel { margin-top: 0; }
+.accuracy-metrics-panel { margin-top: 0; }
+.accuracy-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+.accuracy-metric-card {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: var(--panel-subtle, #fafafa);
+}
+.accuracy-metric-title {
+  margin: 0 0 0.15rem;
+  font-size: 0.95rem;
+}
+.accuracy-metric-desc {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+}
+.chart-wrap-sm { height: 160px; }
+.empty-state.compact { padding: 0.5rem 0; }
 .hyp-accuracy-summary {
   display: flex;
   align-items: baseline;

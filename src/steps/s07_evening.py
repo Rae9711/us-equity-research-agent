@@ -14,6 +14,7 @@ from src.db.market_case_service import load_case, save_case, update_case
 from src.engines.attribution import compute_attribution
 from src.features.build import build_features
 from src.steps.base import save_step_result
+from src.utils.driver_match import driver_match_level
 from src.utils.paths import morning_json_path, step_json_path
 from src.utils.trading_calendar import today_et
 
@@ -143,29 +144,14 @@ def _assess_hypothesis(
     actual_driver: str,
     morning_hypothesis: dict | None,
 ) -> str:
-    if not morning_driver:
-        return "N/A"
+    level = driver_match_level(morning_driver, actual_driver)
+    if level != "错":
+        return level
 
-    if actual_driver == "Unknown":
-        return "N/A"
-
-    morning_driver_lower = morning_driver.lower()
-    actual_lower = actual_driver.lower()
-
-    # Direct match
-    if any(kw in morning_driver_lower for kw in actual_lower.split("/")):
-        return "对"
-
-    # Partial match (e.g., morning said AI, actual was AI/Semi)
-    overlap_keywords = ["ai", "semiconductor", "macro", "employment", "bond", "fed", "risk"]
-    for kw in overlap_keywords:
-        if kw in morning_driver_lower and kw in actual_lower:
-            return "部分对"
-
-    # Regime-level partial match
     if morning_hypothesis and isinstance(morning_hypothesis, dict):
         statement = (morning_hypothesis.get("statement") or "").lower()
-        if any(kw in statement for kw in actual_lower.split("/")):
+        actual_lower = (actual_driver or "").lower()
+        if any(kw in statement for kw in actual_lower.replace("/", " ").split()):
             return "部分对"
 
     return "错"

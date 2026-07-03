@@ -30,14 +30,21 @@ fred:
 
 news:
   primary: polygon
-  polygon_broad_limit: 30
-  polygon_per_ticker_limit: 5
+  polygon_storage_limit: 60
+  polygon_llm_limit: 30
+  polygon_broad_limit: 40
+  polygon_per_ticker_limit: 8
+  rss_per_feed_limit: 8
+  rss_storage_limit: 15
   polygon_tickers:
     - SPY
     - QQQ
     - NVDA
     - MSFT
     - AAPL
+    - AMZN
+    - META
+    - GOOGL
     - TSLA
   rss:
     - url: https://feeds.bloomberg.com/markets/news.rss

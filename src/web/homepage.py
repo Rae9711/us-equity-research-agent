@@ -9,7 +9,8 @@ from typing import Any
 
 from src.db import ConclusionRecord, MarketCase
 from src.db.session import get_session
-from src.utils.paths import morning_json_path, raw_data_path, step_json_path
+from src.utils.paths import morning_json_path, raw_data_path, reports_dir, step_json_path
+from src.utils.driver_match import driver_hit
 
 # Driver keyword → tradable symbols (vs QQQ benchmark)
 DRIVER_SYMBOL_MAP: dict[str, list[str]] = {
@@ -302,6 +303,165 @@ def hypothesis_accuracy_series() -> dict[str, Any]:
             {
                 "date": date_str,
                 "label": label,
+                "cumulative_accuracy": round(cum_correct / cum_total * 100, 1),
+                "n": cum_total,
+            }
+        )
+
+    return {
+        "points": points,
+        "total_labeled": cum_total,
+        "accuracy_pct": round(cum_correct / cum_total * 100, 1) if cum_total else None,
+        "correct": cum_correct,
+        "sufficient": cum_total >= 2,
+    }
+
+
+def _actual_driver_for_date(date_str: str) -> str | None:
+    session = get_session()
+    try:
+        row = session.query(MarketCase).filter(MarketCase.date == date_str).first()
+        if row:
+            try:
+                data = json.loads(row.case_json)
+                actual = (data.get("labels") or {}).get("actual_driver")
+                if actual and actual not in ("", "N/A", "Unknown"):
+                    return actual
+            except Exception:
+                pass
+    finally:
+        session.close()
+
+    step7_path = step_json_path(7, date_str)
+    if step7_path.exists():
+        try:
+            s7 = json.loads(step7_path.read_text(encoding="utf-8"))
+            actual = s7.get("actual_driver") or (s7.get("extra") or {}).get("actual_driver")
+            if actual and actual not in ("", "N/A"):
+                return actual
+        except Exception:
+            pass
+    return None
+
+
+def _morning_p10_driver(date_str: str) -> str:
+    morning = load_morning(date_str)
+    if not morning:
+        return ""
+    p10 = (morning.get("parts") or {}).get("P10") or {}
+    return (p10.get("judgment") or p10.get("one_liner") or "").strip()
+
+
+def _labeled_trading_dates() -> list[str]:
+    session = get_session()
+    dates: set[str] = set()
+    try:
+        for row in session.query(MarketCase.date).all():
+            dates.add(row.date)
+        for row in session.query(ConclusionRecord.trading_date).filter(
+            ConclusionRecord.part_id == "S7",
+        ).all():
+            dates.add(row.trading_date.isoformat())
+    finally:
+        session.close()
+
+    for day_dir in reports_dir().iterdir():
+        if day_dir.is_dir() and (day_dir / "step7.json").exists():
+            dates.add(day_dir.name)
+    return sorted(dates)
+
+
+def driver_accuracy_series() -> dict[str, Any]:
+    """Cumulative P10 driver vs S7 actual_driver hit rate (fuzzy match)."""
+    points: list[dict[str, Any]] = []
+    cum_correct = 0
+    cum_total = 0
+
+    for date_str in _labeled_trading_dates():
+        actual = _actual_driver_for_date(date_str)
+        morning_driver = _morning_p10_driver(date_str)
+        if not actual or not morning_driver:
+            continue
+        hit = driver_hit(morning_driver, actual)
+        cum_total += 1
+        if hit:
+            cum_correct += 1
+        points.append(
+            {
+                "date": date_str,
+                "hit": hit,
+                "morning_driver": morning_driver[:80],
+                "actual_driver": actual,
+                "cumulative_accuracy": round(cum_correct / cum_total * 100, 1),
+                "n": cum_total,
+            }
+        )
+
+    return {
+        "points": points,
+        "total_labeled": cum_total,
+        "accuracy_pct": round(cum_correct / cum_total * 100, 1) if cum_total else None,
+        "correct": cum_correct,
+        "sufficient": cum_total >= 2,
+    }
+
+
+def _bias_direction(morning: dict[str, Any]) -> str | None:
+    bias = morning.get("bias")
+    if not bias:
+        parts = morning.get("parts") or {}
+        p11 = parts.get("P11") or {}
+        if p11.get("judgment"):
+            m = re.search(r"Bias[：:]\s*([^·]+)", p11["judgment"])
+            if m:
+                bias = m.group(1).strip()
+    if not bias:
+        return None
+    b = str(bias).lower()
+    if any(w in b for w in ("bull", "多")):
+        return "bull"
+    if any(w in b for w in ("bear", "空")):
+        return "bear"
+    return "neutral"
+
+
+def _qqq_chg_for_date(date_str: str) -> float | None:
+    raw_path = raw_data_path(date_str)
+    if not raw_path.exists():
+        return None
+    try:
+        raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    qqq_q = _quote_from_raw(raw, "QQQ")
+    return _change_pct(qqq_q)
+
+
+def directional_accuracy_series() -> dict[str, Any]:
+    """Morning bias direction vs QQQ day return."""
+    points: list[dict[str, Any]] = []
+    cum_correct = 0
+    cum_total = 0
+
+    for date_str in _labeled_trading_dates():
+        morning = load_morning(date_str)
+        if not morning:
+            continue
+        direction = _bias_direction(morning)
+        qqq_chg = _qqq_chg_for_date(date_str)
+        if direction is None or qqq_chg is None or direction == "neutral":
+            continue
+
+        correct = (direction == "bull" and qqq_chg > 0) or (direction == "bear" and qqq_chg < 0)
+        cum_total += 1
+        if correct:
+            cum_correct += 1
+        points.append(
+            {
+                "date": date_str,
+                "bias": direction,
+                "qqq_chg": round(qqq_chg, 2),
+                "correct": correct,
                 "cumulative_accuracy": round(cum_correct / cum_total * 100, 1),
                 "n": cum_total,
             }

@@ -42,7 +42,12 @@ def _check_ai_expansion(f: FeaturesModel, cond: dict) -> bool:
     if nvda_gte is not None and f.nvda_chg is not None:
         nvda_ok = f.nvda_chg >= nvda_gte
 
-    any_ok = smh_gt_qqq or nvda_ok
+    news_ai_ok = False
+    if f.news_ai_mentions is not None and f.news_ai_mentions >= 3:
+        bearish = f.news_bearish_ratio
+        news_ai_ok = bearish is None or bearish < 0.45
+
+    any_ok = smh_gt_qqq or nvda_ok or news_ai_ok
 
     vix_ok = True
     vix_lte = cond.get("vix_lte")
@@ -66,7 +71,12 @@ def _check_macro_fear(f: FeaturesModel, cond: dict) -> bool:
         if "dgs10_gte" in item and f.dgs10 is not None:
             dgs_ok = f.dgs10 >= item["dgs10_gte"]
 
-    any_ok = vix_ok or dgs_ok
+    news_macro_ok = False
+    if f.news_macro_mentions is not None and f.news_macro_mentions >= 3:
+        bearish = f.news_bearish_ratio
+        news_macro_ok = bearish is None or bearish >= 0.4
+
+    any_ok = vix_ok or dgs_ok or news_macro_ok
 
     qqq_ok = True
     qqq_lte = cond.get("qqq_chg_lte")

@@ -5,20 +5,38 @@ import logging
 from datetime import date
 from typing import Any
 
+from src.collectors.news import collect_intraday_news
 from src.llm.anthropic_client import AnthropicClient
 from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
 from src.utils.paths import morning_json_path, step_json_path
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import market_open_et, today_et
 
 logger = logging.getLogger(__name__)
 
 SYSTEM = """你是 Daily Trading OS 的 Step 3 Market Update Agent（10:00 ET）。
-根据 Morning Research、Step 2 Opening Report 与最新新闻，判断盘中 Driver 是否切换，并给出更新后的 Total 与置信度。
+根据 Morning Research、Step 2 Opening Report、开盘以来新闻（headlines_since_open），判断盘中 Driver 是否切换，并给出更新后的 Total 与置信度。
 输出 JSON：{"judgment":"...", "confidence":0.8, "one_liner":"...", "body_md":"..."}
 judgment 格式：Driver 变了吗：YES/NO · 若变，新 Driver：{词} · 新 Total：{±N}
 body_md 用 markdown 列表，含昨日→更新后 Score 表（若 Driver 未变可写 NO CHANGE）。
 """
+
+
+def _headlines_since_open(trading_date: date) -> list[dict[str, Any]]:
+    try:
+        bundle = collect_intraday_news(since=market_open_et(trading_date))
+        return [
+            {
+                "title": h.get("title"),
+                "ticker": h.get("ticker"),
+                "published_utc": h.get("published_utc"),
+                "sentiment": h.get("sentiment"),
+            }
+            for h in (bundle.get("polygon") or [])[:20]
+        ]
+    except Exception:
+        logger.exception("Intraday news collection failed")
+        return []
 
 
 def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
@@ -35,12 +53,15 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
     if s2_path.exists():
         s2 = json.loads(s2_path.read_text(encoding="utf-8"))
 
+    headlines_since_open = _headlines_since_open(trading_date)
+
     context = {
         "morning_bias": morning.get("bias"),
         "morning_total": morning.get("total_score"),
         "p10": (morning.get("parts") or {}).get("P10"),
         "s2_market": s2.get("market"),
         "s2_conclusion": s2.get("conclusion"),
+        "headlines_since_open": headlines_since_open,
     }
 
     conclusion: dict[str, Any]
@@ -82,5 +103,9 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
         job_id="market_update",
         conclusion=conclusion,
         body_md=body_md,
-        extra={"context": context},
+        extra={
+            "context": context,
+            "headlines_since_open": headlines_since_open,
+            "intraday_news_count": len(headlines_since_open),
+        },
     )

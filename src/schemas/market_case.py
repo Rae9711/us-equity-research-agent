@@ -20,6 +20,10 @@ class FeaturesModel(BaseModel):
     dxy_chg: Optional[float] = None
     breadth_proxy: Optional[float] = None
     qqq_gap: Optional[float] = None
+    news_headline_count: Optional[int] = None
+    news_bearish_ratio: Optional[float] = None
+    news_ai_mentions: Optional[int] = None
+    news_macro_mentions: Optional[int] = None
     model_config = {"extra": "allow"}
 
 

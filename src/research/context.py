@@ -2,32 +2,44 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _quote(raw: dict[str, Any], ticker: str) -> dict[str, Any]:
-    return (raw.get("market") or {}).get("quotes", {}).get(ticker) or {}
-
-
-def _sector_quotes(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return (raw.get("sector") or {}).get("quotes") or {}
-
-
-def _stock_quotes(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return (raw.get("stocks") or {}).get("quotes") or {}
+from src.collectors.config import load_symbols
 
 
 def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
     """Compact context for the LLM — avoids sending the full raw JSON."""
-    news_polygon = (raw.get("news") or {}).get("polygon") or []
-    headlines = [
-        {
-            "publisher": n.get("publisher"),
-            "title": n.get("title"),
-            "ticker": n.get("ticker"),
-            "published_utc": n.get("published_utc"),
-            "sentiment": n.get("sentiment"),
-        }
-        for n in news_polygon[:20]
-    ]
+    news_block = raw.get("news") or {}
+    news_polygon = news_block.get("polygon") or []
+    news_rss = news_block.get("rss") or []
+    llm_limit = int((load_symbols().get("news") or {}).get("polygon_llm_limit", 30))
+
+    headlines: list[dict[str, Any]] = []
+    seen_titles: set[str] = set()
+
+    def _add(item: dict[str, Any], source: str) -> None:
+        title = str(item.get("title") or "").strip()
+        if not title or title in seen_titles:
+            return
+        seen_titles.add(title)
+        headlines.append(
+            {
+                "source": source,
+                "publisher": item.get("publisher") or source,
+                "title": title,
+                "ticker": item.get("ticker"),
+                "published_utc": item.get("published_utc") or item.get("published"),
+                "sentiment": item.get("sentiment"),
+            }
+        )
+
+    for n in news_polygon:
+        _add(n, "polygon")
+        if len(headlines) >= llm_limit:
+            break
+    if len(headlines) < llm_limit:
+        for n in news_rss:
+            _add(n, str(n.get("source") or "rss"))
+            if len(headlines) >= llm_limit:
+                break
 
     macro_series = (raw.get("macro") or {}).get("series") or {}
     calendar = (raw.get("macro") or {}).get("economic_calendar") or []
@@ -78,7 +90,8 @@ def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
         },
         "sectors": sectors,
         "mag7": mag7,
-        "headlines": headlines,
+        "headlines": headlines[:llm_limit],
+        "headline_count": len(headlines),
         "options": {
             "source": options.get("source"),
             "put_call_ratio": options.get("put_call_ratio"),
@@ -86,3 +99,15 @@ def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
             "contracts_count": options.get("contracts_count"),
         },
     }
+
+
+def _quote(raw: dict[str, Any], ticker: str) -> dict[str, Any]:
+    return (raw.get("market") or {}).get("quotes", {}).get(ticker) or {}
+
+
+def _sector_quotes(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return (raw.get("sector") or {}).get("quotes") or {}
+
+
+def _stock_quotes(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return (raw.get("stocks") or {}).get("quotes") or {}

@@ -25,11 +25,19 @@ class PolygonClient:
     def prev_day_agg(self, ticker: str) -> dict[str, Any]:
         return self.get(f"/v2/aggs/ticker/{ticker}/prev")
 
-    def news(self, ticker: str, limit: int = 5) -> dict[str, Any]:
-        return self.get(
-            "/v2/reference/news",
-            {"ticker": ticker, "limit": limit, "order": "desc"},
-        )
+    def news(
+        self,
+        ticker: str | None = None,
+        limit: int = 5,
+        *,
+        published_gte: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit, "order": "desc"}
+        if ticker:
+            params["ticker"] = ticker
+        if published_gte:
+            params["published_utc.gte"] = published_gte
+        return self.get("/v2/reference/news", params)
 
     def options_snapshot(self, underlying: str) -> dict[str, Any]:
         return self.get(f"/v3/snapshot/options/{underlying}")

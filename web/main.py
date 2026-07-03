@@ -32,6 +32,8 @@ from src.web.conclusion_index import morning_index_from_parts, morning_index_fro
 from src.web.homepage import (
     build_decision_card,
     build_relative_strength,
+    directional_accuracy_series,
+    driver_accuracy_series,
     hypothesis_accuracy_series,
 )
 from src.web.verify_order import conclusion_sort_key, sort_conclusions
@@ -107,6 +109,8 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
     decision_card = build_decision_card(trading_date)
     hyp_accuracy = hypothesis_accuracy_series()
+    driver_accuracy = driver_accuracy_series()
+    directional_accuracy = directional_accuracy_series()
     rel_strength = None
     if decision_card:
         rel_strength = build_relative_strength(trading_date, decision_card["driver"])
@@ -120,6 +124,8 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
             "form_action": "/",
             "decision_card": decision_card,
             "hypothesis_accuracy": hyp_accuracy,
+            "driver_accuracy": driver_accuracy,
+            "directional_accuracy": directional_accuracy,
             "relative_strength": rel_strength,
         },
     )
