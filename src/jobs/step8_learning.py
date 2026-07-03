@@ -35,11 +35,15 @@ def run_step8_learning(trading_date: date | None = None) -> dict[str, Any]:
     attr_dict = case.attribution.model_dump() if case.attribution else {}
     from src.web.verify_learning import bayesian_driver_for_date
 
-    actual_driver, run_bayesian = bayesian_driver_for_date(
+    actual_driver, run_bayesian, bayesian_mode = bayesian_driver_for_date(
         trading_date,
         (case.labels.actual_driver or "Unknown") if case.labels else "Unknown",
     )
-    if run_bayesian:
+    if run_bayesian and bayesian_mode == "downweight":
+        from src.engines.bayesian import downweight_morning_driver
+
+        prior_weights, posterior_weights = downweight_morning_driver(actual_driver)
+    elif run_bayesian:
         prior_weights, posterior_weights = update_weights(attr_dict, actual_driver)
     else:
         prior_weights = load_weights()
