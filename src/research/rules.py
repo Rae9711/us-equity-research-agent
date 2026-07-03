@@ -60,6 +60,11 @@ def _extract_catalysts(calendar: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def catalysts_on_date(calendar: list[dict[str, Any]], target_date: str) -> list[dict[str, Any]]:
+    """Macro catalysts from economic_calendar scheduled on target_date."""
+    return [c for c in _extract_catalysts(calendar) if c.get("date") == target_date]
+
+
 def _pct(q: dict[str, Any]) -> float | None:
     v = q.get("change_pct")
     return float(v) if v is not None else None

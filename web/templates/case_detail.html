@@ -16,6 +16,48 @@
     {% include "_day_header.html" %}
     {% include "_step_nav.html" %}
 
+    {% if catalyst_status and catalyst_status.has_snapshot and catalyst_status.has_data %}
+    <section class="panel catalyst-panel case-catalyst-panel">
+      <div class="decision-card-head">
+        <h2 class="section-title-inline">当日催化剂</h2>
+        {% if catalyst_status.generated_at %}
+        <span class="muted catalyst-ts">快照 {{ catalyst_status.generated_at[:19] }}</span>
+        {% endif %}
+      </div>
+      {% if catalyst_status.has_data %}
+      <table class="data-table catalyst-table">
+        <thead>
+          <tr>
+            <th>事件</th>
+            <th>预定 (ET)</th>
+            <th>状态</th>
+            <th>实际值</th>
+            <th>Consensus</th>
+            <th>Surprise</th>
+            <th>市场反应</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in catalyst_status.rows %}
+          <tr class="catalyst-row {{ row.row_class }}">
+            <td><strong>{{ row.event }}</strong></td>
+            <td>{{ row.scheduled_et }}</td>
+            <td class="catalyst-status catalyst-{{ row.status }}">
+              {{ row.status_icon }}
+              {% if row.status_hint %}<span class="muted status-hint">{{ row.status_hint }}</span>{% endif %}
+            </td>
+            <td>{{ row.actual }}</td>
+            <td>{{ row.consensus }}</td>
+            <td class="surprise-cell {{ row.surprise_class }}">{{ row.surprise }}</td>
+            <td class="muted catalyst-impact">{{ row.market_impact }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
+    {% endif %}
+
     {% if case_data %}
     <div class="case-grid">
       <div class="panel case-card">

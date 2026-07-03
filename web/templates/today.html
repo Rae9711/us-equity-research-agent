@@ -19,6 +19,10 @@
 
     {% include "_conclusion_index.html" %}
 
+    {% if show_catalyst_block %}
+    {% include "_catalyst_panel.html" %}
+    {% endif %}
+
     {% if meta %}
     <div class="report-meta">
       <span class="badge {{ 'badge-ok' if meta.llm_used else 'badge-warn' }}">

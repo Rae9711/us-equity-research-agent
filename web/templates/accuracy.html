@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>准确率 · Daily Trading OS</title>
+  <link rel="stylesheet" href="/static/site.css" />
+</head>
+<body>
+  {% include "nav.html" %}
+  <div class="page-wrap">
+    <h1 class="page-title">Agent 准确率</h1>
+    <p class="muted">累计命中率 · Driver / 方向 / P17 Hypothesis</p>
+
+    <section class="panel accuracy-metrics-panel">
+      <div class="accuracy-metrics-grid">
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">Driver 命中率</h3>
+          <p class="muted accuracy-metric-desc">Morning P10 Driver vs S7 实际 Driver（模糊匹配）</p>
+          {% if driver_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ driver_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ driver_accuracy.correct }}/{{ driver_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="driverAccuracyChart" aria-label="Driver cumulative hit rate"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 S7 归因数据。</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">方向准确率</h3>
+          <p class="muted accuracy-metric-desc">Bias 方向 vs QQQ 日涨跌</p>
+          {% if directional_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ directional_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ directional_accuracy.correct }}/{{ directional_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="directionalAccuracyChart" aria-label="Directional cumulative accuracy"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 Bias + QQQ 行情。</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">P17 Hypothesis 命中率</h3>
+          <p class="muted accuracy-metric-desc">Hypothesis 验证结果</p>
+          {% if hypothesis_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ hypothesis_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ hypothesis_accuracy.correct }}/{{ hypothesis_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="hypAccuracyChart" aria-label="Hypothesis cumulative accuracy"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 P17 标注。</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if driver_accuracy.sufficient or directional_accuracy.sufficient or hypothesis_accuracy.sufficient %}
+      <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+      <script>
+        (function () {
+          function lineChart(canvasId, pts, color, bgColor) {
+            const ctx = document.getElementById(canvasId);
+            if (!ctx || !pts.length) return;
+            new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: pts.map(p => p.date),
+                datasets: [{
+                  label: '累计准确率 %',
+                  data: pts.map(p => p.cumulative_accuracy),
+                  borderColor: color,
+                  backgroundColor: bgColor,
+                  fill: true,
+                  tension: 0.25,
+                  pointRadius: 2,
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+                  x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 10 } } }
+                },
+                plugins: { legend: { display: false } }
+              }
+            });
+          }
+          lineChart('driverAccuracyChart', {{ driver_accuracy.points | tojson }}, '#059669', 'rgba(5, 150, 105, 0.12)');
+          lineChart('directionalAccuracyChart', {{ directional_accuracy.points | tojson }}, '#d97706', 'rgba(217, 119, 6, 0.12)');
+          lineChart('hypAccuracyChart', {{ hypothesis_accuracy.points | tojson }}, '#2563eb', 'rgba(37, 99, 235, 0.12)');
+        })();
+      </script>
+      {% endif %}
+    </section>
+
+    {% if stats and stats.verified > 0 %}
+    <div class="panel stats-bar">
+      <strong>结论核对准确率</strong> {{ stats.accuracy_pct }}%
+      <span class="muted">（{{ stats.correct }}/{{ stats.verified }} 已核对）</span>
+      <span class="muted"> · <a href="/verify">去核对</a></span>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

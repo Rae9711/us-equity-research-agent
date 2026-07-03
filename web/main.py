@@ -110,29 +110,34 @@ def health() -> JSONResponse:
 def index(request: Request, date: str | None = None) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
     decision_card = build_decision_card(trading_date)
-    hyp_accuracy = hypothesis_accuracy_series()
-    driver_accuracy = driver_accuracy_series()
-    directional_accuracy = directional_accuracy_series()
     rel_strength = None
     if decision_card:
         rel_strength = build_relative_strength(trading_date, decision_card["driver"])
-    catalyst_status = build_catalyst_status(trading_date)
-    breaking_signals = build_breaking_signals(trading_date)
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             **_page_context(trading_date),
             "active": "home",
-            "stats": global_accuracy(),
             "form_action": "/",
             "decision_card": decision_card,
-            "hypothesis_accuracy": hyp_accuracy,
-            "driver_accuracy": driver_accuracy,
-            "directional_accuracy": directional_accuracy,
             "relative_strength": rel_strength,
-            "catalyst_status": catalyst_status,
-            "breaking_signals": breaking_signals,
+        },
+    )
+
+
+@app.get("/accuracy", response_class=HTMLResponse, dependencies=_AUTH)
+def accuracy_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "accuracy.html",
+        {
+            "active": "accuracy",
+            "launch_date": launch_date().isoformat(),
+            "stats": global_accuracy(),
+            "hypothesis_accuracy": hypothesis_accuracy_series(),
+            "driver_accuracy": driver_accuracy_series(),
+            "directional_accuracy": directional_accuracy_series(),
         },
     )
 
@@ -370,6 +375,10 @@ def today_report(request: Request, date: str | None = None) -> HTMLResponse:
     else:
         index_rows = morning_index_from_records(conclusions)
 
+    catalyst_status = build_catalyst_status(trading_date)
+    breaking_signals = build_breaking_signals(trading_date)
+    show_catalyst_block = catalyst_status.get("show_section") or breaking_signals.get("has_signals")
+
     return templates.TemplateResponse(
         request,
         "today.html",
@@ -378,6 +387,9 @@ def today_report(request: Request, date: str | None = None) -> HTMLResponse:
             "report_html": report_html,
             "meta": meta,
             "index_rows": index_rows,
+            "catalyst_status": catalyst_status,
+            "breaking_signals": breaking_signals,
+            "show_catalyst_block": show_catalyst_block,
         },
     )
 
@@ -468,6 +480,8 @@ def case_detail_page(request: Request, trading_date: str) -> HTMLResponse:
             ai_pct = f"{attr.get('ai', 0) * 100:.0f}%"
             bond_pct = f"{attr.get('bond', 0) * 100:.0f}%"
 
+    catalyst_status = build_catalyst_status(trading_date)
+
     return templates.TemplateResponse(
         request,
         "case_detail.html",
@@ -477,6 +491,7 @@ def case_detail_page(request: Request, trading_date: str) -> HTMLResponse:
             "case_json": case_json,
             "ai_pct": ai_pct,
             "bond_pct": bond_pct,
+            "catalyst_status": catalyst_status,
         },
     )
 

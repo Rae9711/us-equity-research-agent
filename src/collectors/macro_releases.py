@@ -21,7 +21,8 @@ import yaml
 from pytz import timezone
 
 from src.collectors.fred_client import FredClient
-from src.utils.paths import data_root, raw_dir
+from src.research.rules import catalysts_on_date
+from src.utils.paths import data_root, morning_json_path, raw_data_path, raw_dir
 from src.utils.trading_calendar import today_et
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,73 @@ def load_macro_release_config() -> dict[str, Any]:
     data.setdefault("poll_offsets_min", [2, 5, 10])
     data.setdefault("observation_history", 6)
     return data
+
+
+# P13 catalyst short label → macro_releases.yaml event id(s)
+_CATALYST_LABEL_TO_EVENT_IDS: dict[str, list[str]] = {
+    "CPI": ["CPI"],
+    "PCE": ["PCE"],
+    "PPI": ["PPI"],
+    "Retail Sales": ["RETAIL_SALES"],
+    "NFP": ["NFP", "UNRATE"],
+    "GDP": ["GDP"],
+    "ISM Mfg": ["ISM_MFG"],
+    "JOLTS": ["JOLTS"],
+}
+
+
+def event_config_by_id(cfg: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Map event id → yaml config row."""
+    cfg = cfg or load_macro_release_config()
+    return {str(e.get("id")): e for e in cfg.get("events", []) if e.get("id")}
+
+
+def _catalysts_for_trading_date(trading_date: str) -> list[dict[str, Any]]:
+    """Scheduled macro catalysts for a date (economic_calendar or Morning P13)."""
+    catalysts: list[dict[str, Any]] = []
+    raw_path = raw_data_path(trading_date)
+    if raw_path.exists():
+        try:
+            raw = json.loads(raw_path.read_text(encoding="utf-8"))
+            calendar = (raw.get("macro") or {}).get("economic_calendar") or []
+            catalysts = catalysts_on_date(calendar, trading_date)
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not catalysts:
+        mpath = morning_json_path(trading_date)
+        if mpath.exists():
+            try:
+                morning = json.loads(mpath.read_text(encoding="utf-8"))
+                p13 = (morning.get("parts") or {}).get("P13") or {}
+                for c in p13.get("catalysts") or []:
+                    if c.get("date") in (None, trading_date):
+                        catalysts.append(c)
+            except Exception:  # noqa: BLE001
+                pass
+    return catalysts
+
+
+def scheduled_event_configs_for_date(
+    trading_date: date | str,
+    *,
+    cfg: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Yaml event configs scheduled on trading_date per P13 / economic calendar."""
+    if isinstance(trading_date, date):
+        trading_date = trading_date.isoformat()
+    cfg = cfg or load_macro_release_config()
+    by_id = event_config_by_id(cfg)
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+
+    for catalyst in _catalysts_for_trading_date(trading_date):
+        for event_id in _CATALYST_LABEL_TO_EVENT_IDS.get(catalyst.get("name") or "", []):
+            if event_id in seen or event_id not in by_id:
+                continue
+            seen.add(event_id)
+            out.append(by_id[event_id])
+    return out
 
 
 def _safe_float(value: Any) -> float | None:
@@ -204,13 +272,17 @@ def _status_for(release: dict[str, Any] | None, scheduled_et: str, target_date: 
 
 
 def check_todays_releases(target_date: date | None = None) -> list[dict[str, Any]]:
-    """遍历今日日历，返回每个事件的状态。"""
+    """遍历当日经济日历上的发布，返回每个事件的状态（非发布日返回空列表）。"""
     target_date = target_date or today_et()
     cfg = load_macro_release_config()
     history = int(cfg.get("observation_history", 6))
     results: list[dict[str, Any]] = []
 
-    for event in cfg.get("events", []):
+    events = scheduled_event_configs_for_date(target_date, cfg=cfg)
+    if not events:
+        return []
+
+    for event in events:
         release: dict[str, Any] | None = None
         try:
             release = fetch_release(event, target_date=target_date, history=history)

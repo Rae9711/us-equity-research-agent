@@ -10,7 +10,13 @@ from typing import Any
 from src.db import ConclusionRecord, MarketCase
 from src.db.session import get_session
 from src.utils.paths import morning_json_path, raw_data_path, reports_dir, step_json_path
-from src.collectors.macro_releases import load_releases, releases_file_path
+from src.collectors.macro_releases import (
+    event_config_by_id,
+    load_macro_release_config,
+    load_releases,
+    releases_file_path,
+    scheduled_event_configs_for_date,
+)
 from src.utils.news_signals import detect_high_signal_news
 from src.utils.driver_match import driver_hit
 
@@ -614,33 +620,91 @@ def _status_hint(status: str) -> str:
     return ""
 
 
+def _consensus_value(release: dict[str, Any], event_cfg: dict[str, Any]) -> float | None:
+    """Consensus from snapshot, else yaml consensus_default."""
+    raw = release.get("consensus")
+    if raw is not None:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    default = event_cfg.get("consensus_default")
+    if default in (None, "", "."):
+        return None
+    try:
+        return float(default)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_catalyst_status(trading_date: str) -> dict[str, Any]:
-    """今日催化剂状态表（L1 macro releases）。"""
+    """今日催化剂状态表（仅经济日历当日 scheduled 的宏观发布）。"""
+    cfg = load_macro_release_config()
+    by_id = event_config_by_id(cfg)
+    scheduled = scheduled_event_configs_for_date(trading_date, cfg=cfg)
+
     snap = load_releases(trading_date)
-    releases = list((snap or {}).get("releases") or [])
+    snap_releases = list((snap or {}).get("releases") or [])
+    snap_by_event = {str(r.get("event")): r for r in snap_releases if r.get("event")}
+
+    # Historical: releases.json may exist when calendar/raw is gone
+    if not scheduled and snap_releases:
+        seen: set[str] = set()
+        for r in snap_releases:
+            eid = str(r.get("event") or "")
+            if eid and eid in by_id and eid not in seen:
+                seen.add(eid)
+                scheduled.append(by_id[eid])
+
+    has_scheduled = bool(scheduled)
+    if not has_scheduled and not snap_releases:
+        return {
+            "rows": [],
+            "has_data": False,
+            "has_scheduled": False,
+            "show_section": False,
+            "has_snapshot": releases_file_path(trading_date).exists(),
+            "generated_at": None,
+            "counts": {},
+            "qqq_chg": _qqq_chg_for_date(trading_date),
+        }
 
     qqq_chg = _qqq_chg_for_date(trading_date)
     market_default = f"QQQ {qqq_chg:+.1f}%" if qqq_chg is not None else "—"
 
     rows: list[dict[str, Any]] = []
-    for r in releases:
+    for event_cfg in scheduled:
+        event_id = str(event_cfg.get("id"))
+        r = snap_by_event.get(event_id, {})
         status = str(r.get("status") or "waiting")
-        surprise = _surprise_display(r.get("surprise_pct"), r.get("direction"))
+        unit = r.get("unit") or event_cfg.get("unit")
+        consensus_num = _consensus_value(r, event_cfg)
+        actual_num = r.get("actual")
+        surprise_pct = r.get("surprise_pct")
+        if surprise_pct is None and actual_num is not None and consensus_num is not None:
+            try:
+                surprise_pct = round(
+                    (float(actual_num) - consensus_num) / abs(consensus_num) * 100, 2
+                )
+            except (TypeError, ValueError, ZeroDivisionError):
+                surprise_pct = None
+        direction = r.get("direction") or event_cfg.get("direction")
+        surprise = _surprise_display(surprise_pct, direction)
         row_class = surprise["class"] if r.get("surprise_flag") else ""
         rows.append(
             {
-                "event": r.get("label") or r.get("event"),
-                "scheduled_et": r.get("scheduled_et") or "—",
+                "event": r.get("label") or event_cfg.get("label") or event_id,
+                "scheduled_et": r.get("scheduled_et") or event_cfg.get("scheduled_et") or "—",
                 "status": status,
                 "status_icon": _status_icon(status),
                 "status_hint": _status_hint(status),
-                "actual": _format_release_value(r.get("actual"), r.get("unit")),
-                "consensus": _format_release_value(r.get("consensus"), r.get("unit")),
-                "prior": _format_release_value(r.get("prior"), r.get("unit")),
+                "actual": _format_release_value(actual_num, unit),
+                "consensus": _format_release_value(consensus_num, unit),
+                "prior": _format_release_value(r.get("prior"), unit),
                 "surprise": surprise["text"],
                 "surprise_class": surprise["class"],
                 "row_class": row_class,
-                "market_impact": r.get("market_impact") or market_default,
+                "market_impact": r.get("market_impact") or event_cfg.get("market_impact_default") or market_default,
                 "source": r.get("source"),
             }
         )
@@ -649,6 +713,8 @@ def build_catalyst_status(trading_date: str) -> dict[str, Any]:
     return {
         "rows": rows,
         "has_data": bool(rows),
+        "has_scheduled": has_scheduled,
+        "show_section": bool(rows),
         "has_snapshot": releases_file_path(trading_date).exists(),
         "generated_at": (snap or {}).get("generated_at"),
         "counts": counts,
