@@ -27,7 +27,7 @@ from src.steps.s06_afternoon import run_step6_afternoon
 from src.steps.s07_evening import run_step7_evening
 from src.jobs.step8_learning import run_step8_learning
 from src.runner.catchup import run_startup_catchup
-from src.utils.trading_calendar import is_trading_day, nyse_holiday, today_et
+from src.utils.trading_calendar import require_trading_day, today_et
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,17 +42,8 @@ def _placeholder_job(step_id: str) -> None:
     logger.info("Job %s — Phase 0 placeholder (not implemented yet)", step_id)
 
 
-def _skip_if_holiday(job_name: str) -> bool:
-    d = today_et()
-    if is_trading_day(d):
-        return False
-    label = nyse_holiday(d) or "non-trading day"
-    logger.info("Job %s skipped: NYSE closed (%s)", job_name, label)
-    return True
-
-
 def _collect_raw_job() -> None:
-    if _skip_if_holiday("collect_raw"):
+    if require_trading_day(job="collect_raw") is None:
         return
     logger.info("Job collect_raw — Step 0 data collection starting")
     try:
@@ -67,7 +58,7 @@ def _collect_raw_job() -> None:
 
 
 def _morning_research_job() -> None:
-    if _skip_if_holiday("morning_research"):
+    if require_trading_day(job="morning_research") is None:
         return
     logger.info("Job morning_research — Step 1 starting")
     try:
@@ -83,7 +74,7 @@ def _morning_research_job() -> None:
 
 
 def _open_report_job() -> None:
-    if _skip_if_holiday("open_report"):
+    if require_trading_day(job="open_report") is None:
         return
     logger.info("Job open_report — Step 2 starting")
     try:
@@ -94,7 +85,7 @@ def _open_report_job() -> None:
 
 
 def _market_update_job() -> None:
-    if _skip_if_holiday("market_update"):
+    if require_trading_day(job="market_update") is None:
         return
     logger.info("Job market_update — Step 3 starting")
     try:
@@ -105,7 +96,7 @@ def _market_update_job() -> None:
 
 
 def _trade_decision_job() -> None:
-    if _skip_if_holiday("trade_decision"):
+    if require_trading_day(job="trade_decision") is None:
         return
     logger.info("Job trade_decision — Step 4 starting")
     try:
@@ -116,7 +107,7 @@ def _trade_decision_job() -> None:
 
 
 def _midday_review_job() -> None:
-    if _skip_if_holiday("midday_review"):
+    if require_trading_day(job="midday_review") is None:
         return
     logger.info("Job midday_review — Step 5 starting")
     try:
@@ -127,7 +118,7 @@ def _midday_review_job() -> None:
 
 
 def _afternoon_review_job() -> None:
-    if _skip_if_holiday("afternoon_review"):
+    if require_trading_day(job="afternoon_review") is None:
         return
     logger.info("Job afternoon_review — Step 6 starting")
     try:
@@ -138,7 +129,7 @@ def _afternoon_review_job() -> None:
 
 
 def _evening_review_job() -> None:
-    if _skip_if_holiday("evening_review"):
+    if require_trading_day(job="evening_review") is None:
         return
     logger.info("Job evening_review — Step 7 starting")
     try:
@@ -149,7 +140,7 @@ def _evening_review_job() -> None:
 
 
 def _learning_job() -> None:
-    if _skip_if_holiday("learning"):
+    if require_trading_day(job="learning") is None:
         return
     logger.info("Job learning — Step 8 starting")
     try:
@@ -161,7 +152,7 @@ def _learning_job() -> None:
 
 def _macro_release_poll_job(slot: str) -> None:
     """L1 · 轮询该 slot 时段的宏观数据（+2/+5/+10 min 分别调用）。"""
-    if _skip_if_holiday(f"macro_release_poll[{slot}]"):
+    if require_trading_day(job=f"macro_release_poll[{slot}]") is None:
         return
     logger.info("Job macro_release_poll[%s] starting", slot)
     try:
@@ -180,6 +171,10 @@ def _macro_release_poll_job(slot: str) -> None:
 
 
 def _weekly_ml_job() -> None:
+    # Scheduled Sunday; skip only if misfired onto a weekday holiday.
+    d = today_et()
+    if d.weekday() < 5 and require_trading_day(d, job="weekly_ml") is None:
+        return
     logger.info("Job weekly_ml starting")
     try:
         from src.engines.ml.train import run_weekly_ml

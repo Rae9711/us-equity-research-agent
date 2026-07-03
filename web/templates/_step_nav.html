@@ -3,7 +3,7 @@
   {% for s in day.timeline %}
   <a
     href="/step/{{ s.num }}?date={{ day.trading_date }}"
-    class="step-nav-item {% if s.available %}done{% else %}pending{% endif %}{% if current_step is defined and current_step == s.num %} current{% endif %}"
+    class="step-nav-item {% if day.is_holiday %}holiday{% elif s.available %}done{% else %}pending{% endif %}{% if current_step is defined and current_step == s.num %} current{% endif %}"
     title="Step {{ s.num }} — {{ s.title }}"
   >
     <span class="step-nav-num">{{ s.num }}</span>

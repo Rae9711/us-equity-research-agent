@@ -8,7 +8,11 @@ from src.web.launch import launch_date, launch_label, trading_day_number
 from src.web.steps_status import steps_status
 
 
-def build_timeline(trading_date: str) -> list[dict]:
+def build_timeline(trading_date: str, *, is_holiday: bool | None = None) -> list[dict]:
+    d = date.fromisoformat(trading_date)
+    if is_holiday is None:
+        holiday = nyse_holiday(d)
+        is_holiday = holiday is not None or not is_trading_day(d)
     status = steps_status(trading_date)
     items = []
     for s in STEPS:
@@ -20,6 +24,7 @@ def build_timeline(trading_date: str) -> list[dict]:
                 "subtitle": s.subtitle,
                 "step_id": s.step_id,
                 "available": status.get(s.num, False),
+                "skipped_holiday": is_holiday,
                 "url": f"/step/{s.num}?date={trading_date}",
             }
         )
@@ -45,5 +50,5 @@ def day_summary(trading_date: str) -> dict:
         "steps_total": total,
         "progress_pct": 0 if is_holiday else (round(100 * done / total) if total else 0),
         "steps": status,
-        "timeline": build_timeline(trading_date),
+        "timeline": build_timeline(trading_date, is_holiday=is_holiday),
     }

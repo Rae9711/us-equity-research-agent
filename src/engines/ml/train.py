@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from src.db import TrainingRow, get_session
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import require_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,13 @@ def run_weekly_ml(reference_date: date | None = None) -> dict[str, Any]:
     If insufficient data, log and return graceful skip.
     """
     reference_date = reference_date or today_et()
+    # Weekly ML runs Sunday; skip only if misfired onto a weekday holiday.
+    if reference_date.weekday() < 5 and require_trading_day(reference_date, job="run_weekly_ml") is None:
+        return {
+            "status": "skipped",
+            "reason": "non_trading_day",
+            "reference_date": reference_date.isoformat(),
+        }
     date_str = reference_date.isoformat()
 
     rows = _load_training_rows()

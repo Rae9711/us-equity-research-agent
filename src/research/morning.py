@@ -17,7 +17,7 @@ from src.research.parts_meta import PART_ORDER
 from src.research.report import render_morning_report
 from src.research.rules import compute_rule_parts
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path
-from src.utils.trading_calendar import ET, today_et
+from src.utils.trading_calendar import ET, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,10 @@ def run_morning_research(
     *,
     skip_llm: bool = False,
 ) -> dict[str, Any]:
-    trading_date = trading_date or today_et()
+    d = require_trading_day(trading_date, job="run_morning_research")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Morning research starting for %s", date_str)
 

@@ -16,7 +16,7 @@ from src.collectors.stocks import collect_stocks
 from src.db import ConclusionRecord, DailyRun
 from src.db.session import get_session
 from src.utils.paths import raw_data_path
-from src.utils.trading_calendar import ET, prior_trading_day, prior_close_utc_iso, today_et
+from src.utils.trading_calendar import ET, prior_trading_day, prior_close_utc_iso, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,9 @@ def _persist_run(payload: dict[str, Any]) -> None:
 
 
 def run_step0(trading_date: date | None = None) -> dict[str, Any]:
-    payload = collect_step0(trading_date)
+    d = require_trading_day(trading_date, job="run_step0")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    payload = collect_step0(d)
     _persist_run(payload)
     return payload

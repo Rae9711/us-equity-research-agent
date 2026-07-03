@@ -8,7 +8,7 @@ from typing import Any
 from src.steps.base import save_step_result
 from src.research.format_body import normalize_body_md
 from src.utils.paths import morning_json_path, step_json_path
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,10 @@ def _load_ev_inputs(morning: dict, date_str: str) -> dict:
 
 
 def run_step4_trade_decision(trading_date: date | None = None) -> dict[str, Any]:
-    trading_date = trading_date or today_et()
+    d = require_trading_day(trading_date, job="run_step4_trade_decision")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 4 trade decision for %s", date_str)
 

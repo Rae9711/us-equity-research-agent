@@ -111,16 +111,18 @@
       </div>
     </div>
 
-    <h2 class="section-title">今日流程 · 点任意 Step 查看报告</h2>
+    <h2 class="section-title">{% if day.is_holiday %}休市日 · 无 Step 运行{% else %}今日流程 · 点任意 Step 查看报告{% endif %}</h2>
     <div class="timeline">
       {% for s in day.timeline %}
-      <a class="timeline-item {% if s.available %}done{% else %}pending{% endif %}" href="{{ s.url }}">
+      <a class="timeline-item {% if day.is_holiday %}holiday{% elif s.available %}done{% else %}pending{% endif %}" href="{{ s.url }}">
         <div class="timeline-time">{{ s.time }} ET</div>
         <div class="timeline-body">
           <div class="timeline-title">Step {{ s.num }} — {{ s.title }}</div>
           <div class="timeline-sub">{{ s.subtitle }}</div>
           <div class="timeline-status">
-            {% if s.available %}
+            {% if day.is_holiday %}
+            <span class="badge badge-muted">休市 · 已跳过</span>
+            {% elif s.available %}
             <span class="badge badge-ok">已生成</span>
             <span class="muted">查看报告 →</span>
             {% else %}

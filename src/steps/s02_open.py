@@ -10,7 +10,7 @@ import yfinance as yf
 from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
 from src.utils.paths import morning_json_path, raw_data_path
-from src.utils.trading_calendar import prior_trading_day, today_et
+from src.utils.trading_calendar import prior_trading_day, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,10 @@ def _classify_open(
 
 
 def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
-    trading_date = trading_date or today_et()
+    d = require_trading_day(trading_date, job="run_step2_open")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    trading_date = d
     logger.info("Step 2 Open report for %s", trading_date)
 
     raw, prior_raw = _load_raw(trading_date)

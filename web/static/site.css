@@ -191,6 +191,9 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 
 .timeline-item.done { border-left: 4px solid #22c55e; }
 .timeline-item.pending { border-left: 4px solid #e2e8f0; opacity: 0.92; }
+.timeline-item.holiday { border-left: 4px solid #cbd5e1; opacity: 0.75; pointer-events: none; cursor: default; }
+
+.step-nav-item.holiday { opacity: 0.55; }
 
 .timeline-time {
   font-size: 0.82rem;

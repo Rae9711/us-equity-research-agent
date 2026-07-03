@@ -13,13 +13,16 @@ from typing import Any
 from src.db.market_case_service import update_case
 from src.steps.base import save_step_result
 from src.utils.paths import morning_json_path, step_json_path
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
 
 def run_step5_midday(trading_date: date | None = None) -> dict[str, Any]:
-    trading_date = trading_date or today_et()
+    d = require_trading_day(trading_date, job="run_step5_midday")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 5 Midday Review for %s", date_str)
 

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from pytz import timezone
+
+logger = logging.getLogger(__name__)
 
 ET = timezone("America/New_York")
 UTC = timezone("UTC")
@@ -62,6 +66,32 @@ def is_trading_day(d: date | None = None) -> bool:
     if d.weekday() >= 5:
         return False
     return not is_nyse_holiday(d)
+
+
+def require_trading_day(d: date | None = None, *, job: str = "job") -> date | None:
+    """Return resolved date if NYSE is open; log skip and return None if closed."""
+    resolved = d or today_et()
+    if is_trading_day(resolved):
+        return resolved
+    label = nyse_holiday(resolved) or "weekend"
+    logger.info("%s skipped: NYSE closed (%s, %s)", job, resolved.isoformat(), label)
+    return None
+
+
+def skipped_non_trading_day(d: date | None = None) -> dict[str, Any]:
+    """Standard early-return payload for step jobs on closed days."""
+    resolved = d or today_et()
+    label = nyse_holiday(resolved) or "weekend"
+    return {
+        "skipped": True,
+        "reason": "non_trading_day",
+        "trading_date": resolved.isoformat(),
+        "holiday_label": label,
+        "conclusion": {
+            "judgment": "SKIP",
+            "one_liner": f"NYSE closed — {label}",
+        },
+    }
 
 
 def today_et() -> date:

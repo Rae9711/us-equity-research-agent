@@ -24,7 +24,7 @@ from src.collectors.fred_client import FredClient
 from src.collectors.release_market_reaction import compute_measured_reaction
 from src.research.rules import catalysts_on_date
 from src.utils.paths import data_root, morning_json_path, raw_data_path, raw_dir
-from src.utils.trading_calendar import today_et
+from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -438,7 +438,10 @@ def persist_releases(
 
     Idempotent：多次调用只会覆盖当日快照。
     """
-    trading_date = trading_date or today_et()
+    d = require_trading_day(trading_date, job="persist_releases")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    trading_date = d
     releases = releases if releases is not None else check_todays_releases(trading_date)
 
     payload = {

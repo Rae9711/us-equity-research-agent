@@ -12,7 +12,7 @@ from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
 from src.utils.news_signals import detect_high_signal_news, summarize_signals
 from src.utils.paths import morning_json_path, step_json_path
-from src.utils.trading_calendar import market_open_et, today_et
+from src.utils.trading_calendar import market_open_et, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,10 @@ def _surprise_attention(releases: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
-    trading_date = trading_date or today_et()
+    d = require_trading_day(trading_date, job="run_step3_market_update")
+    if d is None:
+        return skipped_non_trading_day(trading_date)
+    trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 3 market update for %s", date_str)
 
