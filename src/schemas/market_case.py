@@ -52,6 +52,8 @@ class AttributionModel(BaseModel):
 
 class LabelsModel(BaseModel):
     actual_driver: Optional[str] = None
+    agent_driver: Optional[str] = None  # Morning P10 driver judgment
+    corrected_driver_from_verify: Optional[str] = None  # User-corrected via /verify P10
     driver_splits: dict[str, float] = Field(default_factory=dict)
     hypothesis_correct: Optional[str] = None  # 对 | 错 | 部分对
     scenario_primary: Optional[str] = None  # A | B | C — morning P15 pick

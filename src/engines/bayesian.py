@@ -27,10 +27,13 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 
 _DRIVER_MAP = {
     "AI/Semiconductor": "AI",
+    "AI Chip Selloff": "AI",
     "Bond/Rates": "Bond",
     "Oil/Geo": "Oil",
     "Macro": "Macro",
     "Employment": "Macro",
+    "NFP": "Macro",
+    "NFP + AI Chip Selloff": "Macro",
     "Fed": "Macro",
     "Risk Appetite": "Risk",
     "Unknown": None,
@@ -61,6 +64,67 @@ def save_weights(weights: dict[str, float]) -> None:
     p.write_text(json.dumps(weights, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _resolve_canonical_driver(actual_driver: str) -> str | None:
+    """Map free-text or composite driver labels to Bayesian bucket."""
+    if not actual_driver or actual_driver == "Unknown":
+        return None
+    if actual_driver in _DRIVER_MAP:
+        return _DRIVER_MAP[actual_driver]
+
+    lower = actual_driver.lower()
+    if "chip" in lower or "semi" in lower or "nvda" in lower:
+        return "AI"
+    if "nfp" in lower or "employment" in lower or "payroll" in lower:
+        return "Macro"
+    if "bond" in lower or "rate" in lower or "yield" in lower or "fed" in lower:
+        return "Bond"
+    if "oil" in lower or "energy" in lower or "geo" in lower:
+        return "Oil"
+    if "macro" in lower or "cpi" in lower or "inflation" in lower:
+        return "Macro"
+    if "risk" in lower or "liquidity" in lower:
+        return "Risk"
+    return None
+
+
+def downweight_morning_driver(morning_driver: str, factor: float = 0.88) -> tuple[dict[str, float], dict[str, float]]:
+    """
+    Reduce weight on the morning driver's Bayesian bucket without confirming another driver.
+
+    Used when verify marks S7 wrong but P10 is only partially correct.
+    """
+    prior = load_weights()
+    canonical = _resolve_canonical_driver(morning_driver)
+    if canonical is None or canonical not in prior:
+        logger.info(
+            "Cannot down-weight unknown morning driver '%s' — keeping prior",
+            morning_driver,
+        )
+        return prior, prior
+
+    posterior = dict(prior)
+    reduced = posterior[canonical] * factor
+    removed = posterior[canonical] - reduced
+    posterior[canonical] = round(reduced, 6)
+    others = [k for k in posterior if k != canonical]
+    if others and removed > 0:
+        share = removed / len(others)
+        for key in others:
+            posterior[key] = round(posterior[key] + share, 6)
+
+    total = sum(posterior.values())
+    posterior = {k: round(v / total, 4) for k, v in posterior.items()}
+    save_weights(posterior)
+    logger.info(
+        "Bayesian down-weight: %s × %.2f prior=%s posterior=%s",
+        canonical,
+        factor,
+        {k: f"{v:.3f}" for k, v in prior.items()},
+        {k: f"{v:.3f}" for k, v in posterior.items()},
+    )
+    return prior, posterior
+
+
 def update_weights(
     attribution: dict[str, float],
     actual_driver: str,
@@ -72,7 +136,7 @@ def update_weights(
     """
     prior = load_weights()
 
-    canonical_driver = _DRIVER_MAP.get(actual_driver)
+    canonical_driver = _resolve_canonical_driver(actual_driver)
     if canonical_driver is None:
         logger.info("Unknown driver '%s', skipping Bayesian update", actual_driver)
         return prior, prior
