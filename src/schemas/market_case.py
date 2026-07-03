@@ -52,6 +52,9 @@ class AttributionModel(BaseModel):
 class LabelsModel(BaseModel):
     actual_driver: Optional[str] = None
     hypothesis_correct: Optional[str] = None  # 对 | 错 | 部分对
+    scenario_primary: Optional[str] = None  # A | B | C — morning P15 pick
+    scenario_actual: Optional[str] = None  # A | B | C | none
+    scenario_correct: Optional[bool] = None
 
 
 class MarketCaseModel(BaseModel):

@@ -15,7 +15,8 @@ from src.engines.attribution import compute_attribution
 from src.features.build import build_features
 from src.steps.base import save_step_result
 from src.utils.driver_match import driver_match_level
-from src.utils.paths import morning_json_path, step_json_path
+from src.utils.paths import morning_json_path, raw_data_path, step_json_path
+from src.utils.scenario_match import assess_scenarios
 from src.utils.trading_calendar import today_et
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,21 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         actual_driver=actual_driver,
         morning_hypothesis=morning_hypothesis,
     )
+
+    p15 = (morning.get("parts") or {}).get("P15") or {}
+    raw: dict[str, Any] = {}
+    raw_path = raw_data_path(date_str)
+    if raw_path.exists():
+        raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    scenario_result = assess_scenarios(
+        p15_judgment=p15.get("judgment") or "",
+        p15_body=p15.get("body_md") or "",
+        features=features,
+        raw=raw,
+    )
+    scenario_primary = scenario_result["scenario_primary"]
+    scenario_actual = scenario_result["scenario_actual"]
+    scenario_correct = scenario_result["scenario_correct"]
 
     # Load S4 for trade decision outcome
     s4: dict[str, Any] = {}
@@ -77,6 +93,13 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         f"- **Actual: {actual_driver}**",
         f"- Hypothesis result: **{hypothesis_correct}**",
         "",
+        "### 7.2b Scenario (P15)",
+        "",
+        f"- Morning primary: **{scenario_primary or 'N/A'}**",
+        f"- Actual played out: **{scenario_actual}**",
+        f"- Scenario hit: **{'✓' if scenario_correct else '✗'}**",
+        f"- Scores: {scenario_result.get('scenario_scores') or {}}",
+        "",
         "### 7.3 Surprise",
         "",
         f"- {surprise_hint}",
@@ -87,17 +110,22 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         f"|-------|-------|",
         f"| Today's Driver | {actual_driver} |",
         f"| Hypothesis | {hyp_id} · {hypothesis_correct} |",
+        f"| Scenario (P15) | 预测 {scenario_primary or 'N/A'} → 实际 {scenario_actual} · {'命中' if scenario_correct else '未命中'} |",
         f"| Attribution | {attr_summary} |",
         f"| Surprise | {surprise_hint} |",
         f"| Trade Decision | {'Trade' if should_trade else 'No Trade'} |",
     ]
 
+    scenario_hit = "命中" if scenario_correct else "未命中"
     judgment = (
         f"真正 Driver：{actual_driver} · "
         f"Attribution：AI {attr.ai:.0%} · Bond {attr.bond:.0%} · "
-        f"Hypothesis：{hypothesis_correct}"
+        f"Hypothesis：{hypothesis_correct} · "
+        f"Scenario {scenario_primary or '?'}→{scenario_actual} {scenario_hit}"
     )
-    one_liner = f"{actual_driver} 主导；Hypothesis {hypothesis_correct}"
+    one_liner = (
+        f"{actual_driver} 主导；Scenario {scenario_primary or '?'}→{scenario_actual} {scenario_hit}"
+    )
 
     conclusion = {
         "part_id": "S7",
@@ -118,6 +146,10 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
             "actual_driver": actual_driver,
             "hypothesis_correct": hypothesis_correct,
             "surprise": surprise_hint,
+            "scenario_primary": scenario_primary,
+            "scenario_actual": scenario_actual,
+            "scenario_correct": scenario_correct,
+            "scenario_scores": scenario_result.get("scenario_scores"),
         },
     )
 
@@ -128,6 +160,9 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         "labels": {
             "actual_driver": actual_driver,
             "hypothesis_correct": hypothesis_correct,
+            "scenario_primary": scenario_primary,
+            "scenario_actual": scenario_actual,
+            "scenario_correct": scenario_correct,
         },
         "surprise": surprise_hint,
         "intraday": {

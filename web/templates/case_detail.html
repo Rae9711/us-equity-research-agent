@@ -75,6 +75,9 @@
         <dl class="kv">
           <dt>真正 Driver</dt><dd>{{ (case_data.labels or {}).get('actual_driver', '—') }}</dd>
           <dt>Hypothesis 结果</dt><dd>{{ (case_data.labels or {}).get('hypothesis_correct', '—') }}</dd>
+          <dt>Scenario 预测</dt><dd>{{ (case_data.labels or {}).get('scenario_primary', '—') }}</dd>
+          <dt>Scenario 实际</dt><dd>{{ (case_data.labels or {}).get('scenario_actual', '—') }}</dd>
+          <dt>Scenario 命中</dt><dd>{% if (case_data.labels or {}).get('scenario_correct') is sameas true %}✓{% elif (case_data.labels or {}).get('scenario_correct') is sameas false %}✗{% else %}—{% endif %}</dd>
           <dt>AI 贡献</dt><dd>{{ ai_pct }}</dd>
           <dt>Bond</dt><dd>{{ bond_pct }}</dd>
         </dl>

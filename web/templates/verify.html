@@ -55,6 +55,16 @@
           <div class="agent-row"><span class="label">判断</span><span>{{ r.judgment }}</span></div>
           <div class="agent-row"><span class="label">置信度</span><span>{% if r.confidence is not none %}{{ (r.confidence * 100)|round|int }}%{% else %}N/A{% endif %}</span></div>
           <div class="agent-row"><span class="label">一句话</span><span>{{ r.one_liner }}</span></div>
+          {% if r.part_id == 'P15' and scenario_labels %}
+          <div class="agent-row scenario-auto-hint">
+            <span class="label">S7 自动</span>
+            <span>
+              预测 {{ scenario_labels.scenario_primary or '—' }} → 实际 {{ scenario_labels.scenario_actual or '—' }}
+              {% if scenario_labels.scenario_correct is sameas true %}· <strong class="hit-ok">命中</strong>{% elif scenario_labels.scenario_correct is sameas false %}· <strong class="hit-miss">未命中</strong>{% endif %}
+              <span class="muted">（规则检测，可在下方覆盖核对）</span>
+            </span>
+          </div>
+          {% endif %}
         </div>
 
         <div class="user-fields">

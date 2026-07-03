@@ -10,7 +10,7 @@
   {% include "nav.html" %}
   <div class="page-wrap">
     <h1 class="page-title">Agent 准确率</h1>
-    <p class="muted">累计命中率 · Driver / 方向 / P17 Hypothesis</p>
+    <p class="muted">累计命中率 · Driver / 方向 / P17 Hypothesis / P15 Scenario</p>
 
     <section class="panel accuracy-metrics-panel">
       <div class="accuracy-metrics-grid">
@@ -67,9 +67,26 @@
           </div>
           {% endif %}
         </div>
+        <div class="accuracy-metric-card">
+          <h3 class="accuracy-metric-title">P15 Scenario 命中率</h3>
+          <p class="muted accuracy-metric-desc">Morning 最可能 Scenario vs S7 实际演绎（自动检测）</p>
+          {% if scenario_accuracy.sufficient %}
+          <div class="hyp-accuracy-summary">
+            <strong>{{ scenario_accuracy.accuracy_pct }}%</strong>
+            <span class="muted">（{{ scenario_accuracy.correct }}/{{ scenario_accuracy.total_labeled }} 日 · 累计）</span>
+          </div>
+          <div class="chart-wrap chart-wrap-sm">
+            <canvas id="scenarioAccuracyChart" aria-label="Scenario cumulative hit rate"></canvas>
+          </div>
+          {% else %}
+          <div class="empty-state compact">
+            <p class="muted">需 ≥2 日 S7 Scenario 标注。</p>
+          </div>
+          {% endif %}
+        </div>
       </div>
 
-      {% if driver_accuracy.sufficient or directional_accuracy.sufficient or hypothesis_accuracy.sufficient %}
+      {% if driver_accuracy.sufficient or directional_accuracy.sufficient or hypothesis_accuracy.sufficient or scenario_accuracy.sufficient %}
       <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
       <script>
         (function () {
@@ -104,6 +121,7 @@
           lineChart('driverAccuracyChart', {{ driver_accuracy.points | tojson }}, '#059669', 'rgba(5, 150, 105, 0.12)');
           lineChart('directionalAccuracyChart', {{ directional_accuracy.points | tojson }}, '#d97706', 'rgba(217, 119, 6, 0.12)');
           lineChart('hypAccuracyChart', {{ hypothesis_accuracy.points | tojson }}, '#2563eb', 'rgba(37, 99, 235, 0.12)');
+          lineChart('scenarioAccuracyChart', {{ scenario_accuracy.points | tojson }}, '#7c3aed', 'rgba(124, 58, 237, 0.12)');
         })();
       </script>
       {% endif %}

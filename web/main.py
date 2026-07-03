@@ -37,6 +37,8 @@ from src.web.homepage import (
     directional_accuracy_series,
     driver_accuracy_series,
     hypothesis_accuracy_series,
+    scenario_accuracy_series,
+    _scenario_labels_for_date,
 )
 from src.web.verify_order import conclusion_sort_key, sort_conclusions
 from src.web.verify_service import VerifyItem, VerifyPayload, save_verifications
@@ -138,6 +140,7 @@ def accuracy_page(request: Request) -> HTMLResponse:
             "hypothesis_accuracy": hypothesis_accuracy_series(),
             "driver_accuracy": driver_accuracy_series(),
             "directional_accuracy": directional_accuracy_series(),
+            "scenario_accuracy": scenario_accuracy_series(),
         },
     )
 
@@ -181,6 +184,7 @@ def verify_form(
     trading_date = date or today_et().isoformat()
     rows = _load_conclusions(trading_date)
     day_stats = accuracy_for_date(date_type.fromisoformat(trading_date))
+    scenario_labels = _scenario_labels_for_date(trading_date)
 
     return templates.TemplateResponse(
         request,
@@ -194,6 +198,7 @@ def verify_form(
             "part_about": unified_about,
             "saved": saved == 1,
             "day_stats": day_stats,
+            "scenario_labels": scenario_labels,
         },
     )
 

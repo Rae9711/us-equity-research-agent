@@ -418,6 +418,76 @@ def driver_accuracy_series() -> dict[str, Any]:
     }
 
 
+def _scenario_labels_for_date(date_str: str) -> dict[str, Any] | None:
+    session = get_session()
+    try:
+        row = session.query(MarketCase).filter(MarketCase.date == date_str).first()
+        if row:
+            try:
+                data = json.loads(row.case_json)
+                labels = data.get("labels") or {}
+                if labels.get("scenario_actual") is not None:
+                    return labels
+            except Exception:
+                pass
+    finally:
+        session.close()
+
+    step7_path = step_json_path(7, date_str)
+    if step7_path.exists():
+        try:
+            s7 = json.loads(step7_path.read_text(encoding="utf-8"))
+            extra = s7.get("extra") or {}
+            if extra.get("scenario_actual") is not None or s7.get("scenario_actual") is not None:
+                return {
+                    "scenario_primary": extra.get("scenario_primary") or s7.get("scenario_primary"),
+                    "scenario_actual": extra.get("scenario_actual") or s7.get("scenario_actual"),
+                    "scenario_correct": extra.get("scenario_correct", s7.get("scenario_correct")),
+                }
+        except Exception:
+            pass
+    return None
+
+
+def scenario_accuracy_series() -> dict[str, Any]:
+    """Cumulative P15 primary scenario vs S7 actual scenario hit rate."""
+    points: list[dict[str, Any]] = []
+    cum_correct = 0
+    cum_total = 0
+
+    for date_str in _labeled_trading_dates():
+        labels = _scenario_labels_for_date(date_str)
+        if not labels:
+            continue
+        primary = labels.get("scenario_primary")
+        actual = labels.get("scenario_actual")
+        correct = labels.get("scenario_correct")
+        if primary is None or actual is None or actual == "none":
+            continue
+        cum_total += 1
+        hit = bool(correct)
+        if hit:
+            cum_correct += 1
+        points.append(
+            {
+                "date": date_str,
+                "hit": hit,
+                "scenario_primary": primary,
+                "scenario_actual": actual,
+                "cumulative_accuracy": round(cum_correct / cum_total * 100, 1),
+                "n": cum_total,
+            }
+        )
+
+    return {
+        "points": points,
+        "total_labeled": cum_total,
+        "accuracy_pct": round(cum_correct / cum_total * 100, 1) if cum_total else None,
+        "correct": cum_correct,
+        "sufficient": cum_total >= 2,
+    }
+
+
 def _bias_direction(morning: dict[str, Any]) -> str | None:
     bias = morning.get("bias")
     if not bias:
