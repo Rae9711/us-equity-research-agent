@@ -17,6 +17,10 @@ from src.collectors.macro_releases import (
     releases_file_path,
     scheduled_event_configs_for_date,
 )
+from src.collectors.release_market_reaction import (
+    compute_measured_reaction,
+    format_measured_reaction,
+)
 from src.utils.news_signals import detect_high_signal_news
 from src.utils.driver_match import driver_hit
 
@@ -637,20 +641,24 @@ def _consensus_value(release: dict[str, Any], event_cfg: dict[str, Any]) -> floa
         return None
 
 
-def _format_measured_reaction(reaction: dict[str, Any] | None) -> str:
+def _measured_reaction_display(
+    trading_date: str,
+    scheduled_et: str,
+    status: str,
+    snapshot_reaction: dict[str, Any] | None,
+) -> str:
+    if status != "released" or scheduled_et == "—":
+        return "—"
+    reaction = snapshot_reaction
     if not reaction:
-        return "—"
-    parts: list[str] = []
-    for sym in ("QQQ", "SMH"):
-        val = reaction.get(sym)
-        if val:
-            parts.append(f"{sym} {val}")
-    if not parts:
-        return "—"
-    text = " · ".join(parts)
-    if reaction.get("source") == "daily":
-        return f"{text} (日涨跌)"
-    return text
+        try:
+            reaction = compute_measured_reaction(
+                date_type.fromisoformat(trading_date),
+                str(scheduled_et),
+            )
+        except Exception:
+            reaction = None
+    return format_measured_reaction(reaction)
 
 
 def build_catalyst_status(trading_date: str) -> dict[str, Any]:
@@ -706,10 +714,11 @@ def build_catalyst_status(trading_date: str) -> dict[str, Any]:
         direction = r.get("direction") or event_cfg.get("direction")
         surprise = _surprise_display(surprise_pct, direction)
         row_class = surprise["class"] if r.get("surprise_flag") else ""
+        scheduled_et = r.get("scheduled_et") or event_cfg.get("scheduled_et") or "—"
         rows.append(
             {
                 "event": r.get("label") or event_cfg.get("label") or event_id,
-                "scheduled_et": r.get("scheduled_et") or event_cfg.get("scheduled_et") or "—",
+                "scheduled_et": scheduled_et,
                 "status": status,
                 "status_icon": _status_icon(status),
                 "status_hint": _status_hint(status),
@@ -720,10 +729,8 @@ def build_catalyst_status(trading_date: str) -> dict[str, Any]:
                 "surprise_class": surprise["class"],
                 "row_class": row_class,
                 "typical_impact": r.get("market_impact") or event_cfg.get("market_impact_default") or "—",
-                "measured_reaction": (
-                    _format_measured_reaction(r.get("measured_reaction"))
-                    if status == "released"
-                    else "—"
+                "measured_reaction": _measured_reaction_display(
+                    trading_date, str(scheduled_et), status, r.get("measured_reaction")
                 ),
                 "source": r.get("source"),
             }

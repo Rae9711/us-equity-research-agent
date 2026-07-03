@@ -321,7 +321,7 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .catalyst-row.surprise-good { background: rgba(22, 163, 74, 0.06); }
 .catalyst-row.surprise-bad { background: rgba(220, 38, 38, 0.06); }
 .catalyst-impact { font-size: 0.78rem; max-width: 14rem; }
-.catalyst-measured { font-size: 0.78rem; white-space: nowrap; }
+.catalyst-measured { font-size: 0.78rem; max-width: 12rem; white-space: nowrap; }
 
 .breaking-panel { margin-top: 0; }
 .breaking-hint { margin: -0.25rem 0 0.65rem; font-size: 0.8rem; }

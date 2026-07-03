@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import date, datetime, timedelta
 from typing import Any
 
-import httpx
 from pytz import timezone
 
 from src.utils.paths import raw_data_path
@@ -17,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 ET = timezone("America/New_York")
 REACTION_SYMBOLS = ("QQQ", "SMH")
+POST_RELEASE_MINUTES = 5
 
 
 def _parse_scheduled_et(scheduled_et: str, trading_date: date) -> datetime | None:
@@ -29,80 +28,93 @@ def _parse_scheduled_et(scheduled_et: str, trading_date: date) -> datetime | Non
         return None
 
 
-def _release_windows(release_dt: datetime) -> tuple[tuple[datetime, datetime], tuple[datetime, datetime]]:
-    """Pre ~5 min before release; post ~5–10 min after (e.g. 8:25–8:29 vs 8:35–8:40)."""
-    pre_start = release_dt - timedelta(minutes=5)
-    pre_end = release_dt - timedelta(minutes=1)
-    post_start = release_dt + timedelta(minutes=5)
-    post_end = release_dt + timedelta(minutes=10)
-    return (pre_start, pre_end), (post_start, post_end)
-
-
-def _avg_close_in_window(
-    bars: list[dict[str, Any]],
-    start: datetime,
-    end: datetime,
-) -> float | None:
-    """Average close for Polygon-style bars with ms timestamp `t` and close `c`."""
-    start_ms = int(start.timestamp() * 1000)
-    end_ms = int(end.timestamp() * 1000)
-    prices: list[float] = []
-    for bar in bars:
-        ts = bar.get("t")
-        close = bar.get("c")
-        if ts is None or close is None:
-            continue
-        if start_ms <= int(ts) <= end_ms:
+def _bar_ts_et(ts_raw: Any, trading_date: date) -> datetime | None:
+    if ts_raw is None:
+        return None
+    if isinstance(ts_raw, datetime):
+        dt = ts_raw
+    else:
+        text = str(ts_raw).strip()
+        if not text:
+            return None
+        if "T" in text or "+" in text or text.endswith("Z"):
             try:
-                prices.append(float(close))
+                dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        elif ":" in text:
+            try:
+                hh, mm = text.split(":")[:2]
+                dt = datetime(trading_date.year, trading_date.month, trading_date.day, int(hh), int(mm))
             except (TypeError, ValueError):
-                continue
-    if not prices:
-        return None
-    return sum(prices) / len(prices)
+                return None
+        else:
+            return None
+    if dt.tzinfo is None:
+        return ET.localize(dt)
+    return dt.astimezone(ET)
 
 
-def _pct_change(pre: float | None, post: float | None) -> float | None:
-    if pre is None or post is None or pre == 0:
-        return None
-    return round((post - pre) / abs(pre) * 100, 2)
+def _parse_minute_bars(bars: Any, trading_date: date) -> list[tuple[datetime, float]]:
+    out: list[tuple[datetime, float]] = []
+    if not isinstance(bars, list):
+        return out
+    for bar in bars:
+        if not isinstance(bar, dict):
+            continue
+        px = bar.get("close") or bar.get("price") or bar.get("last") or bar.get("c")
+        try:
+            price = float(px)
+        except (TypeError, ValueError):
+            continue
+        ts_raw = bar.get("ts") or bar.get("time") or bar.get("datetime") or bar.get("t")
+        if isinstance(ts_raw, (int, float)) and ts_raw > 1_000_000_000_000:
+            ts = datetime.fromtimestamp(float(ts_raw) / 1000.0, tz=ET)
+        else:
+            ts = _bar_ts_et(ts_raw, trading_date)
+        if ts is not None:
+            out.append((ts, price))
+    out.sort(key=lambda x: x[0])
+    return out
 
 
-def _polygon_minute_bars(ticker: str, day_start: datetime, day_end: datetime) -> list[dict[str, Any]]:
-    api_key = os.environ.get("POLYGON_API_KEY", "")
-    if not api_key:
-        return []
-    from_ms = int(day_start.timestamp() * 1000)
-    to_ms = int(day_end.timestamp() * 1000)
-    url = (
-        f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/"
-        f"{from_ms}/{to_ms}"
-    )
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            r = client.get(url, params={"apiKey": api_key, "sort": "asc", "limit": 50000})
-            r.raise_for_status()
-            data = r.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Polygon minute %s failed: %s", ticker, exc)
-        return []
-    return list(data.get("results") or [])
+def _minute_bars_from_raw(raw: dict[str, Any], symbol: str, trading_date: date) -> list[tuple[datetime, float]]:
+    sym = symbol.upper()
+    intraday = raw.get("intraday") or {}
+    top_bars = (intraday.get("bars") or {}).get(sym)
+    if top_bars:
+        parsed = _parse_minute_bars(top_bars, trading_date)
+        if parsed:
+            return parsed
+
+    for section_key in ("market", "sector", "stocks"):
+        section = raw.get(section_key) or {}
+        section_bars = (section.get("minute_bars") or {}).get(sym)
+        if section_bars:
+            parsed = _parse_minute_bars(section_bars, trading_date)
+            if parsed:
+                return parsed
+        quotes = section.get("quotes") or {}
+        q = quotes.get(sym) or {}
+        if isinstance(q, dict) and q.get("minute_bars"):
+            parsed = _parse_minute_bars(q["minute_bars"], trading_date)
+            if parsed:
+                return parsed
+    return []
 
 
-def _yfinance_minute_bars(ticker: str, trading_date: date) -> list[dict[str, Any]]:
+def _minute_bars_yfinance(ticker: str, trading_date: date) -> list[tuple[datetime, float]]:
     try:
         import yfinance as yf
     except ImportError:
         return []
 
-    start = ET.localize(datetime(trading_date.year, trading_date.month, trading_date.day, 4, 0))
-    end = start + timedelta(days=1)
     try:
         df = yf.Ticker(ticker).history(
-            start=start.astimezone(timezone("UTC")).replace(tzinfo=None),
-            end=end.astimezone(timezone("UTC")).replace(tzinfo=None),
+            start=trading_date.isoformat(),
+            end=(trading_date + timedelta(days=1)).isoformat(),
             interval="1m",
-            auto_adjust=False,
+            prepost=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.debug("yfinance 1m %s failed: %s", ticker, exc)
@@ -110,15 +122,33 @@ def _yfinance_minute_bars(ticker: str, trading_date: date) -> list[dict[str, Any
     if df is None or df.empty:
         return []
 
-    bars: list[dict[str, Any]] = []
+    out: list[tuple[datetime, float]] = []
     for idx, row in df.iterrows():
         ts = idx.to_pydatetime()
         if ts.tzinfo is None:
             ts = ET.localize(ts)
         else:
             ts = ts.astimezone(ET)
-        bars.append({"t": int(ts.timestamp() * 1000), "c": float(row["Close"])})
-    return bars
+        out.append((ts, float(row["Close"])))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _price_at_or_before(bars: list[tuple[datetime, float]], target: datetime) -> float | None:
+    best: float | None = None
+    for ts, px in bars:
+        if ts <= target:
+            best = px
+        else:
+            break
+    return best
+
+
+def _price_at_or_after(bars: list[tuple[datetime, float]], target: datetime) -> float | None:
+    for ts, px in bars:
+        if ts >= target:
+            return px
+    return None
 
 
 def _quote_change_pct(raw: dict[str, Any], symbol: str) -> float | None:
@@ -131,63 +161,62 @@ def _quote_change_pct(raw: dict[str, Any], symbol: str) -> float | None:
                 return round(float(chg), 2)
             except (TypeError, ValueError):
                 pass
+        close = q.get("close")
+        prev = q.get("prev_close")
+        if close is not None and prev not in (None, 0):
+            try:
+                return round((float(close) - float(prev)) / abs(float(prev)) * 100, 2)
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
     return None
-
-
-def _reaction_from_minute_bars(
-    bars: list[dict[str, Any]],
-    pre_window: tuple[datetime, datetime],
-    post_window: tuple[datetime, datetime],
-) -> float | None:
-    pre_avg = _avg_close_in_window(bars, *pre_window)
-    post_avg = _avg_close_in_window(bars, *post_window)
-    return _pct_change(pre_avg, post_avg)
 
 
 def compute_measured_reaction(
     trading_date: date,
     scheduled_et: str,
     symbols: tuple[str, ...] = REACTION_SYMBOLS,
+    *,
+    window_minutes: int = POST_RELEASE_MINUTES,
 ) -> dict[str, Any] | None:
-    """QQQ/SMH % move pre- vs post-release window; degrades to daily Step 0 quotes."""
+    """QQQ/SMH % move from scheduled_et to scheduled_et + window; raw 1m first, then yfinance."""
     release_dt = _parse_scheduled_et(scheduled_et, trading_date)
     if release_dt is None:
         return None
 
-    pre_window, post_window = _release_windows(release_dt)
-    window_label = f"{scheduled_et} release"
-    day_lo = ET.localize(datetime(trading_date.year, trading_date.month, trading_date.day, 4, 0))
-    day_hi = day_lo + timedelta(hours=20)
+    after_dt = release_dt + timedelta(minutes=window_minutes)
+    raw: dict[str, Any] = {}
+    raw_path = raw_data_path(trading_date.isoformat())
+    if raw_path.exists():
+        try:
+            raw = json.loads(raw_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            raw = {}
 
-    result: dict[str, Any] = {"window": window_label}
+    result: dict[str, Any] = {"window_minutes": window_minutes}
     symbol_pcts: dict[str, float] = {}
-    source = "polygon"
+    source = "intraday"
 
     for sym in symbols:
-        bars = _polygon_minute_bars(sym, day_lo, day_hi)
-        pct = _reaction_from_minute_bars(bars, pre_window, post_window) if bars else None
-        if pct is None:
-            bars = _yfinance_minute_bars(sym, trading_date)
-            pct = _reaction_from_minute_bars(bars, pre_window, post_window) if bars else None
-            if pct is not None:
+        bars = _minute_bars_from_raw(raw, sym, trading_date) if raw else []
+        if not bars:
+            bars = _minute_bars_yfinance(sym, trading_date)
+            if bars:
                 source = "yfinance"
-        if pct is not None:
-            symbol_pcts[sym] = pct
-            result[sym] = f"{pct:+.1f}%"
+        if bars:
+            px_before = _price_at_or_before(bars, release_dt)
+            px_after = _price_at_or_after(bars, after_dt)
+            if px_before and px_after and px_before > 0:
+                pct = round((px_after - px_before) / px_before * 100, 2)
+                symbol_pcts[sym] = pct
+                result[sym] = f"{pct:+.1f}%"
+                result[f"{sym}_pct"] = pct
+                continue
 
     if symbol_pcts:
         result["source"] = source
-        for sym, pct in symbol_pcts.items():
-            result[f"{sym}_pct"] = pct
         return result
 
-    # Last resort: Step 0 daily change (not intraday — label clearly)
-    raw_path = raw_data_path(trading_date.isoformat())
-    if not raw_path.exists():
-        return None
-    try:
-        raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
+    if not raw:
         return None
 
     daily_any = False
@@ -203,5 +232,46 @@ def compute_measured_reaction(
         return None
 
     result["source"] = "daily"
-    result["window"] = f"{window_label} (日涨跌 · Step 0)"
     return result
+
+
+def format_measured_reaction(reaction: dict[str, Any] | None) -> str:
+    if not reaction:
+        return "—"
+    parts: list[str] = []
+    for sym in REACTION_SYMBOLS:
+        val = reaction.get(sym)
+        if val:
+            parts.append(f"{sym} {val}" if not str(val).startswith(sym) else str(val))
+    if not parts:
+        return "—"
+    text = " / ".join(parts)
+    if reaction.get("source") == "daily":
+        return f"{text} (全日)"
+    window = reaction.get("window_minutes", POST_RELEASE_MINUTES)
+    return f"{text} ({window}min post-release)"
+
+
+def measure_post_release_move(
+    trading_date: str,
+    scheduled_et: str,
+    symbols: list[str] | None = None,
+    *,
+    window_minutes: int = POST_RELEASE_MINUTES,
+) -> dict[str, Any]:
+    """Wrapper returning display string for UI callers."""
+    d = date.fromisoformat(trading_date)
+    sym_tuple = tuple(symbols) if symbols else REACTION_SYMBOLS
+    reaction = compute_measured_reaction(
+        d, scheduled_et, sym_tuple, window_minutes=window_minutes
+    )
+    return {
+        "display": format_measured_reaction(reaction),
+        "source": (reaction or {}).get("source"),
+        "moves": {
+            sym: reaction[f"{sym}_pct"]
+            for sym in sym_tuple
+            if reaction and f"{sym}_pct" in reaction
+        },
+        "reaction": reaction,
+    }
