@@ -43,6 +43,16 @@ def _load_morning_driver(date_str: str) -> str:
 
 
 def _macro_release_signal(date_str: str) -> float:
+    from src.utils.trading_calendar import employment_situation_date
+
+    try:
+        d = date.fromisoformat(date_str)
+    except ValueError:
+        return 0.0
+
+    if employment_situation_date(d.year, d.month) == d:
+        return 1.0
+
     path = raw_data_path(date_str)
     if not path.exists():
         return 0.0
@@ -57,6 +67,8 @@ def _macro_release_signal(date_str: str) -> float:
 
     calendar = macro.get("economic_calendar") or []
     catalysts = catalysts_on_date(calendar, date_str)
+    if any(c.get("name") == "NFP" for c in catalysts):
+        return 1.0
     if catalysts:
         return 0.85
     return 0.0
@@ -92,6 +104,10 @@ def compute_attribution(
         )
     )
     nfp_active = macro_release >= 0.85 or "nfp" in _load_morning_driver(date_str).lower()
+    if not nfp_active and trading_date:
+        from src.utils.trading_calendar import employment_situation_date
+
+        nfp_active = employment_situation_date(trading_date.year, trading_date.month) == trading_date
 
     named: dict[str, float] = {}
     if nfp_active and chip_active:
