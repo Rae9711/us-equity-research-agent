@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path, raw_dir, reports_dir
 from src.utils.trading_calendar import today_et
 from src.web.launch import launch_date, trading_day_number
 from src.web.steps_status import steps_status
+
+
+def _is_trading_date_str(s: str) -> bool:
+    try:
+        date.fromisoformat(s)
+    except ValueError:
+        return False
+    return len(s) == 10
 
 
 def _day_entry(date_str: str) -> dict:
@@ -36,11 +45,12 @@ def list_trading_days() -> list[dict]:
     seen: set[str] = set()
 
     for p in reports_dir().iterdir():
-        if p.is_dir():
+        if p.is_dir() and _is_trading_date_str(p.name):
             seen.add(p.name)
 
     for p in raw_dir().glob("*.json"):
-        seen.add(p.stem)
+        if _is_trading_date_str(p.stem):
+            seen.add(p.stem)
 
     days = [_day_entry(date_str) for date_str in sorted(seen, reverse=True)]
 
