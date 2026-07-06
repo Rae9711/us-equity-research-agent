@@ -62,6 +62,9 @@ class LabelsModel(BaseModel):
     scenario_correct: Optional[bool] = None
     trade_recommendation: Optional[str] = None  # P18 best symbol
     trade_direction: Optional[str] = None  # LONG | SHORT | NO TRADE
+    primary_symbol: Optional[str] = None  # P18 primary pick
+    predicted_return_pct: Optional[float] = None  # morning expected return %
+    prediction_error_pct: Optional[float] = None  # evening: predicted - actual
 
 
 class MarketCaseModel(BaseModel):

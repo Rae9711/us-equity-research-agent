@@ -193,10 +193,13 @@ def run_morning_research(
             parts=parts,
             regime_label=regime_model.label,
             regime_confidence=regime_model.confidence,
+            edges=rule_bundle.get("edges"),
         )
         parts["P18"] = build_p18_part(
             trade_decision["trade_candidates"],
             trade_decision["best_opportunity"],
+            best_trades=trade_decision.get("best_trades"),
+            edges=trade_decision.get("edges"),
         )
         logger.info(
             "P18 Best Opportunity: %s %s (conf=%s%%)",
@@ -223,6 +226,7 @@ def run_morning_research(
             driver_type=rule_bundle.get("driver_type") or "",
             driver=rule_bundle.get("daily_driver") or "",
             best=trade_decision.get("best_opportunity") or {},
+            best_trades=trade_decision.get("best_trades"),
         )
 
     payload: dict[str, Any] = {
@@ -240,6 +244,10 @@ def run_morning_research(
         "hypothesis": hypothesis_model.model_dump() if hypothesis_model else None,
         "trade_candidates": trade_decision.get("trade_candidates") or [],
         "best_opportunity": trade_decision.get("best_opportunity") or {},
+        "best_trades": trade_decision.get("best_trades") or {},
+        "edges": trade_decision.get("edges") or rule_bundle.get("edges") or {},
+        "index_trade": trade_decision.get("index_trade"),
+        "stock_trades": trade_decision.get("stock_trades") or [],
         "executive_summary": executive_summary,
     }
 
@@ -272,13 +280,28 @@ def run_morning_research(
                 "driver_type": rule_bundle.get("driver_type"),
                 "daily_driver": rule_bundle.get("daily_driver"),
                 "best_opportunity": trade_decision.get("best_opportunity") or {},
+                "best_trades": trade_decision.get("best_trades") or {},
+                "edges": trade_decision.get("edges") or {},
                 "trade_candidates": trade_decision.get("trade_candidates") or [],
             },
             "labels": {
                 "agent_driver": rule_bundle.get("daily_driver"),
                 "agent_driver_type": rule_bundle.get("driver_type"),
-                "trade_recommendation": (trade_decision.get("best_opportunity") or {}).get("symbol"),
-                "trade_direction": (trade_decision.get("best_opportunity") or {}).get("direction"),
+                "trade_recommendation": (
+                    (trade_decision.get("best_trades") or {}).get("primary") or {}
+                ).get("symbol")
+                or (trade_decision.get("best_opportunity") or {}).get("symbol"),
+                "trade_direction": (
+                    (trade_decision.get("best_trades") or {}).get("primary") or {}
+                ).get("direction")
+                or (trade_decision.get("best_opportunity") or {}).get("direction"),
+                "primary_symbol": (
+                    (trade_decision.get("best_trades") or {}).get("primary") or {}
+                ).get("symbol"),
+                "predicted_return_pct": (
+                    (trade_decision.get("best_trades") or {}).get("primary") or {}
+                ).get("expected_return_pct")
+                or (trade_decision.get("best_opportunity") or {}).get("expected_return_pct"),
             },
             "features": features.model_dump() if features else {},
         })

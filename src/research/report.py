@@ -106,13 +106,19 @@ def _render_candidates_section(candidates: list[dict[str, Any]]) -> list[str]:
     lines = [
         "## P18 Trade Candidates",
         "",
-        "| Rank | Symbol | Score | Why |",
-        "|------|--------|-------|-----|",
+        "> ADVISORY — 不构成投资建议",
+        "",
+        "| Rank | Symbol | Win% | ER% | R:R | Score | Trade |",
+        "|------|--------|------|-----|-----|-------|-------|",
     ]
     for row in candidates:
         lines.append(
             f"| {row.get('rank', '—')} | {row.get('symbol', '—')} | "
-            f"{row.get('score', '—')} | {row.get('why', '—')} |"
+            f"{row.get('win_prob', row.get('score', '—'))} | "
+            f"{row.get('expected_return_pct', '—')} | "
+            f"{row.get('risk_reward', '—')} | "
+            f"{row.get('final_score', row.get('score', '—'))} | "
+            f"{row.get('trade_action', row.get('trade', '—'))} |"
         )
     lines.append("")
     return lines

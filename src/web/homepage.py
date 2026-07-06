@@ -175,7 +175,12 @@ def _trade_action(morning: dict[str, Any], step4: dict[str, Any] | None) -> str:
             total = 0
 
     edge = (parts.get("P13") or {}).get("judgment") or ""
-    if total >= 2 and "Edge：YES" in edge:
+    edges = (parts.get("P13") or {}).get("edges") or {}
+    any_edge = any(
+        (edges.get(k) or {}).get("edge") == "YES"
+        for k in ("macro_edge", "index_edge", "sector_edge", "stock_edge")
+    )
+    if total >= 2 and (any_edge or "Edge：YES" in edge or "/4 YES" in edge):
         return "Trade"
     if total >= 0:
         return "Wait"
@@ -272,6 +277,8 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
 
     exec_sum = morning.get("executive_summary") or {}
     best = morning.get("best_opportunity") or {}
+    best_trades = morning.get("best_trades") or {}
+    primary = best_trades.get("primary")
     bias_raw = morning.get("bias") or "—"
     from src.research.trade_candidates import _bias_stars
 
@@ -286,11 +293,16 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
             driver_type=driver_info["driver_type"],
             driver=driver_info["driver"],
             best=best,
+            best_trades=best_trades,
         )
 
-    # Trade action: prefer best_opportunity direction, else legacy
+    # Trade action: prefer primary trade, not blanket NO TRADE on macro edge alone
     trade_action = _trade_action(morning, step4)
-    if best.get("direction") == "NO TRADE":
+    if primary and primary.get("direction") in ("LONG", "SHORT"):
+        trade_action = "Trade"
+    elif best_trades.get("threshold_message"):
+        trade_action = "Wait"
+    elif best.get("direction") == "NO TRADE" and not primary:
         trade_action = "No Trade"
     elif best.get("direction") in ("LONG", "SHORT") and trade_action == "Wait":
         trade_action = "Trade"

@@ -12,12 +12,62 @@
   <div class="page-wrap">
     <p class="muted"><a href="/?date={{ day.trading_date }}">← 流程首页</a></p>
     <h1 class="page-title">Step 1 — Morning Research</h1>
-    <p class="muted">8:00 ET · R0 → P1–P16 → P17 Hypothesis → P18 Trade Candidates</p>
+    <p class="muted">8:00 ET · R0 → P1–P16 → P17 Hypothesis → P18 Trade Candidates (v2)</p>
 
     {% include "_day_header.html" %}
     {% include "_step_nav.html" %}
 
-    {% if meta and meta.get('best_opportunity') %}
+    {% if meta and meta.get('edges') %}
+    {% set edges = meta.edges %}
+    <section class="edges-panel" id="edges">
+      <h2 class="section-title">四路 Edge</h2>
+      <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
+      <div class="best-opp-grid">
+        {% for key, label in [('macro_edge', 'Macro'), ('index_edge', 'Index'), ('sector_edge', 'Sector'), ('stock_edge', 'Stock')] %}
+        {% set e = edges.get(key) or {} %}
+        <div>
+          <span class="decision-label">{{ label }} Edge</span>
+          <strong class="edge-{{ e.get('edge', 'NO') | lower }}">{{ e.get('edge', 'NO') }}</strong>
+          <p class="muted small">{{ e.get('why', '') }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      {% if meta.get('index_trade') %}
+      <p><strong>Index Trade：</strong>{{ meta.index_trade }}</p>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% set best_trades = meta.get('best_trades') or {} %}
+    {% set primary = best_trades.get('primary') %}
+    {% if primary %}
+    <section class="best-opportunity-panel" id="best-opportunity">
+      <h2 class="section-title">🥇 Primary Trade</h2>
+      <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
+      <div class="best-opp-grid">
+        <div><span class="decision-label">Direction</span><strong>{{ primary.direction }}</strong></div>
+        <div><span class="decision-label">Symbol</span><strong>{{ primary.symbol }}</strong></div>
+        <div><span class="decision-label">Instrument</span><strong>{{ primary.instrument }}</strong></div>
+        <div><span class="decision-label">Win Prob</span><strong>{{ primary.win_prob }}%</strong></div>
+        <div><span class="decision-label">Expected Return</span><strong>{{ primary.expected_move }}</strong></div>
+        <div><span class="decision-label">R:R</span><strong>{{ primary.risk_reward }}</strong></div>
+        <div><span class="decision-label">Confidence</span><strong>{{ primary.confidence }}%</strong></div>
+        <div><span class="decision-label">Entry</span><strong>{{ primary.entry }}</strong></div>
+        <div><span class="decision-label">Stop</span><strong>{{ primary.stop }}</strong></div>
+        <div><span class="decision-label">Target</span><strong>{{ primary.target }}</strong></div>
+      </div>
+      <p><strong>Why：</strong>{{ primary.why_chain or (primary.why | join(' · ')) }}</p>
+      {% if meta.get('best_opportunity') and meta.best_opportunity.one_liner %}
+      <p class="best-opp-oneliner">「{{ meta.best_opportunity.one_liner }}」</p>
+      {% endif %}
+    </section>
+    {% elif best_trades.get('threshold_message') %}
+    <section class="best-opportunity-panel threshold-panel" id="best-opportunity">
+      <h2 class="section-title">今日交易</h2>
+      <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
+      <p class="threshold-message">{{ best_trades.threshold_message }}</p>
+    </section>
+    {% elif meta and meta.get('best_opportunity') %}
     {% set best = meta.best_opportunity %}
     <section class="best-opportunity-panel" id="best-opportunity">
       <h2 class="section-title">🥇 Best Opportunity Today</h2>
@@ -30,10 +80,8 @@
         <div><span class="decision-label">Entry</span><strong>{{ best.entry }}</strong></div>
         <div><span class="decision-label">Stop</span><strong>{{ best.stop }}</strong></div>
         <div><span class="decision-label">Target</span><strong>{{ best.target }}</strong></div>
-        <div><span class="decision-label">Duration</span><strong>{{ best.duration }}</strong></div>
       </div>
       <p><strong>Why：</strong>{{ best.why_chain or (best.why | join(' · ')) }}</p>
-      <p><strong>Avoid：</strong>{{ best.avoid | join(', ') }}</p>
       <p class="best-opp-oneliner">「{{ best.one_liner }}」</p>
     </section>
     {% endif %}
@@ -48,8 +96,11 @@
             <tr>
               <th>Rank</th>
               <th>Symbol</th>
-              <th>Score</th>
-              <th>Why</th>
+              <th>Win Prob</th>
+              <th>Expected Return</th>
+              <th>R:R</th>
+              <th>Final Score</th>
+              <th>Trade</th>
               <th></th>
             </tr>
           </thead>
@@ -58,18 +109,23 @@
             <tr class="candidate-row">
               <td>{{ row.rank }}</td>
               <td><strong>{{ row.symbol }}</strong></td>
-              <td>{{ row.score }}</td>
-              <td>{{ row.why }}</td>
+              <td>{{ row.win_prob }}%</td>
+              <td>{{ row.expected_return_pct }}%</td>
+              <td>{{ row.risk_reward }}</td>
+              <td>{{ row.final_score }}</td>
+              <td><span class="trade-action-{{ row.trade_action | lower }}">{{ row.trade_action }}</span></td>
               <td>
                 <details class="candidate-detail">
                   <summary>详情</summary>
                   <div class="candidate-detail-card">
-                    {% set d = row.detail %}
-                    <p><strong>{{ row.symbol }}</strong> · {{ d.direction }} · {{ d.instrument }}</p>
-                    <p>Entry {{ d.entry }} · Stop {{ d.stop }} · Target {{ d.target }}</p>
-                    <p>Conviction {{ d.conviction }}% · R:R {{ d.rr_ratio }}</p>
-                    <ul>{% for r in d.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-                    <p class="muted">Avoid: {{ d.avoid | join(', ') }}</p>
+                    <p><strong>{{ row.symbol }}</strong> · {{ row.trade_action }} · ${{ row.current_price }}</p>
+                    <p>Expected High {{ row.expected_high }} · Low {{ row.expected_low }} · Close {{ row.expected_close }}</p>
+                    <p>Gap {{ row.gap_pct or '—' }}% · RS vs QQQ {{ row.relative_strength or '—' }}%</p>
+                    <p>Upside {{ row.upside_pct }}% · Downside {{ row.downside_risk_pct }}%</p>
+                    <ul class="why-factors">
+                      {% for f in row.why_factors or [] %}<li>{{ f }}</li>{% endfor %}
+                      <li class="muted">Gamma — placeholder</li>
+                    </ul>
                   </div>
                 </details>
               </td>

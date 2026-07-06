@@ -4,6 +4,7 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
+from src.research.edges import compute_edges, format_p13_from_edges
 from src.utils.paths import raw_data_path
 from src.utils.quote_resolve import session_change_pct
 from src.utils.trading_calendar import prior_trading_day
@@ -586,6 +587,26 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     )
     p2_driver = daily_driver if not chip_selloff else "AI Chip Selloff"
 
+    tsla_q = stock_quotes.get("TSLA") or {}
+    tsla_pct = _session_pct("TSLA", raw, prior_raw, trading_day, tsla_q, section="stocks")
+    edges = compute_edges(
+        raw,
+        catalysts_today=catalysts_today,
+        qqq_pct=qqq_pct,
+        smh_pct=smh_pct,
+        spy_pct=spy_pct,
+        sym_pcts={
+            "QQQ": qqq_pct,
+            "SMH": smh_pct,
+            "SPY": spy_pct,
+            "NVDA": nvda_pct,
+            "TSLA": tsla_pct,
+        },
+        driver_type=daily_driver_type,
+    )
+    p13_part = format_p13_from_edges(edges)
+    p13_part["catalysts"] = catalysts_today
+
     parts: dict[str, Any] = {
         "P1": {
             "judgment": p1_label,
@@ -692,7 +713,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             "total": total,
             "bias": bias,
         },
-        "P13": _build_p13(catalysts_today),
+        "P13": p13_part,
         "P14": _build_p14_preference(
             ai_stance=ai_stance,
             chip_selloff=chip_selloff,
@@ -719,6 +740,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         "driver_type": daily_driver_type,
         "daily_driver": daily_driver,
         "catalysts_today": catalysts_today,
+        "edges": edges,
     }
 
 

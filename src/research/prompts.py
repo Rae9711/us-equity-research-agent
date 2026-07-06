@@ -50,7 +50,7 @@ Part ID 说明：
 - P8 AI：分 **Bullish Long-term / Bearish Today** 两行判断
 - P9 Options：四问 YES/NO（买期权/0DTE/Call/Put）；买期权=NO 则 0DTE 必须 NO
 - P10 driver_type + driver（规则已算，勿改）
-- P11/P13/P14 规则已算
+- P11/P13/P14 规则已算；P13 为四路 Edge（Macro/Index/Sector/Stock），P17/P18 由引擎生成
 - P15 Scenarios：可验证触发（QQQ > 昨高 → Call），禁止「Macro利好」等模糊条件
 - P16 Trading Plan：IF-THEN 三行，judgment：计划：Trade / Wait / No Trade
 - P17 由引擎生成；Hypothesis 应可验证

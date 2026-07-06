@@ -23,6 +23,37 @@ from src.utils.trading_calendar import require_trading_day, skipped_non_trading_
 logger = logging.getLogger(__name__)
 
 
+def _compute_prediction_error(
+    morning: dict[str, Any],
+    features: Any,
+) -> dict[str, Any]:
+    """Stub: compare morning predicted return vs symbol close change."""
+    primary = (morning.get("best_trades") or {}).get("primary") or {}
+    symbol = primary.get("symbol") or (morning.get("best_opportunity") or {}).get("symbol")
+    predicted = primary.get("expected_return_pct")
+    if predicted is None:
+        predicted = (morning.get("best_opportunity") or {}).get("expected_return_pct")
+
+    actual_map = {
+        "QQQ": getattr(features, "qqq_chg", None),
+        "SPY": getattr(features, "spy_chg", None),
+        "NVDA": getattr(features, "nvda_chg", None),
+        "SMH": getattr(features, "smh_chg", None),
+        "TSLA": getattr(features, "tsla_chg", None) if hasattr(features, "tsla_chg") else None,
+    }
+    actual = actual_map.get(str(symbol or "").upper())
+    error = None
+    if predicted is not None and actual is not None:
+        error = round(float(predicted) - float(actual), 2)
+
+    return {
+        "primary_symbol": symbol,
+        "predicted_return_pct": predicted,
+        "actual_return_pct": actual,
+        "prediction_error_pct": error,
+    }
+
+
 def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
     d = require_trading_day(trading_date, job="run_step7_evening")
     if d is None:
@@ -105,6 +136,8 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         hypothesis_correct=hypothesis_correct,
     )
 
+    prediction = _compute_prediction_error(morning, features)
+
     body_lines = [
         "## Step 7 — Evening Review (Attribution Engine)",
         "",
@@ -146,6 +179,13 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         f"| Attribution | {attr_summary} |",
         f"| Surprise | {surprise_hint} |",
         f"| Trade Decision | {'Trade' if should_trade else 'No Trade'} |",
+        "",
+        "### 7.5 Prediction Error (P18 learning stub)",
+        "",
+        f"- Primary: {prediction.get('primary_symbol') or 'N/A'}",
+        f"- Predicted ER: {prediction.get('predicted_return_pct')}%",
+        f"- Actual: {prediction.get('actual_return_pct')}%",
+        f"- Error: {prediction.get('prediction_error_pct')}%",
     ]
 
     scenario_hit = "命中" if scenario_correct else "未命中"
@@ -184,6 +224,7 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
             "scenario_actual": scenario_actual,
             "scenario_correct": scenario_correct,
             "scenario_scores": scenario_result.get("scenario_scores"),
+            "prediction_error": prediction,
         },
     )
 
@@ -200,6 +241,9 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
             "scenario_primary": scenario_primary,
             "scenario_actual": scenario_actual,
             "scenario_correct": scenario_correct,
+            "primary_symbol": prediction.get("primary_symbol"),
+            "predicted_return_pct": prediction.get("predicted_return_pct"),
+            "prediction_error_pct": prediction.get("prediction_error_pct"),
         },
         "surprise": surprise_hint,
         "lesson": lesson,

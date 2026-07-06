@@ -63,7 +63,7 @@ PART_META: dict[str, dict[str, str]] = {
     },
     "P13": {
         "title": "Edge 优势",
-        "about": "今天有没有信息优势（重大数据/CPI/PCE/FOMC 等催化剂）",
+        "about": "四路 Edge：Macro / Index / Sector / Stock（独立 YES/NO，非单一 gate）",
     },
     "P14": {
         "title": "市场偏好 Preference",
@@ -83,7 +83,7 @@ PART_META: dict[str, dict[str, str]] = {
     },
     "P18": {
         "title": "Trade Candidates",
-        "about": "候选标的排名 + Best Opportunity 决策输出（ADVISORY — 不构成投资建议）",
+        "about": "Win Prob · Expected Return · R:R · Final Score 排名 + Primary/Secondary/Watchlist（ADVISORY）",
     },
 }
 
