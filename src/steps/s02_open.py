@@ -8,7 +8,7 @@ from typing import Any
 from src.collectors.fred_client import FredClient
 from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
-from src.utils.data_freshness import guard_fresh_raw
+from src.utils.data_freshness import dgs10_fred_stale, guard_fresh_raw
 from src.utils.paths import morning_json_path, raw_data_path
 from src.utils.quote_resolve import intraday_session_quote, session_observation
 from src.utils.trading_calendar import prior_trading_day, require_trading_day, skipped_non_trading_day, today_et
@@ -74,18 +74,27 @@ def _bond_from_fred() -> dict[str, Any]:
 
 
 def _bond_observation(trading_date: date, raw: dict[str, Any], prior_raw: dict[str, Any]) -> dict[str, Any]:
+    prior_day = prior_trading_day(trading_date)
+    fred_stale = dgs10_fred_stale(raw, prior_day)
+
     tnx = intraday_session_quote("^TNX", trading_date)
     if "error" not in tnx:
         tnx["ticker"] = "^TNX"
+        if fred_stale:
+            tnx["fred_stale"] = True
         return tnx
 
-    fred_bond = _bond_from_fred()
-    if "error" not in fred_bond:
-        return fred_bond
+    if not fred_stale:
+        fred_bond = _bond_from_fred()
+        if "error" not in fred_bond:
+            return fred_bond
 
     cur = _treasury_rate(raw)
     prev = _treasury_rate(prior_raw)
     if cur is None:
+        fred_bond = _bond_from_fred()
+        if "error" not in fred_bond:
+            return fred_bond
         return {"ticker": "DGS10", "error": "no treasury data"}
     change_pct = _pct_chg(cur, prev) if prev is not None else None
     return {
@@ -94,6 +103,7 @@ def _bond_observation(trading_date: date, raw: dict[str, Any], prior_raw: dict[s
         "last": round(cur, 4),
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
         "source": "raw",
+        "fred_stale": fred_stale,
     }
 
 
@@ -225,10 +235,12 @@ def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
         chg = tnx.get("change_pct")
         if tnx.get("ticker") == "DGS10":
             chg_txt = f"{chg:+.2f}%" if chg is not None else "—"
-            bond_note = f"10Y DGS10 {tnx.get('last')} ({chg_txt} vs 前日)"
+            stale_tag = "（FRED 滞后）" if tnx.get("fred_stale") else ""
+            bond_note = f"10Y DGS10 {tnx.get('last')} ({chg_txt} vs 前日){stale_tag}"
         else:
             chg_txt = f"{chg:+.2f}%" if chg is not None else "—"
-            bond_note = f"10Y proxy (^TNX) {chg_txt} vs 昨收"
+            stale_tag = "，FRED 滞后" if tnx.get("fred_stale") else ""
+            bond_note = f"10Y proxy (^TNX) {chg_txt} vs 昨收{stale_tag}"
         if chg is not None and abs(chg) > 1.5:
             notes.append(f"Bond 突发：{bond_note}")
 

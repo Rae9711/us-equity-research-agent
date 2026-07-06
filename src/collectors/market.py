@@ -33,6 +33,9 @@ def collect_market(trading_date: date | None = None) -> dict[str, Any]:
     batch["treasury_10y_fred"] = ten_y
 
     quotes = batch["quotes"]
+    tnx_key = cfg["market"].get("TEN_Y", "^TNX")
+    tnx_fresh = _quote_ok(quotes, tnx_key, trading_date=trading_date, prior_day=prior_day)
+    ten_y_ok = ten_y is not None and ten_y.get("value") not in (None, ".")
     checklist = {
         "SPY": _quote_ok(quotes, cfg["market"]["SPY"], trading_date=trading_date, prior_day=prior_day),
         "QQQ": _quote_ok(quotes, cfg["market"]["QQQ"], trading_date=trading_date, prior_day=prior_day),
@@ -41,7 +44,7 @@ def collect_market(trading_date: date | None = None) -> dict[str, Any]:
         "TQQQ": _quote_ok(quotes, cfg["market"]["TQQQ"], trading_date=trading_date, prior_day=prior_day),
         "VIX": _quote_ok(quotes, cfg["market"]["VIX"], trading_date=trading_date, prior_day=prior_day),
         "DXY": _quote_ok(quotes, cfg["market"]["DXY"], trading_date=trading_date, prior_day=prior_day),
-        "10Y": ten_y is not None and ten_y.get("value") not in (None, "."),
+        "10Y": ten_y_ok or tnx_fresh,
     }
     batch["checklist"] = checklist
     batch["ok"] = all(checklist.values()) and len(batch["errors"]) == 0

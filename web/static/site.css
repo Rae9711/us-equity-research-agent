@@ -337,9 +337,15 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 
 .badge-ok { background: #dcfce7; color: #166534; }
 .badge-warn { background: #fef9c3; color: #854d0e; }
+.badge-info { background: #e0f2fe; color: #0369a1; }
 .stale-row td { color: #b91c1c; }
 .freshness-warn { border-left: 4px solid #f59e0b; background: #fffbeb; margin-bottom: 1rem; }
 .freshness-warn strong { color: #92400e; }
+.freshness-attention { border-left: 4px solid #f59e0b; background: #fffbeb; margin-bottom: 1rem; }
+.freshness-attention strong { color: #92400e; }
+.freshness-macro { border-left: 4px solid #38bdf8; background: #f0f9ff; margin-bottom: 1rem; }
+.freshness-macro strong { color: #0369a1; }
+.macro-ref-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
 .badge-muted { background: #f1f5f9; color: #64748b; }
 
 .link-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
@@ -819,6 +825,7 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .checklist { padding-left: 1.2rem; margin: 0.35rem 0; }
 .checklist .ok { color: #16a34a; }
 .checklist .miss { color: #dc2626; }
+.checklist .attention { color: #b45309; }
 .raw-conclusion { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
 
 @media (max-width: 520px) {

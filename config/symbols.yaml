@@ -6,6 +6,7 @@ market:
   ES: ES=F
   VIX: ^VIX
   DXY: DX-Y.NYB
+  TEN_Y: ^TNX
   TEN_Y_FRED: DGS10
 
 sectors:

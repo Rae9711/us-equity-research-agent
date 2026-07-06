@@ -17,12 +17,22 @@ logger = logging.getLogger(__name__)
 _PRIOR_SESSION_TYPES = frozenset({"premarket", "prior_close", "prior_session"})
 _CHANGE_PCT_TOLERANCE = 0.15
 
+# FRED macro series tiers (keys in macro.series and/or series_id).
+_MONTHLY_MACRO = frozenset(
+    {"FEDFUNDS", "CPIAUCSL", "PCEPI", "PAYEMS", "UNRATE", "AHETPI"}
+)
+_WEEKLY_MACRO = frozenset({"ICSA"})
+_DAILY_RATE_MACRO = frozenset({"DGS10", "DGS2"})
+_ICSA_STALE_CALENDAR_DAYS = 10
+
 
 @dataclass
 class ValidationResult:
     ok: bool
     reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    attention: list[str] = field(default_factory=list)
+    macro_reference: list[dict[str, str]] = field(default_factory=list)
     field_sessions: dict[str, str | None] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -30,6 +40,8 @@ class ValidationResult:
             "ok": self.ok,
             "reasons": self.reasons,
             "warnings": self.warnings,
+            "attention": self.attention,
+            "macro_reference": self.macro_reference,
             "field_sessions": self.field_sessions,
             "trading_date": None,
             "prior_trading_day": None,
@@ -193,35 +205,152 @@ def _validate_news(
     return reasons, warnings
 
 
+def macro_series_tier(key: str, row: dict[str, Any] | None = None) -> str:
+    """Return ``monthly`` | ``weekly`` | ``daily_rate`` | ``other`` for a FRED series."""
+    sid = str((row or {}).get("series_id") or key).upper()
+    key_u = str(key).upper()
+    if sid in _MONTHLY_MACRO or key_u in _MONTHLY_MACRO:
+        return "monthly"
+    if sid in _WEEKLY_MACRO or key_u in _WEEKLY_MACRO:
+        return "weekly"
+    if sid in _DAILY_RATE_MACRO or key_u in _DAILY_RATE_MACRO:
+        return "daily_rate"
+    return "other"
+
+
+def _parse_obs_date(obs_raw: Any) -> date | None:
+    if not obs_raw:
+        return None
+    try:
+        return date.fromisoformat(str(obs_raw)[:10])
+    except ValueError:
+        return None
+
+
+def _tnx_quote_fresh(
+    raw: dict[str, Any],
+    *,
+    trading_date: date,
+    prior_day: date,
+) -> bool:
+    quotes = ((raw.get("market") or {}).get("quotes") or {})
+    for ticker in ("^TNX", "TNX"):
+        q = quotes.get(ticker) or {}
+        if quote_fresh_for_checklist(q, trading_date, prior_day):
+            return True
+    return False
+
+
+def _classify_macro_observation(
+    label: str,
+    obs: date,
+    *,
+    tier: str,
+    trading_date: date,
+    prior_day: date,
+    tnx_fresh: bool,
+) -> tuple[str | None, dict[str, str] | None]:
+    """Return (attention_message, macro_reference_entry) — at most one non-None."""
+    if tier == "monthly":
+        return None, {
+            "key": label,
+            "date": obs.isoformat(),
+            "label": f"{label}: 最新可用 {obs.isoformat()}",
+        }
+
+    if tier == "weekly":
+        age_days = (trading_date - obs).days
+        if age_days > _ICSA_STALE_CALENDAR_DAYS:
+            return (
+                f"{label}: observation_date={obs} 已超过 {age_days} 日历日未更新",
+                None,
+            )
+        return None, {
+            "key": label,
+            "date": obs.isoformat(),
+            "label": f"{label}: 最新可用 {obs.isoformat()}（周度）",
+        }
+
+    if tier == "daily_rate":
+        if obs < prior_day:
+            suffix = "；盘中 ^TNX 已补充" if tnx_fresh else "（FRED 正常滞后）"
+            return (
+                f"{label}: FRED 最新 {obs.isoformat()}，上一交易日 {prior_day.isoformat()}{suffix}",
+                None,
+            )
+        return None, None
+
+    if obs < prior_day:
+        return (
+            f"{label}: observation_date={obs} 早于上一交易日 {prior_day}",
+            None,
+        )
+    return None, None
+
+
 def _validate_macro(
     raw: dict[str, Any],
     *,
+    trading_date: date,
     prior_day: date,
-) -> list[str]:
-    warnings: list[str] = []
+) -> tuple[list[str], list[str], list[dict[str, str]]]:
+    """Classify macro lag into attention (需关注) vs macro_reference (正常滞后)."""
+    attention: list[str] = []
+    macro_reference: list[dict[str, str]] = []
+    legacy_warnings: list[str] = []
+    tnx_fresh = _tnx_quote_fresh(raw, trading_date=trading_date, prior_day=prior_day)
+
     series = (raw.get("macro") or {}).get("series") or {}
     for key, row in series.items():
-        obs_raw = row.get("date") or row.get("observation_date")
-        if not obs_raw:
+        obs = _parse_obs_date(row.get("date") or row.get("observation_date"))
+        if obs is None:
             continue
-        try:
-            obs = date.fromisoformat(str(obs_raw)[:10])
-        except ValueError:
-            continue
-        if obs < prior_day:
-            warnings.append(
-                f"macro.{key}: observation_date={obs} 早于上一交易日 {prior_day}"
-            )
+        tier = macro_series_tier(key, row)
+        msg, ref = _classify_macro_observation(
+            f"macro.{key}",
+            obs,
+            tier=tier,
+            trading_date=trading_date,
+            prior_day=prior_day,
+            tnx_fresh=tnx_fresh,
+        )
+        if ref:
+            macro_reference.append(ref)
+        elif msg:
+            attention.append(msg)
+            if tier not in ("daily_rate", "weekly"):
+                legacy_warnings.append(msg)
+
     treasury = (raw.get("market") or {}).get("treasury_10y_fred") or {}
-    obs_raw = treasury.get("date")
-    if obs_raw:
-        try:
-            obs = date.fromisoformat(str(obs_raw)[:10])
-            if obs < prior_day:
-                warnings.append(f"market.10Y: observation_date={obs} 可能过期")
-        except ValueError:
-            pass
-    return warnings
+    obs = _parse_obs_date(treasury.get("date"))
+    if obs is not None:
+        msg, ref = _classify_macro_observation(
+            "market.10Y",
+            obs,
+            tier="daily_rate",
+            trading_date=trading_date,
+            prior_day=prior_day,
+            tnx_fresh=tnx_fresh,
+        )
+        if ref:
+            macro_reference.append(ref)
+        elif msg:
+            attention.append(msg)
+
+    return legacy_warnings, attention, macro_reference
+
+
+def dgs10_fred_stale(raw: dict[str, Any], prior_day: date) -> bool:
+    """True when embedded DGS10 / treasury_10y_fred predates the prior session."""
+    dgs10_row = ((raw.get("macro") or {}).get("series") or {}).get("DGS10") or {}
+    macro_obs = _parse_obs_date(dgs10_row.get("date"))
+    mkt_obs = _parse_obs_date(
+        ((raw.get("market") or {}).get("treasury_10y_fred") or {}).get("date")
+    )
+    for obs in (macro_obs, mkt_obs):
+        if obs is not None and obs < prior_day:
+            return True
+    return False
 
 
 def validate_raw_for_trading_date(raw: dict[str, Any], trading_date: date) -> ValidationResult:
@@ -256,12 +385,17 @@ def validate_raw_for_trading_date(raw: dict[str, Any], trading_date: date) -> Va
     )
     reasons.extend(news_reasons)
     warnings.extend(news_warnings)
-    warnings.extend(_validate_macro(raw, prior_day=prior_day))
+    macro_legacy, attention, macro_reference = _validate_macro(
+        raw, trading_date=trading_date, prior_day=prior_day
+    )
+    warnings.extend(macro_legacy)
 
     result = ValidationResult(
         ok=len(reasons) == 0,
         reasons=reasons,
         warnings=warnings,
+        attention=attention,
+        macro_reference=macro_reference,
         field_sessions=field_sessions,
     )
     d = result.to_dict()
@@ -316,6 +450,8 @@ def stale_raw_response(
             "ok": result.ok,
             "reasons": result.reasons,
             "warnings": result.warnings,
+            "attention": result.attention,
+            "macro_reference": result.macro_reference,
             "field_sessions": result.field_sessions,
             "trading_date": trading_date.isoformat(),
             "prior_trading_day": prior_trading_day(trading_date).isoformat(),

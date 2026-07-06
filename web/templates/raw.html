@@ -17,22 +17,37 @@
     <div class="panel freshness-warn">
       <strong>数据未通过交易日校验 — 请勿用于决策</strong>
       <p class="muted">报价或采集时间与交易日 {{ day.trading_date }} 不一致，请勿用于 Morning Research。</p>
+      <p class="muted"><strong>需关注</strong></p>
       <ul class="checklist">
         {% for reason in freshness.reasons %}
         <li class="miss">{{ reason }}</li>
         {% endfor %}
       </ul>
-      {% if freshness.warnings %}
-      <p class="muted">警告（不阻断 checklist，但需关注）：</p>
-      <ul class="checklist">
-        {% for warn in freshness.warnings %}
-        <li class="miss">{{ warn }}</li>
-        {% endfor %}
-      </ul>
-      {% endif %}
       {% if quote_session_dates %}
       <p class="muted">SPY session {{ quote_session_dates.get('SPY', '—') }} · QQQ session {{ quote_session_dates.get('QQQ', '—') }} · 上一交易日收盘 {{ prior_trading_day or day.prior_trading_date }}</p>
       {% endif %}
+    </div>
+    {% elif freshness and freshness.attention %}
+    <div class="panel freshness-attention">
+      <strong>需关注</strong>
+      <p class="muted">以下项目略滞后，但不阻断数据就绪。</p>
+      <ul class="checklist">
+        {% for item in freshness.attention %}
+        <li class="attention">{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if freshness and freshness.macro_reference %}
+    <div class="panel freshness-macro">
+      <strong>宏观参考（正常滞后）</strong>
+      <p class="muted">月度/周度 FRED 序列按发布节奏滞后，属正常现象。</p>
+      <div class="macro-ref-badges">
+        {% for ref in freshness.macro_reference %}
+        <span class="badge badge-info">{{ ref.label }}</span>
+        {% endfor %}
+      </div>
     </div>
     {% endif %}
 
@@ -89,10 +104,10 @@
 
       {% if missing %}
       <section class="raw-section">
-        <h2>缺失项</h2>
+        <h2>需关注</h2>
         <ul class="checklist">
           {% for item in missing %}
-          <li class="miss">{{ item }}</li>
+          <li class="{{ 'attention' if item.startswith('⚠') else 'miss' }}">{{ item }}</li>
           {% endfor %}
         </ul>
       </section>

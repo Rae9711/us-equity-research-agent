@@ -6,7 +6,10 @@ import unittest
 from datetime import date, datetime
 from unittest.mock import patch
 
-from src.utils.data_freshness import validate_raw_for_trading_date
+from src.utils.data_freshness import (
+    macro_series_tier,
+    validate_raw_for_trading_date,
+)
 from src.utils.trading_calendar import prior_trading_day
 
 
@@ -123,6 +126,64 @@ class StaleQuoteTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertTrue(any("change_pct" in r for r in result.reasons))
+
+
+class MacroFreshnessTierTests(unittest.TestCase):
+    def test_monthly_macro_is_reference_not_attention(self) -> None:
+        trading_date = date(2026, 7, 6)
+        prior = prior_trading_day(trading_date)
+        raw = _minimal_raw(trading_date)
+        raw["collected_at"] = "2026-07-06T07:45:00-04:00"
+        raw["macro"]["series"] = {
+            "CPIAUCSL": {"series_id": "CPIAUCSL", "date": "2026-05-01", "value": "320.1"},
+            "UNRATE": {"series_id": "UNRATE", "date": "2026-05-01", "value": "4.1"},
+        }
+
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-02T20:00:00Z"):
+            result = validate_raw_for_trading_date(raw, trading_date)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.macro_reference), 2)
+        self.assertFalse(any("早于上一交易日" in a for a in result.attention))
+        self.assertEqual(macro_series_tier("CPIAUCSL"), "monthly")
+
+    def test_daily_dgs10_weekend_lag_is_attention_not_blocking(self) -> None:
+        trading_date = date(2026, 7, 6)
+        prior = prior_trading_day(trading_date)
+        raw = _minimal_raw(trading_date)
+        raw["collected_at"] = "2026-07-06T07:45:00-04:00"
+        raw["macro"]["series"] = {
+            "DGS10": {"series_id": "DGS10", "date": "2026-07-01", "value": "4.25"},
+        }
+        raw["market"]["treasury_10y_fred"] = {"date": "2026-07-01", "value": "4.25"}
+
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-02T20:00:00Z"):
+            result = validate_raw_for_trading_date(raw, trading_date)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.attention), 2)
+        self.assertTrue(any("FRED 最新" in a for a in result.attention))
+        self.assertFalse(any("早于上一交易日" in a for a in result.attention))
+
+    def test_icsa_stale_only_after_ten_days(self) -> None:
+        trading_date = date(2026, 7, 6)
+        raw = _minimal_raw(trading_date)
+        raw["collected_at"] = "2026-07-06T07:45:00-04:00"
+        raw["macro"]["series"] = {
+            "ICSA": {"series_id": "ICSA", "date": "2026-06-28", "value": "240000"},
+        }
+
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-02T20:00:00Z"):
+            result = validate_raw_for_trading_date(raw, trading_date)
+
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.macro_reference), 1)
+        self.assertEqual(result.attention, [])
+
+        raw["macro"]["series"]["ICSA"]["date"] = "2026-06-20"
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-02T20:00:00Z"):
+            stale = validate_raw_for_trading_date(raw, trading_date)
+        self.assertTrue(any("已超过" in a for a in stale.attention))
 
 
 if __name__ == "__main__":
