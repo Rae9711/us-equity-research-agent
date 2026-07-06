@@ -12,6 +12,7 @@ from typing import Any
 
 from src.db.market_case_service import update_case
 from src.steps.base import save_step_result
+from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import step_json_path
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
@@ -25,6 +26,10 @@ def run_step6_afternoon(trading_date: date | None = None) -> dict[str, Any]:
     trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 6 Afternoon Review for %s", date_str)
+
+    _, stale = guard_fresh_raw(trading_date, step="run_step6_afternoon")
+    if stale:
+        return stale
 
     s4: dict[str, Any] = {}
     if step_json_path(4, date_str).exists():

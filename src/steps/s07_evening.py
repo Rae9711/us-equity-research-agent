@@ -14,6 +14,7 @@ from src.db.market_case_service import load_case, save_case, update_case
 from src.engines.attribution import compute_attribution
 from src.features.build import build_features
 from src.steps.base import save_step_result
+from src.utils.data_freshness import guard_fresh_raw
 from src.utils.driver_match import driver_match_level
 from src.utils.paths import morning_json_path, raw_data_path, step_json_path
 from src.utils.scenario_match import assess_scenarios
@@ -29,6 +30,10 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
     trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 7 Evening Review for %s", date_str)
+
+    _, stale = guard_fresh_raw(trading_date, step="run_step7_evening")
+    if stale:
+        return stale
 
     features = build_features(trading_date)
     attr, actual_driver, surprise_hint, driver_splits = compute_attribution(trading_date, features)

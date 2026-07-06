@@ -7,16 +7,15 @@ from typing import Any
 
 from pytz import timezone
 
-from src.collectors.config import load_symbols
 from src.collectors.macro import collect_macro
 from src.collectors.market import collect_market
 from src.collectors.news import collect_news
 from src.collectors.options import collect_options
-from src.collectors.quote_freshness import assess_raw_freshness
 from src.collectors.sector import collect_sectors
 from src.collectors.stocks import collect_stocks
 from src.db import ConclusionRecord, DailyRun
 from src.db.session import get_session
+from src.utils.data_freshness import freshness_dict
 from src.utils.paths import raw_data_path
 from src.utils.trading_calendar import ET, prior_trading_day, prior_close_utc_iso, require_trading_day, skipped_non_trading_day, today_et
 
@@ -68,33 +67,12 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
         missing.extend(_flatten_missing(items, section))
 
     quote_session_dates: dict[str, str | None] = {}
-    cfg = load_symbols()
-    for label in ("SPY", "QQQ"):
-        ticker = cfg["market"][label]
-        q = (market.get("quotes") or {}).get(ticker) or {}
-        quote_session_dates[label] = q.get("quote_session_date")
-
-    payload_preview: dict[str, Any] = {
-        "collected_at": collected_at,
-        "trading_date": trading_date.isoformat(),
-        "prior_trading_day": prior_day.isoformat(),
-        "market": market,
-    }
-    freshness = assess_raw_freshness(payload_preview)
-    if not freshness["ok"]:
-        missing.extend(freshness["reasons"])
-
-    data_ready = len(missing) == 0
 
     payload: dict[str, Any] = {
         "collected_at": collected_at,
         "data_as_of": collected_at,
         "trading_date": trading_date.isoformat(),
         "prior_trading_day": prior_day.isoformat(),
-        "quote_session_dates": quote_session_dates,
-        "freshness": freshness,
-        "data_ready": data_ready,
-        "missing": missing,
         "checklist": checklist,
         "market": market,
         "macro": macro,
@@ -102,6 +80,26 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
         "stocks": stocks,
         "news": news,
         "options": options,
+    }
+
+    freshness = freshness_dict(payload, trading_date)
+    payload["freshness"] = freshness
+    payload["quote_session_dates"] = {
+        k.split(".", 1)[-1]: v
+        for k, v in (freshness.get("field_sessions") or {}).items()
+        if k.startswith("market.")
+    } or quote_session_dates
+
+    if not freshness["ok"]:
+        missing.extend(freshness["reasons"])
+    for warn in freshness.get("warnings") or []:
+        missing.append(f"⚠ {warn}")
+
+    data_ready = len([m for m in missing if not str(m).startswith("⚠")]) == 0
+
+    payload.update({
+        "data_ready": data_ready,
+        "missing": missing,
         "conclusion": {
             "part_id": "Step0",
             "judgment": f"数据就绪：{'YES' if data_ready else 'NO'}",
@@ -115,7 +113,7 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
                 )
             ),
         },
-    }
+    })
 
     out_path = raw_data_path(trading_date.isoformat())
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

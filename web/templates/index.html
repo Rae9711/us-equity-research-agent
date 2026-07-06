@@ -21,6 +21,21 @@
 
     {% include "_day_header.html" %}
 
+    {% if not day.is_holiday and raw_valid is defined and not raw_valid %}
+    <div class="panel freshness-warn">
+      <strong>数据未通过交易日校验 — 请勿用于决策</strong>
+      {% if raw_freshness and raw_freshness.reasons %}
+      <ul class="checklist">
+        {% for reason in raw_freshness.reasons[:6] %}
+        <li class="miss">{{ reason }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Step 0 数据缺失或未通过校验。请重新采集或查看 <a href="/step/0?date={{ day.trading_date }}">Raw Data</a>。</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if day.is_holiday %}
     <section class="panel holiday-panel">
       <h2 class="section-title-inline">NYSE 休市 · 无交易日决策</h2>

@@ -15,6 +15,7 @@ from src.db.market_case_service import load_case, save_case, update_case
 from src.engines.bayesian import load_weights, max_delta, update_weights
 from src.engines.playbook import store_case
 from src.steps.base import save_step_result
+from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import step_json_path
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
@@ -28,6 +29,10 @@ def run_step8_learning(trading_date: date | None = None) -> dict[str, Any]:
     trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 8 Learning for %s", date_str)
+
+    _, stale = guard_fresh_raw(trading_date, step="run_step8_learning")
+    if stale:
+        return stale
 
     case = load_case(date_str)
 

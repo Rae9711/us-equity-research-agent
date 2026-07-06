@@ -58,13 +58,20 @@ def fetch_quote(ticker: str, *, trading_date: date | None = None) -> dict[str, A
         last_idx = hist.index[-1]
         fallback = hist.loc[last_idx]
         bar_date = last_idx.date()
+        if bar_date not in (trading_date, prior_day):
+            return {
+                "ticker": ticker,
+                "error": f"stale bar date {bar_date} (expected {trading_date} or {prior_day})",
+                "data_as_of": data_as_of,
+            }
         close = float(fallback["Close"])
         prev_bar = hist.iloc[-2] if len(hist) > 1 else None
+        session_type = "prior_close" if bar_date == prior_day else "fallback"
         out: dict[str, Any] = {
             "ticker": ticker,
             "date": bar_date.isoformat(),
             "quote_session_date": bar_date.isoformat(),
-            "session_type": "fallback",
+            "session_type": session_type,
             "open": round(float(fallback["Open"]), 4),
             "high": round(float(fallback["High"]), 4),
             "low": round(float(fallback["Low"]), 4),
@@ -72,9 +79,12 @@ def fetch_quote(ticker: str, *, trading_date: date | None = None) -> dict[str, A
             "volume": int(fallback["Volume"]),
             "data_as_of": data_as_of,
         }
+        if bar_date == prior_day:
+            out["prior_session"] = True
         if prev_bar is not None:
             prev_close = float(prev_bar["Close"])
-            out["prev_close"] = round(prev_close, 4)
+            out["prior_close"] = round(prev_close, 4)
+            out["prior_close_date"] = prior_day.isoformat()
             out["change_pct"] = round((close - prev_close) / prev_close * 100, 2)
         return out
 
@@ -142,8 +152,11 @@ def fetch_quote(ticker: str, *, trading_date: date | None = None) -> dict[str, A
         "volume": volume,
         "data_as_of": data_as_of,
     }
+    if quote_session_date == prior_day:
+        out["prior_session"] = True
     if prior_close is not None:
         out["prior_close"] = round(prior_close, 4)
+        out["prior_close_date"] = prior_day.isoformat()
         out["change_pct"] = round((close - prior_close) / prior_close * 100, 2)
     return out
 

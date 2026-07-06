@@ -337,6 +337,7 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 
 .badge-ok { background: #dcfce7; color: #166534; }
 .badge-warn { background: #fef9c3; color: #854d0e; }
+.stale-row td { color: #b91c1c; }
 .freshness-warn { border-left: 4px solid #f59e0b; background: #fffbeb; margin-bottom: 1rem; }
 .freshness-warn strong { color: #92400e; }
 .badge-muted { background: #f1f5f9; color: #64748b; }

@@ -48,6 +48,18 @@ def _collect_raw_job() -> None:
     logger.info("Job collect_raw — Step 0 data collection starting")
     try:
         payload = run_step0()
+        if not payload.get("data_ready"):
+            logger.warning(
+                "Step 0 validation failed — retrying once: %s",
+                payload.get("missing"),
+            )
+            payload = run_step0()
+        if not payload.get("data_ready"):
+            logger.error(
+                "ALERT Step 0 validation failed after retry for %s: %s",
+                payload.get("trading_date"),
+                payload.get("missing"),
+            )
         logger.info(
             "Step 0 done: %s — %s",
             payload["conclusion"]["judgment"],

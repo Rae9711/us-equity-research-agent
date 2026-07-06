@@ -226,6 +226,11 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     if not is_trading_day(d):
         return None
 
+    from src.web.steps_status import step0_available
+
+    if not step0_available(trading_date):
+        return None
+
     morning = load_morning(trading_date)
     if not morning:
         return None

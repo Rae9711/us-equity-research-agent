@@ -27,7 +27,7 @@ from src.web.history import list_trading_days
 from src.web.launch import launch_date
 from src.web.labels import unified_about, unified_label
 from src.web.stats import accuracy_by_date, accuracy_for_date, global_accuracy
-from src.web.steps_status import step_available, steps_status
+from src.web.steps_status import step0_available, step0_freshness
 from src.web.conclusion_index import morning_index_from_parts, morning_index_from_records
 from src.web.homepage import (
     agent_driver_accuracy_series,
@@ -114,14 +114,16 @@ def health() -> JSONResponse:
 def index(request: Request, date: str | None = None) -> HTMLResponse:
     trading_date = date or today_et().isoformat()
     day = day_summary(trading_date)
+    raw_valid = step0_available(trading_date)
+    raw_freshness = step0_freshness(trading_date)
     decision_card = None
     rel_strength = None
     holiday_news = None
-    if not day["is_holiday"]:
+    if not day["is_holiday"] and raw_valid:
         decision_card = build_decision_card(trading_date)
         if decision_card:
             rel_strength = build_relative_strength(trading_date, decision_card["driver"])
-    else:
+    elif day["is_holiday"]:
         holiday_news = build_holiday_news_brief(trading_date)
     return templates.TemplateResponse(
         request,
@@ -133,6 +135,8 @@ def index(request: Request, date: str | None = None) -> HTMLResponse:
             "decision_card": decision_card,
             "relative_strength": rel_strength,
             "holiday_news": holiday_news,
+            "raw_valid": raw_valid,
+            "raw_freshness": raw_freshness,
         },
     )
 

@@ -16,6 +16,7 @@ from src.research.prompts import MORNING_SYSTEM
 from src.research.parts_meta import PART_ORDER
 from src.research.report import render_morning_report
 from src.research.rules import compute_rule_parts
+from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path
 from src.utils.trading_calendar import ET, require_trading_day, skipped_non_trading_day, today_et
 
@@ -90,9 +91,9 @@ def run_morning_research(
     date_str = trading_date.isoformat()
     logger.info("Morning research starting for %s", date_str)
 
-    raw = _load_raw(trading_date)
-    if not raw.get("data_ready"):
-        logger.warning("Raw data not fully ready: %s", raw.get("missing"))
+    raw, stale = guard_fresh_raw(trading_date, step="run_morning_research")
+    if stale:
+        return stale
 
     # Step 1a: R0 Regime Engine (must run before P1-P16)
     regime_model = None

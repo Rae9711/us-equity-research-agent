@@ -10,6 +10,7 @@ from src.collectors.news import collect_intraday_news
 from src.llm.anthropic_client import AnthropicClient
 from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
+from src.utils.data_freshness import guard_fresh_raw
 from src.utils.news_signals import detect_high_signal_news, summarize_signals
 from src.utils.paths import morning_json_path, step_json_path
 from src.utils.trading_calendar import market_open_et, require_trading_day, skipped_non_trading_day, today_et
@@ -93,6 +94,10 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
     trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 3 market update for %s", date_str)
+
+    _, stale = guard_fresh_raw(trading_date, step="run_step3_market_update")
+    if stale:
+        return stale
 
     morning = {}
     if morning_json_path(date_str).exists():

@@ -7,6 +7,7 @@ from typing import Any
 
 from src.steps.base import save_step_result
 from src.research.format_body import normalize_body_md
+from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import morning_json_path, step_json_path
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
@@ -51,6 +52,10 @@ def run_step4_trade_decision(trading_date: date | None = None) -> dict[str, Any]
     trading_date = d
     date_str = trading_date.isoformat()
     logger.info("Step 4 trade decision for %s", date_str)
+
+    _, stale = guard_fresh_raw(trading_date, step="run_step4_trade_decision")
+    if stale:
+        return stale
 
     morning = {}
     if morning_json_path(date_str).exists():

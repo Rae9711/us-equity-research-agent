@@ -15,16 +15,41 @@
 
     {% if freshness and not freshness.ok %}
     <div class="panel freshness-warn">
-      <strong>数据新鲜度警告</strong>
+      <strong>数据未通过交易日校验 — 请勿用于决策</strong>
       <p class="muted">报价或采集时间与交易日 {{ day.trading_date }} 不一致，请勿用于 Morning Research。</p>
       <ul class="checklist">
         {% for reason in freshness.reasons %}
         <li class="miss">{{ reason }}</li>
         {% endfor %}
       </ul>
+      {% if freshness.warnings %}
+      <p class="muted">警告（不阻断 checklist，但需关注）：</p>
+      <ul class="checklist">
+        {% for warn in freshness.warnings %}
+        <li class="miss">{{ warn }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
       {% if quote_session_dates %}
       <p class="muted">SPY session {{ quote_session_dates.get('SPY', '—') }} · QQQ session {{ quote_session_dates.get('QQQ', '—') }} · 上一交易日收盘 {{ prior_trading_day or day.prior_trading_date }}</p>
       {% endif %}
+    </div>
+    {% endif %}
+
+    {% if freshness and freshness.field_sessions %}
+    <div class="panel">
+      <h2 class="section-title-inline">字段 · Session 日期</h2>
+      <table class="data-table">
+        <thead><tr><th>字段</th><th>Session</th></tr></thead>
+        <tbody>
+          {% for field, sess in freshness.field_sessions.items() %}
+          <tr class="{{ 'stale-row' if sess and day.trading_date not in (sess or '') and (prior_trading_day or day.prior_trading_date) not in (sess or '') else '' }}">
+            <td>{{ field }}</td>
+            <td class="{{ 'miss' if sess and day.trading_date not in (sess or '') and (prior_trading_day or day.prior_trading_date) not in (sess or '') else '' }}">{{ sess or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
     {% endif %}
 
