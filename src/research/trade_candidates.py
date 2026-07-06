@@ -429,6 +429,31 @@ def _index_trade_label(
     return f"{verb} {top['symbol']}"
 
 
+def _select_stock_picks(
+    ranked: list[dict[str, Any]],
+    edges: dict[str, Any],
+    tradeable: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Pick primary/secondary/watchlist stocks — independent of P16 index gate."""
+    macro_no = edges.get("macro_edge", {}).get("edge") == "NO"
+    index_no = edges.get("index_edge", {}).get("edge") == "NO"
+    stock_yes = edges.get("stock_edge", {}).get("edge") == "YES"
+
+    if macro_no and index_no:
+        if stock_yes and tradeable:
+            stock_only = [r for r in tradeable if r["symbol"] in ("NVDA", "TSLA")]
+            return (stock_only or tradeable)[:3]
+        if tradeable and tradeable[0]["final_score"] > FINAL_SCORE_THRESHOLD:
+            return tradeable[:3]
+        return []
+
+    if tradeable:
+        return tradeable[:3]
+    if ranked and ranked[0]["final_score"] > FINAL_SCORE_THRESHOLD:
+        return [ranked[0]]
+    return []
+
+
 def _decision_tree(
     ranked: list[dict[str, Any]],
     edges: dict[str, Any],
@@ -438,40 +463,25 @@ def _decision_tree(
     obs_by_sym: dict[str, dict[str, Any]],
     p16_gate: str,
 ) -> dict[str, Any]:
-    macro_no = edges.get("macro_edge", {}).get("edge") == "NO"
-    index_no = edges.get("index_edge", {}).get("edge") == "NO"
-    stock_yes = edges.get("stock_edge", {}).get("edge") == "YES"
-
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
 
+    picks = _select_stock_picks(ranked, edges, tradeable)
     threshold_msg: str | None = None
-    picks: list[dict[str, Any]] = []
+    if not picks:
+        threshold_msg = "今日无任何标的达到交易阈值"
 
-    if p16_gate == "No Trade":
-        threshold_msg = "P16 交易计划：No Trade"
-    elif macro_no and index_no:
-        if stock_yes and tradeable:
-            stock_only = [r for r in tradeable if r["symbol"] in ("NVDA", "TSLA")]
-            picks = stock_only or tradeable
-            picks = picks[:3]
-        elif tradeable and tradeable[0]["final_score"] > FINAL_SCORE_THRESHOLD:
-            picks = tradeable[:3]
-        else:
-            threshold_msg = "今日无任何标的达到交易阈值"
+    # P16 No Trade / Wait gates index exposure only — stock picks stay independent.
+    if p16_gate in ("No Trade", "Wait"):
+        index_trade = "NO TRADE"
     else:
-        if tradeable:
-            picks = tradeable[:3]
-        elif ranked and ranked[0]["final_score"] > FINAL_SCORE_THRESHOLD:
-            picks = [ranked[0]]
-        else:
-            threshold_msg = "今日无任何标的达到交易阈值"
+        index_trade = _index_trade_label(ranked, edges, direction)
 
     slots: dict[str, Any] = {
         "primary": None,
         "secondary": None,
         "watchlist": None,
-        "index_trade": _index_trade_label(ranked, edges, direction),
+        "index_trade": index_trade,
         "threshold_message": threshold_msg,
         "stock_trades": [],
         "advisory": True,

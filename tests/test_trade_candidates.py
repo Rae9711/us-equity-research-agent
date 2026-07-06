@@ -259,6 +259,52 @@ def test_macro_no_index_no_still_trades_on_stock_edge(_prior, _obs):
 
 @patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
 @patch("src.research.trade_candidates._load_prior_raw")
+def test_p16_no_trade_still_picks_stock_on_stock_edge(_prior, _obs):
+    """P16 No Trade gates index only — stock primary still populated when stock_edge YES."""
+    _prior.return_value = {
+        "stocks": {"quotes": {"TSLA": {"change_pct": 6.0, "close": 240.0}}},
+    }
+    raw = _bullish_raw()
+    edges = compute_edges(
+        raw,
+        catalysts_today=[],
+        qqq_pct=0.1,
+        smh_pct=0.2,
+        spy_pct=0.1,
+        sym_pcts={"TSLA": 2.5, "NVDA": 1.4},
+        driver_type="Momentum",
+    )
+    rule_bundle = {
+        "bias": "Bullish Bias",
+        "total": 3,
+        "driver_type": "Momentum",
+        "daily_driver": "AI Momentum",
+        "catalysts_today": [],
+        "edges": edges,
+    }
+    parts = {
+        "P9": {"buy_options": "No", "zero_dte": "No", "buy_call": "No", "buy_put": "No"},
+        "P11": {"scores": {"VIX": 1, "Bond": 0}},
+        "P13": format_p13_from_edges(edges),
+        "P16": {"judgment": "计划：不交易", "one_liner": "指数观望", "body_md": ""},
+    }
+    result = compute_trade_decision(
+        raw,
+        rule_bundle=rule_bundle,
+        parts=parts,
+        edges=edges,
+    )
+    primary = result["best_trades"]["primary"]
+    assert primary is not None
+    assert primary["symbol"] == "TSLA"
+    assert result["best_trades"]["index_trade"] == "NO TRADE"
+    assert result["best_opportunity"]["direction"] == "LONG"
+    assert result["best_opportunity"]["symbol"] == "TSLA"
+    assert "TSLA" in result["best_opportunity"]["one_liner"]
+
+
+@patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
+@patch("src.research.trade_candidates._load_prior_raw")
 def test_low_scores_threshold_message(_prior, _obs):
     _prior.return_value = {}
     raw = _bullish_raw()

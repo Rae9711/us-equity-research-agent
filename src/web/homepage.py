@@ -155,6 +155,10 @@ def _trade_action(morning: dict[str, Any], step4: dict[str, Any] | None) -> str:
     if step4 is not None:
         return "Trade" if step4.get("should_trade") else "No Trade"
 
+    primary = (morning.get("best_trades") or {}).get("primary")
+    if primary and primary.get("direction") in ("LONG", "SHORT"):
+        return "Trade"
+
     parts = morning.get("parts") or {}
     p16_text = _part_text(parts.get("P16")).lower()
     if any(w in p16_text for w in ("不交易", "放弃", "不追", "no trade", "hold off")):
