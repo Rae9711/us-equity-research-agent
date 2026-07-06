@@ -7,10 +7,12 @@ from typing import Any
 
 from pytz import timezone
 
+from src.collectors.config import load_symbols
 from src.collectors.macro import collect_macro
 from src.collectors.market import collect_market
 from src.collectors.news import collect_news
 from src.collectors.options import collect_options
+from src.collectors.quote_freshness import assess_raw_freshness
 from src.collectors.sector import collect_sectors
 from src.collectors.stocks import collect_stocks
 from src.db import ConclusionRecord, DailyRun
@@ -45,10 +47,10 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
 
     logger.info("Step 0 collect starting for %s", trading_date)
 
-    market = collect_market()
+    market = collect_market(trading_date)
     macro = collect_macro()
-    sector = collect_sectors()
-    stocks = collect_stocks()
+    sector = collect_sectors(trading_date)
+    stocks = collect_stocks(trading_date)
     news = collect_news(published_gte=prior_close_utc_iso(trading_date))
     options = collect_options()
 
@@ -65,12 +67,32 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
     for section, items in checklist.items():
         missing.extend(_flatten_missing(items, section))
 
+    quote_session_dates: dict[str, str | None] = {}
+    cfg = load_symbols()
+    for label in ("SPY", "QQQ"):
+        ticker = cfg["market"][label]
+        q = (market.get("quotes") or {}).get(ticker) or {}
+        quote_session_dates[label] = q.get("quote_session_date")
+
+    payload_preview: dict[str, Any] = {
+        "collected_at": collected_at,
+        "trading_date": trading_date.isoformat(),
+        "prior_trading_day": prior_day.isoformat(),
+        "market": market,
+    }
+    freshness = assess_raw_freshness(payload_preview)
+    if not freshness["ok"]:
+        missing.extend(freshness["reasons"])
+
     data_ready = len(missing) == 0
 
     payload: dict[str, Any] = {
         "collected_at": collected_at,
+        "data_as_of": collected_at,
         "trading_date": trading_date.isoformat(),
         "prior_trading_day": prior_day.isoformat(),
+        "quote_session_dates": quote_session_dates,
+        "freshness": freshness,
         "data_ready": data_ready,
         "missing": missing,
         "checklist": checklist,

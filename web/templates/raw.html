@@ -11,7 +11,22 @@
   <div class="page-wrap">
     <p class="muted"><a href="/?date={{ day.trading_date }}">← 流程首页</a></p>
     <h1 class="page-title">Step 0 — Raw Data</h1>
-    <p class="muted">7:45 ET · 采集于 {{ collected_at }}</p>
+    <p class="muted">7:45 ET · 采集于 {{ collected_at }}{% if data_as_of and data_as_of != collected_at %} · data_as_of {{ data_as_of }}{% endif %}</p>
+
+    {% if freshness and not freshness.ok %}
+    <div class="panel freshness-warn">
+      <strong>数据新鲜度警告</strong>
+      <p class="muted">报价或采集时间与交易日 {{ day.trading_date }} 不一致，请勿用于 Morning Research。</p>
+      <ul class="checklist">
+        {% for reason in freshness.reasons %}
+        <li class="miss">{{ reason }}</li>
+        {% endfor %}
+      </ul>
+      {% if quote_session_dates %}
+      <p class="muted">SPY session {{ quote_session_dates.get('SPY', '—') }} · QQQ session {{ quote_session_dates.get('QQQ', '—') }} · 上一交易日收盘 {{ prior_trading_day or day.prior_trading_date }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% include "_day_header.html" %}
     {% include "_step_nav.html" %}

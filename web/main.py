@@ -305,7 +305,11 @@ def step0_view(request: Request, date: str | None = None) -> HTMLResponse:
         {
             **_page_context(trading_date, active="step0", current_step=0),
             "collected_at": payload.get("collected_at", "—"),
+            "data_as_of": payload.get("data_as_of", payload.get("collected_at", "—")),
+            "quote_session_dates": payload.get("quote_session_dates", {}),
+            "prior_trading_day": payload.get("prior_trading_day"),
             "data_ready": payload.get("data_ready", False),
+            "freshness": payload.get("freshness"),
             "checklist": payload.get("checklist", {}),
             "missing": payload.get("missing", []),
             "conclusion": payload.get("conclusion"),
