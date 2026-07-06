@@ -20,10 +20,7 @@ def step0_available(trading_date: str) -> bool:
     payload = _load_raw(trading_date)
     if not payload:
         return False
-    freshness = payload.get("freshness") or {}
-    if freshness:
-        return bool(payload.get("data_ready")) and bool(freshness.get("ok"))
-    # Legacy files without freshness metadata: require data_ready only.
+    # data_ready already excludes freshness warnings; hard failures are in missing.
     return bool(payload.get("data_ready"))
 
 

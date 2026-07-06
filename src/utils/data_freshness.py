@@ -96,6 +96,10 @@ def _validate_quote(
         issues.append(f"{label}: {q.get('error')}")
         return issues
 
+    # FRED series observations (value/date) are not equity session quotes.
+    if q.get("value") is not None and q.get("close") is None:
+        return issues
+
     qsd = parse_quote_session_date(q)
     if qsd is None:
         issues.append(f"{label}: 缺少 quote_session_date")

@@ -95,6 +95,7 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
     for warn in freshness.get("warnings") or []:
         missing.append(f"⚠ {warn}")
 
+    # Warnings (e.g. lagging FRED macro) must not block data_ready.
     data_ready = len([m for m in missing if not str(m).startswith("⚠")]) == 0
 
     payload.update({
