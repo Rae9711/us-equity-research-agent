@@ -12,10 +12,74 @@
   <div class="page-wrap">
     <p class="muted"><a href="/?date={{ day.trading_date }}">← 流程首页</a></p>
     <h1 class="page-title">Step 1 — Morning Research</h1>
-    <p class="muted">8:00 ET · R0 → P1–P16 → P17 Hypothesis</p>
+    <p class="muted">8:00 ET · R0 → P1–P16 → P17 Hypothesis → P18 Trade Candidates</p>
 
     {% include "_day_header.html" %}
     {% include "_step_nav.html" %}
+
+    {% if meta and meta.get('best_opportunity') %}
+    {% set best = meta.best_opportunity %}
+    <section class="best-opportunity-panel" id="best-opportunity">
+      <h2 class="section-title">🥇 Best Opportunity Today</h2>
+      <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
+      <div class="best-opp-grid">
+        <div><span class="decision-label">Direction</span><strong>{{ best.direction }}</strong></div>
+        <div><span class="decision-label">Symbol</span><strong>{{ best.symbol }}</strong></div>
+        <div><span class="decision-label">Instrument</span><strong>{{ best.instrument }}</strong></div>
+        <div><span class="decision-label">Confidence</span><strong>{{ best.confidence }}%</strong></div>
+        <div><span class="decision-label">Entry</span><strong>{{ best.entry }}</strong></div>
+        <div><span class="decision-label">Stop</span><strong>{{ best.stop }}</strong></div>
+        <div><span class="decision-label">Target</span><strong>{{ best.target }}</strong></div>
+        <div><span class="decision-label">Duration</span><strong>{{ best.duration }}</strong></div>
+      </div>
+      <p><strong>Why：</strong>{{ best.why_chain or (best.why | join(' · ')) }}</p>
+      <p><strong>Avoid：</strong>{{ best.avoid | join(', ') }}</p>
+      <p class="best-opp-oneliner">「{{ best.one_liner }}」</p>
+    </section>
+    {% endif %}
+
+    {% if meta and meta.get('trade_candidates') %}
+    <section class="candidates-panel" id="candidates">
+      <h2 class="section-title">P18 Trade Candidates</h2>
+      <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
+      <div class="conclusion-index-scroll">
+        <table class="data-table candidates-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Symbol</th>
+              <th>Score</th>
+              <th>Why</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in meta.trade_candidates %}
+            <tr class="candidate-row">
+              <td>{{ row.rank }}</td>
+              <td><strong>{{ row.symbol }}</strong></td>
+              <td>{{ row.score }}</td>
+              <td>{{ row.why }}</td>
+              <td>
+                <details class="candidate-detail">
+                  <summary>详情</summary>
+                  <div class="candidate-detail-card">
+                    {% set d = row.detail %}
+                    <p><strong>{{ row.symbol }}</strong> · {{ d.direction }} · {{ d.instrument }}</p>
+                    <p>Entry {{ d.entry }} · Stop {{ d.stop }} · Target {{ d.target }}</p>
+                    <p>Conviction {{ d.conviction }}% · R:R {{ d.rr_ratio }}</p>
+                    <ul>{% for r in d.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+                    <p class="muted">Avoid: {{ d.avoid | join(', ') }}</p>
+                  </div>
+                </details>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
 
     {% include "_conclusion_index.html" %}
 

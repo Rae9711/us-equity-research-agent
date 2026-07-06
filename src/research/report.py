@@ -19,7 +19,7 @@ def render_morning_report(
     lines = [
         f"# Morning Research — {trading_date}",
         "",
-        "> Step 1 · 8:00 AM ET · ADVISORY ONLY",
+        "> Step 1 · 8:00 AM ET · ADVISORY ONLY — 不构成投资建议",
         "",
     ]
     if rule_meta:
@@ -27,6 +27,13 @@ def render_morning_report(
             f"**综合 Bias**：{rule_meta.get('bias', 'N/A')} · **Total**：{rule_meta.get('total', 0):+d}",
             "",
         ]
+
+    best = (rule_meta or {}).get("best_opportunity") or {}
+    candidates = (rule_meta or {}).get("trade_candidates") or []
+    if best:
+        lines += _render_best_opportunity_section(best)
+    if candidates:
+        lines += _render_candidates_section(candidates)
 
     lines.append("## 结论总表")
     lines.append("")
@@ -49,6 +56,8 @@ def render_morning_report(
             body = format_scenario_body(p.get("body_md") or "", part_id=pid)
         elif pid == "P17":
             body = _format_hypothesis_body(p.get("hypothesis") or {})
+        elif pid == "P18":
+            body = p.get("body_md") or ""
         else:
             body = normalize_body_md(p.get("body_md") or "")
 
@@ -68,6 +77,45 @@ def render_morning_report(
         ]
 
     return "\n".join(lines)
+
+
+def _render_best_opportunity_section(best: dict[str, Any]) -> list[str]:
+    why = best.get("why_chain") or " · ".join(best.get("why") or [])
+    avoid = ", ".join(best.get("avoid") or [])
+    return [
+        "## 🥇 Best Opportunity Today",
+        "",
+        "> ADVISORY — 不构成投资建议",
+        "",
+        f"- **Direction**：{best.get('direction', '—')}",
+        f"- **Symbol**：{best.get('symbol', '—')}",
+        f"- **Instrument**：{best.get('instrument', '—')}",
+        f"- **Confidence**：{best.get('confidence', '—')}%",
+        f"- **Entry**：{best.get('entry', '—')}",
+        f"- **Stop**：{best.get('stop', '—')}",
+        f"- **Target**：{best.get('target', '—')}",
+        f"- **Duration**：{best.get('duration', '—')}",
+        f"- **Why**：{why}",
+        f"- **Avoid**：{avoid}",
+        f"- **One-liner**：{best.get('one_liner', '—')}",
+        "",
+    ]
+
+
+def _render_candidates_section(candidates: list[dict[str, Any]]) -> list[str]:
+    lines = [
+        "## P18 Trade Candidates",
+        "",
+        "| Rank | Symbol | Score | Why |",
+        "|------|--------|-------|-----|",
+    ]
+    for row in candidates:
+        lines.append(
+            f"| {row.get('rank', '—')} | {row.get('symbol', '—')} | "
+            f"{row.get('score', '—')} | {row.get('why', '—')} |"
+        )
+    lines.append("")
+    return lines
 
 
 def _format_hypothesis_body(hypothesis: dict[str, Any]) -> str:

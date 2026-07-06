@@ -245,7 +245,7 @@ def _watch_variables(morning: dict[str, Any], driver: str) -> list[str]:
 
 
 def build_decision_card(trading_date: str) -> dict[str, Any] | None:
-    """Build 一页纸决策卡 from morning JSON (+ Step 4 if available)."""
+    """Build Executive Summary decision card from morning JSON (+ Step 4 if available)."""
     d = date_type.fromisoformat(trading_date)
     from src.utils.trading_calendar import is_trading_day
 
@@ -263,7 +263,6 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
 
     step4 = load_step4(trading_date)
     driver_info = _extract_driver(morning)
-    driver = driver_info["display"]
     hyp = morning.get("hypothesis") or {}
     p17 = (morning.get("parts") or {}).get("P17") or {}
 
@@ -271,16 +270,55 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     if hyp.get("id"):
         hypothesis_line = f"{hyp['id']} · {hypothesis_line}"
 
+    exec_sum = morning.get("executive_summary") or {}
+    best = morning.get("best_opportunity") or {}
+    bias_raw = morning.get("bias") or "—"
+    from src.research.trade_candidates import _bias_stars
+
+    bias_stars = exec_sum.get("bias_stars") or _bias_stars(str(bias_raw))
+
+    if not exec_sum and best:
+        from src.research.trade_candidates import build_executive_summary
+
+        exec_sum = build_executive_summary(
+            bias=bias_raw,
+            bias_stars=bias_stars,
+            driver_type=driver_info["driver_type"],
+            driver=driver_info["driver"],
+            best=best,
+        )
+
+    # Trade action: prefer best_opportunity direction, else legacy
+    trade_action = _trade_action(morning, step4)
+    if best.get("direction") == "NO TRADE":
+        trade_action = "No Trade"
+    elif best.get("direction") in ("LONG", "SHORT") and trade_action == "Wait":
+        trade_action = "Trade"
+
     return {
-        "driver": driver,
-        "driver_type": driver_info["driver_type"],
-        "driver_label": driver_info["driver"],
-        "bias": _extract_bias(morning),
-        "trade_action": _trade_action(morning, step4),
+        "driver": driver_info["display"],
+        "driver_type": exec_sum.get("driver_type") or driver_info["driver_type"],
+        "driver_label": exec_sum.get("driver") or driver_info["driver"],
+        "bias": f"{bias_raw} {bias_stars}".strip() if bias_stars else _extract_bias(morning),
+        "bias_stars": bias_stars,
+        "best_trade": exec_sum.get("best_trade") or (
+            f"{best.get('symbol', '—')} · {best.get('direction', '—')} · "
+            f"{best.get('instrument', '—')}"
+        ),
+        "confidence": exec_sum.get("confidence") or best.get("confidence"),
+        "entry": exec_sum.get("entry") or best.get("entry", "—"),
+        "stop": exec_sum.get("stop") or best.get("stop", "—"),
+        "target": exec_sum.get("target") or best.get("target", "—"),
+        "why_chain": exec_sum.get("why_chain") or best.get("why_chain", "—"),
+        "one_liner": exec_sum.get("one_liner") or best.get("one_liner", "—"),
+        "trade_action": trade_action,
         "invalidation": _extract_invalidation(morning),
-        "watch_variables": _watch_variables(morning, driver),
+        "watch_variables": _watch_variables(morning, driver_info["display"]),
         "hypothesis": hypothesis_line[:200],
         "has_morning": True,
+        "advisory": "ADVISORY — 不构成投资建议",
+        "trade_candidates": morning.get("trade_candidates") or [],
+        "best_opportunity": best,
     }
 
 

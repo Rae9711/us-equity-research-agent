@@ -179,6 +179,52 @@ def run_morning_research(
             "body_md": "",
         }
 
+    # Step 1d: P18 Trade Candidates + Best Opportunity
+    trade_decision: dict[str, Any] = {}
+    try:
+        from src.research.trade_candidates import (
+            build_executive_summary,
+            build_p18_part,
+            compute_trade_decision,
+        )
+        trade_decision = compute_trade_decision(
+            raw,
+            rule_bundle=rule_bundle,
+            parts=parts,
+            regime_label=regime_model.label,
+            regime_confidence=regime_model.confidence,
+        )
+        parts["P18"] = build_p18_part(
+            trade_decision["trade_candidates"],
+            trade_decision["best_opportunity"],
+        )
+        logger.info(
+            "P18 Best Opportunity: %s %s (conf=%s%%)",
+            trade_decision["best_opportunity"].get("direction"),
+            trade_decision["best_opportunity"].get("symbol"),
+            trade_decision["best_opportunity"].get("confidence"),
+        )
+    except Exception:
+        logger.exception("P18 Trade Candidates failed")
+        parts["P18"] = {
+            "judgment": "Trade Candidates：N/A",
+            "confidence": None,
+            "one_liner": "Trade Candidates 引擎未生成",
+            "body_md": "",
+        }
+
+    executive_summary = None
+    if trade_decision:
+        from src.research.trade_candidates import build_executive_summary
+
+        executive_summary = build_executive_summary(
+            bias=rule_bundle.get("bias") or "Neutral",
+            bias_stars=trade_decision.get("bias_stars", ""),
+            driver_type=rule_bundle.get("driver_type") or "",
+            driver=rule_bundle.get("daily_driver") or "",
+            best=trade_decision.get("best_opportunity") or {},
+        )
+
     payload: dict[str, Any] = {
         "generated_at": datetime.now(ET).isoformat(),
         "trading_date": date_str,
@@ -192,12 +238,21 @@ def run_morning_research(
         "parts": parts,
         "r0": {"label": regime_model.label, "confidence": regime_model.confidence} if regime_model else None,
         "hypothesis": hypothesis_model.model_dump() if hypothesis_model else None,
+        "trade_candidates": trade_decision.get("trade_candidates") or [],
+        "best_opportunity": trade_decision.get("best_opportunity") or {},
+        "executive_summary": executive_summary,
     }
 
     report_md = render_morning_report(
         date_str,
         parts,
-        {"bias": rule_bundle.get("bias"), "total": rule_bundle.get("total")},
+        {
+            "bias": rule_bundle.get("bias"),
+            "total": rule_bundle.get("total"),
+            "best_opportunity": trade_decision.get("best_opportunity"),
+            "trade_candidates": trade_decision.get("trade_candidates"),
+            "executive_summary": executive_summary,
+        },
     )
     morning_report_path(date_str).write_text(report_md, encoding="utf-8")
     morning_json_path(date_str).write_text(
@@ -216,10 +271,14 @@ def run_morning_research(
                 "total": rule_bundle.get("total"),
                 "driver_type": rule_bundle.get("driver_type"),
                 "daily_driver": rule_bundle.get("daily_driver"),
+                "best_opportunity": trade_decision.get("best_opportunity") or {},
+                "trade_candidates": trade_decision.get("trade_candidates") or [],
             },
             "labels": {
                 "agent_driver": rule_bundle.get("daily_driver"),
                 "agent_driver_type": rule_bundle.get("driver_type"),
+                "trade_recommendation": (trade_decision.get("best_opportunity") or {}).get("symbol"),
+                "trade_direction": (trade_decision.get("best_opportunity") or {}).get("direction"),
             },
             "features": features.model_dump() if features else {},
         })
@@ -245,6 +304,9 @@ def resync_morning_from_disk(trading_date: date | None = None) -> dict[str, Any]
         {
             "bias": payload.get("bias"),
             "total": payload.get("total_score"),
+            "best_opportunity": payload.get("best_opportunity"),
+            "trade_candidates": payload.get("trade_candidates"),
+            "executive_summary": payload.get("executive_summary"),
         },
     )
     morning_report_path(date_str).write_text(report_md, encoding="utf-8")
@@ -265,7 +327,7 @@ def _persist_morning(payload: dict[str, Any]) -> None:
                 message=f"Bias: {payload.get('bias')} · Total: {payload.get('total_score')}",
             )
         )
-        for pid in ["R0"] + PART_ORDER + ["P17"]:
+        for pid in ["R0"] + PART_ORDER + ["P17", "P18"]:
             part = payload["parts"].get(pid) or {}
             existing = (
                 session.query(ConclusionRecord)

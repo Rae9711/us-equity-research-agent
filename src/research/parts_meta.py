@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 PART_ORDER = [f"P{i}" for i in range(1, 17)]
-MORNING_REPORT_ORDER = ["R0"] + PART_ORDER + ["P17"]
+MORNING_REPORT_ORDER = ["R0"] + PART_ORDER + ["P17", "P18"]
 
 # title: 表格与章节标题；about: 这个 Part 是干什么的
 PART_META: dict[str, dict[str, str]] = {
@@ -80,6 +80,10 @@ PART_META: dict[str, dict[str, str]] = {
     "P17": {
         "title": "Hypothesis",
         "about": "可验证假设：Evidence / Counter / 状态（待验证 → 盘中更新）",
+    },
+    "P18": {
+        "title": "Trade Candidates",
+        "about": "候选标的排名 + Best Opportunity 决策输出（ADVISORY — 不构成投资建议）",
     },
 }
 

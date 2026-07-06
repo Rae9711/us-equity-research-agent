@@ -60,6 +60,8 @@ class LabelsModel(BaseModel):
     scenario_primary: Optional[str] = None  # A | B | C — morning P15 pick
     scenario_actual: Optional[str] = None  # A | B | C | none
     scenario_correct: Optional[bool] = None
+    trade_recommendation: Optional[str] = None  # P18 best symbol
+    trade_direction: Optional[str] = None  # LONG | SHORT | NO TRADE
 
 
 class MarketCaseModel(BaseModel):

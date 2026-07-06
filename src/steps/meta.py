@@ -15,7 +15,7 @@ class StepDef:
 
 STEPS: list[StepDef] = [
     StepDef(0, "Step0", "7:45", "数据更新", "Raw Data 采集", "collect_raw"),
-    StepDef(1, "Step1", "8:00", "Morning Research", "R0 → P1–P16 → P17 Hypothesis", "morning_research"),
+    StepDef(1, "Step1", "8:00", "Morning Research", "R0 → P1–P16 → P17 → P18 Decision", "morning_research"),
     StepDef(2, "S2", "9:30", "Open", "开盘观察 · 不交易", "open_report"),
     StepDef(3, "S3", "10:00", "Market Update", "Driver 切换 · 重算 Score", "market_update"),
     StepDef(4, "S4", "10:15", "Trading Decision", "建议 only · ADVISORY", "trade_decision"),

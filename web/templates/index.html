@@ -73,46 +73,57 @@
     {% elif decision_card %}
     <section class="panel decision-card">
       <div class="decision-card-head">
-        <h2 class="section-title-inline">Morning 一页纸 · 决策卡</h2>
-        <a class="muted" href="/step/1?date={{ day.trading_date }}">完整 Morning →</a>
+        <h2 class="section-title-inline">Executive Summary · 今日决策</h2>
+        <a class="muted" href="/today?date={{ day.trading_date }}">完整 Morning →</a>
       </div>
-      <div class="decision-grid">
+      <p class="advisory-banner">{{ decision_card.advisory }}</p>
+      <div class="decision-grid decision-grid-exec">
         <div class="decision-field">
-          <span class="decision-label">Driver Type</span>
-          <span class="decision-value">{{ decision_card.driver_type }}</span>
-        </div>
-        <div class="decision-field">
-          <span class="decision-label">Driver</span>
-          <span class="decision-value">{{ decision_card.driver_label }}</span>
-        </div>
-        <div class="decision-field">
-          <span class="decision-label">Bias</span>
+          <span class="decision-label">1 · Today's Bias</span>
           <span class="decision-value">{{ decision_card.bias }}</span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">Trade · Wait · No Trade</span>
-          {% set ta = decision_card.trade_action %}
-          <span class="decision-value">
-            <span class="trade-badge trade-{{ ta | lower | replace(' ', '-') }}">{{ ta }}</span>
-          </span>
+          <span class="decision-label">2 · Today's Driver</span>
+          <span class="decision-value">{{ decision_card.driver_type }} — {{ decision_card.driver_label }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">3 · Best Trade</span>
+          <span class="decision-value decision-best-trade">{{ decision_card.best_trade }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">4 · Confidence</span>
+          <span class="decision-value">{% if decision_card.confidence is not none %}{{ decision_card.confidence }}%{% else %}—{% endif %}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">5 · Entry</span>
+          <span class="decision-value">{{ decision_card.entry }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">6 · Stop</span>
+          <span class="decision-value">{{ decision_card.stop }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">7 · Target</span>
+          <span class="decision-value">{{ decision_card.target }}</span>
         </div>
         <div class="decision-field decision-field-wide">
-          <span class="decision-label">失效条件</span>
-          <span class="decision-value">{{ decision_card.invalidation }}</span>
-        </div>
-        <div class="decision-field">
-          <span class="decision-label">今日只盯 · 变量 1</span>
-          <span class="decision-value">{{ decision_card.watch_variables[0] }}</span>
-        </div>
-        <div class="decision-field">
-          <span class="decision-label">今日只盯 · 变量 2</span>
-          <span class="decision-value">{{ decision_card.watch_variables[1] }}</span>
+          <span class="decision-label">8 · Why</span>
+          <span class="decision-value">{{ decision_card.why_chain }}</span>
         </div>
       </div>
-      <div class="decision-hypothesis">
-        <span class="decision-label">Hypothesis (P17)</span>
-        <span class="decision-value">{{ decision_card.hypothesis }}</span>
+      {% if decision_card.one_liner and decision_card.one_liner != '—' %}
+      <p class="decision-oneliner">「{{ decision_card.one_liner }}」</p>
+      {% endif %}
+      <div class="decision-meta-row">
+        {% set ta = decision_card.trade_action %}
+        <span class="trade-badge trade-{{ ta | lower | replace(' ', '-') }}">{{ ta }}</span>
+        <a class="muted" href="/today?date={{ day.trading_date }}#candidates">Bond · Dollar · Sector 证据 →</a>
       </div>
+      <details class="decision-hypothesis">
+        <summary class="decision-label">Hypothesis (P17) · 失效条件</summary>
+        <p class="decision-value">{{ decision_card.hypothesis }}</p>
+        <p class="decision-value muted">{{ decision_card.invalidation }}</p>
+      </details>
     </section>
 
     {% if relative_strength %}
