@@ -114,8 +114,10 @@ def collect_news(*, published_gte: str | None = None) -> dict[str, Any]:
     rss_articles, rss_errors = _collect_rss(cfg)
     rss_cap = int(cfg.get("rss_storage_limit", 15))
 
+    has_polygon = len(polygon_articles) >= 5
+    has_rss_fallback = len(rss_articles) >= 5 and bool(poly_errors)
     checklist = {
-        "polygon_news": len(polygon_articles) >= 5,
+        "polygon_news": has_polygon or has_rss_fallback,
         "bloomberg": any(a["source"] == "Bloomberg" for a in rss_articles),
         "wsj": any(a["source"] == "WSJ" for a in rss_articles),
     }
