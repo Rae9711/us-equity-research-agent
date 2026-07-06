@@ -59,6 +59,23 @@ def _quote_chg(q: dict[str, Any], prior_q: dict[str, Any] | None = None) -> floa
     return _pct_chg(cur, prv)
 
 
+def _quote_chg_or_session(
+    sym: str,
+    q: dict[str, Any],
+    prior_q: dict[str, Any] | None,
+    *,
+    section: str,
+    trading_date: date,
+    prior_raw: dict[str, Any],
+) -> float | None:
+    bar_day = quote_bar_date(q)
+    if bar_day is not None and bar_day < trading_date:
+        prior_px = prior_close_from_raw(prior_raw, section=section, ticker=sym)
+        live = intraday_session_quote(sym, trading_date, prior_px)
+        return live.get("change_pct") if "error" not in live else None
+    return _quote_chg(q, prior_q)
+
+
 def build_features(trading_date: date | None = None) -> FeaturesModel:
     """Build features from raw data files for given trading date."""
     trading_date = trading_date or today_et()
@@ -146,12 +163,18 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
     # SMH (semiconductor ETF)
     smh_q = _quote(sector, "SMH")
     prior_smh_q = _quote(prior_sector, "SMH")
-    smh_chg = _quote_chg(smh_q, prior_smh_q)
+    smh_chg = _quote_chg_or_session(
+        "SMH", smh_q, prior_smh_q,
+        section="sector", trading_date=trading_date, prior_raw=prior_raw,
+    )
 
     # NVDA
     nvda_q = _quote(stocks, "NVDA")
     prior_nvda_q = _quote(prior_stocks, "NVDA")
-    nvda_chg = _quote_chg(nvda_q, prior_nvda_q)
+    nvda_chg = _quote_chg_or_session(
+        "NVDA", nvda_q, prior_nvda_q,
+        section="stocks", trading_date=trading_date, prior_raw=prior_raw,
+    )
 
     # Oil (XLE as proxy)
     xle_q = _quote(sector, "XLE")
@@ -164,14 +187,11 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
     valid_count = 0
     for sym in mag7:
         cur_p = _quote(stocks, sym)
-        bar_day = quote_bar_date(cur_p)
-        if bar_day is not None and bar_day < trading_date:
-            prior_px = prior_close_from_raw(prior_raw, section="stocks", ticker=sym)
-            live = intraday_session_quote(sym, trading_date, prior_px)
-            chg = live.get("change_pct") if "error" not in live else None
-        else:
-            prv_p = _quote(prior_stocks, sym)
-            chg = _quote_chg(cur_p, prv_p)
+        prv_p = _quote(prior_stocks, sym)
+        chg = _quote_chg_or_session(
+            sym, cur_p, prv_p,
+            section="stocks", trading_date=trading_date, prior_raw=prior_raw,
+        )
         if chg is not None:
             valid_count += 1
             if chg > 0:

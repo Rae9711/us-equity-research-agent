@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from typing import Any
+
+from src.utils.paths import raw_data_path
+from src.utils.quote_resolve import session_change_pct
+from src.utils.trading_calendar import prior_trading_day
 
 # Mapping from macro release keywords → short catalyst label used in P13.
 # Order matters: labor/inflation before generic Fed/FOMC.
@@ -82,6 +87,32 @@ def catalysts_on_date(calendar: list[dict[str, Any]], target_date: str) -> list[
 def _pct(q: dict[str, Any]) -> float | None:
     v = q.get("change_pct")
     return float(v) if v is not None else None
+
+
+def _load_prior_raw(trading_day: date) -> dict[str, Any]:
+    prior_path = raw_data_path(prior_trading_day(trading_day).isoformat())
+    if not prior_path.exists():
+        return {}
+    try:
+        return json.loads(prior_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _session_pct(
+    ticker: str,
+    raw: dict[str, Any],
+    prior_raw: dict[str, Any],
+    trading_day: date | None,
+    q: dict[str, Any],
+    *,
+    section: str,
+) -> float | None:
+    if trading_day is not None:
+        pct = session_change_pct(ticker, raw, prior_raw, trading_day, section=section)
+        if pct is not None:
+            return pct
+    return _pct(q)
 
 
 def _fred_value(raw: dict[str, Any], key: str) -> float | None:
@@ -188,6 +219,14 @@ def _pre_holiday(raw: dict[str, Any]) -> bool:
 
 def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     trading_date = str(raw.get("trading_date") or "")
+    trading_day: date | None = None
+    if trading_date:
+        try:
+            trading_day = date.fromisoformat(trading_date)
+        except ValueError:
+            trading_day = None
+    prior_raw = _load_prior_raw(trading_day) if trading_day else {}
+
     market_quotes = (raw.get("market") or {}).get("quotes") or {}
     dxy = market_quotes.get("DX-Y.NYB") or {}
     vix = market_quotes.get("^VIX") or {}
@@ -206,7 +245,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         elif dgs10 <= 4.0:
             bond_direction, bond_score = "Down", 1
 
-    dxy_pct = _pct(dxy)
+    dxy_pct = _session_pct("DX-Y.NYB", raw, prior_raw, trading_day, dxy, section="market")
     dxy_dir = _score_direction(dxy_pct)
     dollar_score = 0
     if dxy_dir == "Up":
@@ -217,7 +256,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         "Negative" if dollar_score < 0 else "Positive" if dollar_score > 0 else "Neutral"
     )
 
-    vix_pct = _pct(vix)
+    vix_pct = _session_pct("^VIX", raw, prior_raw, trading_day, vix, section="market")
     vix_dir = _score_direction(vix_pct, threshold=2.0)
     vix_score = 0
     panic = "Low"
@@ -236,7 +275,9 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         sector_rows.append(
             {
                 "sector": name,
-                "change_pct": q.get("change_pct"),
+                "change_pct": _session_pct(
+                    name, raw, prior_raw, trading_day, q, section="sector"
+                ),
                 "close": q.get("close"),
             }
         )
@@ -249,12 +290,12 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         else 0
     )
 
-    spy_pct = _pct(spy_q)
-    qqq_pct = _pct(qqq_q)
-    dow_pct = _pct(dia_q)
+    spy_pct = _session_pct("SPY", raw, prior_raw, trading_day, spy_q, section="market")
+    qqq_pct = _session_pct("QQQ", raw, prior_raw, trading_day, qqq_q, section="market")
+    dow_pct = _session_pct("DIA", raw, prior_raw, trading_day, dia_q, section="market")
     smh = sector_quotes.get("SMH") or {}
     xlk = sector_quotes.get("XLK") or {}
-    smh_pct = _pct(smh)
+    smh_pct = _session_pct("SMH", raw, prior_raw, trading_day, smh, section="sector")
 
     p1_label, is_divergence = _index_divergence(dow_pct, spy_pct, qqq_pct, smh_pct)
     if is_divergence:
@@ -283,9 +324,10 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     from src.utils.news_signals import extract_news_signals
 
     news_signals = extract_news_signals(raw.get("news"))
+    nvda_q = (raw.get("stocks") or {}).get("quotes", {}).get("NVDA") or {}
     chip_selloff = _chip_selloff_signal(
         smh_pct,
-        _pct((raw.get("stocks") or {}).get("quotes", {}).get("NVDA") or {}),
+        _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks"),
         int(news_signals.get("news_ai_mentions") or 0),
         int(news_signals.get("news_macro_mentions") or 0),
     )
@@ -296,8 +338,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     buy_options = "No" if catalyst_today or pre_holiday else ("Yes" if iv_level in ("Low", "Medium") else "No")
 
     stock_quotes = (raw.get("stocks") or {}).get("quotes") or {}
-    nvda = stock_quotes.get("NVDA") or {}
-    nvda_pct = _pct(nvda)
+    nvda_pct = _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks")
 
     ai_score = 0
     if smh_pct is not None and smh_pct > 0:
@@ -309,7 +350,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     mag7_rows: list[dict[str, Any]] = []
     for sym in mag7_syms:
         q = stock_quotes.get(sym) or {}
-        pct = _pct(q)
+        pct = _session_pct(sym, raw, prior_raw, trading_day, q, section="stocks")
         if pct is None:
             continue
         mag7_rows.append({"symbol": sym, "change_pct": pct})
@@ -359,7 +400,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         "AI": ai_score,
         "Earnings": 0,
         "Breadth": 1 if avg_sector > 0 else -1 if avg_sector < 0 else 0,
-        "Momentum": 1 if _pct(market_quotes.get("QQQ") or {}) and _pct(market_quotes.get("QQQ") or {}) > 0 else -1,
+        "Momentum": 1 if qqq_pct is not None and qqq_pct > 0 else -1,
     }
     total = sum(scores.values())
     if total >= 5:
@@ -470,7 +511,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             ai_signals=ai_signals,
             smh_pct=smh_pct,
             nvda_pct=nvda_pct,
-            xlk_pct=_pct(xlk),
+            xlk_pct=_session_pct("XLK", raw, prior_raw, trading_day, xlk, section="sector"),
             mag7_rows=mag7_rows,
             mag7_breadth=mag7_breadth,
             mag7_avg=mag7_avg,
