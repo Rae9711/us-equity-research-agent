@@ -145,6 +145,20 @@ def employment_situation_date(year: int, month: int) -> date:
     return friday
 
 
+def next_employment_situation_date(d: date | None = None) -> date:
+    """Next upcoming BLS NFP release on or after d."""
+    d = d or today_et()
+    cur_month = employment_situation_date(d.year, d.month)
+    if cur_month >= d:
+        return cur_month
+    month = d.month + 1
+    year = d.year
+    if month > 12:
+        month = 1
+        year += 1
+    return employment_situation_date(year, month)
+
+
 def market_open_et(d: date | None = None) -> datetime:
     """US cash equity session open — 9:30 AM ET."""
     d = d or today_et()

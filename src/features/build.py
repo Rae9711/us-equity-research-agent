@@ -14,6 +14,7 @@ from typing import Any
 from src.schemas.market_case import FeaturesModel
 from src.utils.news_signals import extract_news_signals
 from src.utils.paths import raw_data_path
+from src.utils.quote_resolve import intraday_session_quote, prior_close_from_raw, quote_bar_date
 from src.utils.trading_calendar import prior_trading_day, today_et
 
 logger = logging.getLogger(__name__)
@@ -103,16 +104,33 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
     vix = _safe_float(vix_q, "close") or _safe_float(vix_q, "current_price")
     vix_chg = _quote_chg(vix_q, prior_vix_q)
 
-    # QQQ
+    # QQQ — avoid stale pre-open Step 0 bars after holiday weekends
     qqq_q = _quote(market, "QQQ")
     prior_qqq_q = _quote(prior_market, "QQQ")
-    qqq_close = _safe_float(qqq_q, "close") or _safe_float(qqq_q, "current_price")
-    qqq_open = _safe_float(qqq_q, "open")
-    prior_qqq = _safe_float(prior_qqq_q, "close") or _safe_float(prior_qqq_q, "current_price")
+    qqq_bar = quote_bar_date(qqq_q)
+    prior_qqq = prior_close_from_raw(
+        prior_raw, section="market", ticker="QQQ"
+    ) or _safe_float(prior_qqq_q, "close") or _safe_float(prior_qqq_q, "current_price")
     if prior_qqq is None:
         prior_qqq = _safe_float(qqq_q, "prev_close")
-    qqq_chg = _quote_chg(qqq_q, prior_qqq_q)
-    qqq_gap = _pct_chg(qqq_open, prior_qqq) if qqq_open and prior_qqq else None
+
+    if qqq_bar is not None and qqq_bar < trading_date:
+        live_qqq = intraday_session_quote("QQQ", trading_date, prior_qqq)
+        if "error" not in live_qqq:
+            qqq_close = live_qqq.get("last")
+            qqq_open = live_qqq.get("open")
+            qqq_chg = live_qqq.get("change_pct")
+            qqq_gap = live_qqq.get("gap_pct")
+        else:
+            qqq_close = prior_qqq
+            qqq_open = None
+            qqq_chg = None
+            qqq_gap = None
+    else:
+        qqq_close = _safe_float(qqq_q, "close") or _safe_float(qqq_q, "current_price")
+        qqq_open = _safe_float(qqq_q, "open")
+        qqq_chg = _quote_chg(qqq_q, prior_qqq_q)
+        qqq_gap = _pct_chg(qqq_open, prior_qqq) if qqq_open and prior_qqq else None
 
     # SPY
     spy_q = _quote(market, "SPY")
@@ -146,8 +164,14 @@ def build_features(trading_date: date | None = None) -> FeaturesModel:
     valid_count = 0
     for sym in mag7:
         cur_p = _quote(stocks, sym)
-        prv_p = _quote(prior_stocks, sym)
-        chg = _quote_chg(cur_p, prv_p)
+        bar_day = quote_bar_date(cur_p)
+        if bar_day is not None and bar_day < trading_date:
+            prior_px = prior_close_from_raw(prior_raw, section="stocks", ticker=sym)
+            live = intraday_session_quote(sym, trading_date, prior_px)
+            chg = live.get("change_pct") if "error" not in live else None
+        else:
+            prv_p = _quote(prior_stocks, sym)
+            chg = _quote_chg(cur_p, prv_p)
         if chg is not None:
             valid_count += 1
             if chg > 0:

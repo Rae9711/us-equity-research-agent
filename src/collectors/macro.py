@@ -6,7 +6,7 @@ from typing import Any
 
 from src.collectors.config import load_symbols
 from src.collectors.fred_client import FredClient
-from src.utils.trading_calendar import employment_situation_date, today_et
+from src.utils.trading_calendar import employment_situation_date, next_employment_situation_date, today_et
 
 
 def _days_until(text: str, today: date) -> int | None:
@@ -96,13 +96,12 @@ def collect_macro() -> dict[str, Any]:
     _inject_nfp_holiday_move(calendar, today)
 
     if nonfarm_days is None:
-        nfp_target = employment_situation_date(today.year, today.month)
-        delta = (nfp_target - today).days
-        if delta >= 0:
-            nonfarm_days = delta
+        nfp_target = next_employment_situation_date(today)
+        nonfarm_days = (nfp_target - today).days
 
     checklist["economic_calendar"] = len(calendar) > 0
     checklist["nonfarm_countdown"] = nonfarm_days is not None
+    # False = not NFP today (valid); only exclude from missing via step0 skip set
     checklist["nfp_release_day"] = nfp_release_today
     checklist["unemployment_rate"] = _series_present(series, "UNRATE")
     checklist["avg_hourly_earnings"] = _series_present(series, "AHETPI")
@@ -114,7 +113,7 @@ def collect_macro() -> dict[str, Any]:
         "economic_calendar": calendar[:15],
         "nonfarm_days_until": nonfarm_days,
         "nfp_release_today": nfp_release_today,
-        "employment_situation_date": employment_situation_date(today.year, today.month).isoformat(),
+        "employment_situation_date": next_employment_situation_date(today).isoformat(),
         "errors": errors,
         "ok": len(errors) == 0 and checklist.get("fed", False),
     }

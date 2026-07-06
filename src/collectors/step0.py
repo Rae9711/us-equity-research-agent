@@ -21,9 +21,18 @@ from src.utils.trading_calendar import ET, prior_trading_day, prior_close_utc_is
 logger = logging.getLogger(__name__)
 
 
+# Checklist keys where False is a valid state (not absent data).
+_SKIP_MISSING_KEYS: dict[str, frozenset[str]] = {
+    "macro": frozenset({"nfp_release_day"}),
+}
+
+
 def _flatten_missing(checklist: dict[str, Any], prefix: str) -> list[str]:
+    skip = _SKIP_MISSING_KEYS.get(prefix, frozenset())
     missing: list[str] = []
     for key, ok in checklist.items():
+        if key in skip:
+            continue
         if not ok:
             missing.append(f"{prefix}.{key}")
     return missing

@@ -10,6 +10,8 @@ from typing import Any
 from src.db import ConclusionRecord, MarketCase
 from src.db.session import get_session
 from src.utils.paths import morning_json_path, raw_data_path, reports_dir, step_json_path
+from src.utils.quote_resolve import session_change_pct
+from src.utils.trading_calendar import prior_trading_day
 from src.collectors.macro_releases import (
     event_config_by_id,
     load_macro_release_config,
@@ -781,8 +783,33 @@ def symbols_for_driver(driver: str) -> list[str]:
     return DRIVER_SYMBOL_MAP.get(key, DEFAULT_SYMBOLS)
 
 
+def _section_for_symbol(symbol: str) -> str:
+    sym = symbol.upper()
+    if sym in ("QQQ", "SPY", "DIA", "TQQQ", "^VIX", "DX-Y.NYB", "ES=F"):
+        return "market"
+    if sym in ("SMH", "XLK", "XLF", "XLE"):
+        return "sector"
+    return "stocks"
+
+
+def _session_chg(
+    symbol: str,
+    raw: dict[str, Any],
+    prior_raw: dict[str, Any],
+    trading_day: date_type,
+) -> float | None:
+    section = _section_for_symbol(symbol)
+    return session_change_pct(
+        symbol if symbol != "DXY" else "DX-Y.NYB",
+        raw,
+        prior_raw,
+        trading_day,
+        section=section,
+    )
+
+
 def build_relative_strength(trading_date: str, driver: str) -> dict[str, Any] | None:
-    """Relative strength vs QQQ from Step 0 raw quotes."""
+    """Relative strength vs QQQ using session-aware quotes (not stale Step 0 bars)."""
     raw_path = raw_data_path(trading_date)
     if not raw_path.exists():
         return None
@@ -791,16 +818,23 @@ def build_relative_strength(trading_date: str, driver: str) -> dict[str, Any] | 
     except Exception:
         return None
 
-    qqq_q = _quote_from_raw(raw, "QQQ")
-    qqq_chg = _change_pct(qqq_q)
+    trading_day = date_type.fromisoformat(trading_date)
+    prior_raw: dict[str, Any] = {}
+    prior_path = raw_data_path(prior_trading_day(trading_day).isoformat())
+    if prior_path.exists():
+        try:
+            prior_raw = json.loads(prior_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    qqq_chg = _session_chg("QQQ", raw, prior_raw, trading_day)
     if qqq_chg is None:
         return None
 
     symbols = symbols_for_driver(driver)
     rows: list[dict[str, Any]] = []
     for sym in symbols:
-        q = _quote_from_raw(raw, sym)
-        sym_chg = _change_pct(q)
+        sym_chg = _session_chg(sym, raw, prior_raw, trading_day)
         if sym_chg is None:
             rows.append(
                 {
