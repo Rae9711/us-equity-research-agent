@@ -438,19 +438,24 @@ def _select_stock_picks(
     macro_no = edges.get("macro_edge", {}).get("edge") == "NO"
     index_no = edges.get("index_edge", {}).get("edge") == "NO"
     stock_yes = edges.get("stock_edge", {}).get("edge") == "YES"
+    top = ranked[0] if ranked else None
+    score_ok = bool(top and top["final_score"] > FINAL_SCORE_THRESHOLD)
 
-    if macro_no and index_no:
-        if stock_yes and tradeable:
-            stock_only = [r for r in tradeable if r["symbol"] in ("NVDA", "TSLA")]
-            return (stock_only or tradeable)[:3]
-        if tradeable and tradeable[0]["final_score"] > FINAL_SCORE_THRESHOLD:
-            return tradeable[:3]
+    if not stock_yes and not score_ok:
         return []
 
     if tradeable:
+        if macro_no and index_no:
+            stock_only = [r for r in tradeable if r["symbol"] in ("NVDA", "TSLA")]
+            return (stock_only or tradeable)[:3]
         return tradeable[:3]
-    if ranked and ranked[0]["final_score"] > FINAL_SCORE_THRESHOLD:
-        return [ranked[0]]
+
+    if stock_yes:
+        stocks = [r for r in ranked if r["symbol"] in ("NVDA", "TSLA")]
+        if stocks:
+            return stocks[:3]
+    if score_ok and top:
+        return [top]
     return []
 
 
