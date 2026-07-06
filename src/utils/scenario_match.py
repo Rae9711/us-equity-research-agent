@@ -115,8 +115,10 @@ def _trigger_score(trigger: str, features: FeaturesModel, raw: dict[str, Any] | 
         elif re.search(r"qqq|纳指|ndx", c):
             qqq = features.qqq_chg
             if qqq is not None:
-                if "突破" in c or "破高" in c or "新高" in c:
+                if re.search(r"突破|破高|昨高|新高|>.*高", c):
                     matched = 1.0 if _qqq_broke_high(raw, features) else 0.0
+                elif re.search(r"昨低|<.*低|跌破", c):
+                    matched = 1.0 if _qqq_broke_low(raw, features) else 0.0
                 elif "跌" in c or "回落" in c:
                     matched = 1.0 if qqq < 0 else 0.0
                 else:
@@ -163,6 +165,22 @@ def _trigger_score(trigger: str, features: FeaturesModel, raw: dict[str, Any] | 
     if not score_parts:
         return 0.0
     return sum(score_parts) / len(score_parts)
+
+
+def _qqq_broke_low(raw: dict[str, Any] | None, features: FeaturesModel) -> bool:
+    if not raw:
+        return features.qqq_chg is not None and features.qqq_chg < -0.5
+    market = raw.get("market") or {}
+    qqq = (market.get("quotes") or market.get("prices") or {}).get("QQQ") or {}
+    close = qqq.get("close") or qqq.get("current_price")
+    low = qqq.get("low")
+    prior = qqq.get("prev_close")
+    if close and low and prior:
+        try:
+            return float(close) <= float(prior) and float(low) < float(prior)
+        except (TypeError, ValueError):
+            pass
+    return features.qqq_chg is not None and features.qqq_chg < -0.5
 
 
 def _qqq_broke_high(raw: dict[str, Any] | None, features: FeaturesModel) -> bool:

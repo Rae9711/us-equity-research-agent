@@ -114,14 +114,21 @@ def _p10_agent_text(record: ConclusionRecord | None) -> str:
     return (record.judgment or record.one_liner or "").strip()
 
 
-def _morning_p10_driver(date_str: str) -> str:
+def _morning_p10_fields(date_str: str) -> tuple[str, str | None]:
     from src.web.homepage import load_morning
 
     morning = load_morning(date_str)
     if not morning:
-        return ""
+        return "", None
     p10 = (morning.get("parts") or {}).get("P10") or {}
-    return (p10.get("judgment") or p10.get("one_liner") or "").strip()
+    driver = (p10.get("driver") or p10.get("judgment") or p10.get("one_liner") or "").strip()
+    driver_type = p10.get("driver_type") or morning.get("driver_type")
+    return driver, driver_type
+
+
+def _morning_p10_driver(date_str: str) -> str:
+    driver, _ = _morning_p10_fields(date_str)
+    return driver
 
 
 def _driver_hint_texts(trading_date: date_type, case_lesson: str | None) -> list[str]:
@@ -194,9 +201,13 @@ def apply_verify_to_market_case(trading_date: date_type) -> dict[str, Any]:
     applied: list[str] = []
 
     p10_record = next((r for r in records if r.part_id == "P10"), None)
-    morning_driver = _morning_p10_driver(date_str) or _p10_agent_text(p10_record)
+    morning_driver, morning_driver_type = _morning_p10_fields(date_str)
+    if not morning_driver:
+        morning_driver = _p10_agent_text(p10_record)
     if morning_driver:
         labels["agent_driver"] = morning_driver
+    if morning_driver_type:
+        labels["agent_driver_type"] = morning_driver_type
 
     for record in records:
         ver = record.verification

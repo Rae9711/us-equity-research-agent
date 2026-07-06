@@ -47,11 +47,11 @@ PART_META: dict[str, dict[str, str]] = {
     },
     "P9": {
         "title": "期权 Options",
-        "about": "QQQ IV 水平、是否适合买期权、本周是否做 0DTE",
+        "about": "四问：适合买期权/0DTE/Call/Put（YES/NO），事件日禁止 0DTE",
     },
     "P10": {
         "title": "今日 Driver",
-        "about": "今天市场真正等待的是什么（一个词，全天唯一 Driver）",
+        "about": "Driver Type（分类）+ Driver（具体标签）；无宏观催化剂日禁止写 Macro",
     },
     "P11": {
         "title": "综合打分 Scoring",
@@ -67,7 +67,7 @@ PART_META: dict[str, dict[str, str]] = {
     },
     "P14": {
         "title": "市场偏好 Preference",
-        "about": "市场实际在交易什么 vs 理论上该交易什么（偏好函数 X > Y）",
+        "about": "结构化偏好（AI > Defensive、Growth > Value、Momentum > Mean Reversion），非新闻罗列",
     },
     "P15": {
         "title": "情景 Scenario",

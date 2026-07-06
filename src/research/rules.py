@@ -8,7 +8,21 @@ from src.utils.paths import raw_data_path
 from src.utils.quote_resolve import session_change_pct
 from src.utils.trading_calendar import prior_trading_day
 
-# Mapping from macro release keywords → short catalyst label used in P13.
+# Driver taxonomy — P10 driver_type must be one of these.
+DRIVER_TYPES: list[str] = [
+    "Macro",
+    "Positioning",
+    "Momentum",
+    "Earnings",
+    "AI",
+    "Fed",
+    "Rates",
+    "Political",
+    "Liquidity",
+    "Rebalance",
+    "No Catalyst",
+]
+
 # Order matters: labor/inflation before generic Fed/FOMC.
 _CATALYST_KEYWORDS: list[tuple[str, str]] = [
     ("employment situation", "NFP"),
@@ -187,23 +201,162 @@ def _daily_macro_driver(catalysts_today: list[dict[str, Any]]) -> str | None:
     return catalysts_today[0].get("name")
 
 
-def _daily_driver(
+def _daily_driver_type_and_driver(
     catalysts_today: list[dict[str, Any]],
     chip_selloff: bool,
     smh_pct: float | None,
-) -> str:
+    strongest_sector: str,
+    qqq_pct: float | None,
+) -> tuple[str, str]:
+    """Return (driver_type, specific_driver). Never Macro when no catalyst today."""
     macro = _daily_macro_driver(catalysts_today)
+
     if macro == "NFP":
         if chip_selloff and smh_pct is not None and smh_pct <= -3.0:
-            return "NFP + AI Chip Selloff"
-        return "NFP"
-    if macro and macro not in ("FOMC", "FOMC Minutes"):
-        return macro
-    if chip_selloff:
-        return "AI Chip Selloff"
+            return "Macro", "NFP + AI Chip Selloff"
+        return "Macro", "NFP"
+
+    if macro in ("FOMC", "FOMC Minutes"):
+        return "Fed", macro
+
     if macro:
-        return macro
-    return "Macro"
+        return "Macro", macro
+
+    # No macro catalyst — driver_type must NOT be Macro
+    if chip_selloff:
+        return "AI", "AI Chip Selloff"
+
+    if strongest_sector == "SMH":
+        if smh_pct is not None and smh_pct > 0:
+            return "Momentum", "AI Momentum"
+        return "AI", "AI Momentum"
+
+    if qqq_pct is not None and abs(qqq_pct) > 0.5:
+        return "Momentum", "Index Momentum"
+
+    if strongest_sector not in ("N/A", "") and strongest_sector not in ("SMH",):
+        return "Positioning", f"{strongest_sector} Rotation"
+
+    return "No Catalyst", "No dominant catalyst"
+
+
+def _bond_growth_lens(bond_direction: str, bond_score: int) -> str:
+    if bond_score > 0:
+        return "Tailwind"
+    if bond_score < 0:
+        return "Headwind"
+    return "No Headwind"
+
+
+def _p2_causal_chain(
+    *,
+    driver_type: str,
+    driver: str,
+    chip_selloff: bool,
+    macro_driver: str | None,
+    smh_pct: float | None,
+) -> str:
+    if chip_selloff:
+        return (
+            f"AI Chip Selloff → SMH {smh_pct or 'N/A'}% → NVDA/META 新闻 → Nasdaq 承压"
+        )
+    if macro_driver:
+        return f"{macro_driver} → Bond → Dollar → Sector → Index"
+    if driver_type in ("Momentum", "AI", "Positioning"):
+        return f"{driver_type} ({driver}) → Sector → Index"
+    return "No Macro Catalyst → Bond → Dollar → Sector → Index"
+
+
+def _build_p9_options(
+    *,
+    catalyst_today: bool,
+    pre_holiday: bool,
+    iv_level: str,
+    total: int,
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    """Four explicit YES/NO fields; 0DTE only when buy_options is Yes."""
+    event_day = catalyst_today or pre_holiday
+    can_buy = not event_day and iv_level in ("Low", "Medium")
+    buy_options = "Yes" if can_buy else "No"
+    zero_dte = "Yes" if can_buy and iv_level == "Low" and not event_day else "No"
+    if buy_options == "No":
+        zero_dte = "No"
+    buy_call = "Yes" if buy_options == "Yes" and total >= 0 else "No"
+    buy_put = "Yes" if buy_options == "Yes" and total < 0 else "No"
+
+    judgment = (
+        f"买期权：{buy_options} · 0DTE：{zero_dte} · "
+        f"Call：{buy_call} · Put：{buy_put}"
+    )
+    one_liner = (
+        "事件日/节前 → 全部 NO"
+        if event_day
+        else f"IV {iv_level}，P/C {options.get('put_call_ratio', 'N/A')}"
+    )
+    body_md = "\n".join(
+        [
+            f"- **适合买期权？**：{buy_options}",
+            f"- **适合做 0DTE？**：{zero_dte}",
+            f"- **适合买 Call？**：{buy_call}",
+            f"- **适合买 Put？**：{buy_put}",
+            f"- **QQQ IV**：{iv_level}",
+            f"- **事件日**：{'是' if catalyst_today else '否'} · **节前**：{'是' if pre_holiday else '否'}",
+            f"- **数据源**：{options.get('source', 'N/A')}",
+        ]
+    )
+    return {
+        "judgment": judgment,
+        "confidence": None,
+        "one_liner": one_liner,
+        "body_md": body_md,
+        "buy_options": buy_options,
+        "zero_dte": zero_dte,
+        "buy_call": buy_call,
+        "buy_put": buy_put,
+        "scores": {},
+    }
+
+
+def _build_p14_preference(
+    *,
+    ai_stance: str,
+    chip_selloff: bool,
+    strongest: str,
+    weakest: str,
+    smh_pct: float | None,
+    avg_sector: float,
+    qqq_pct: float | None,
+) -> dict[str, Any]:
+    prefs: list[str] = []
+    if chip_selloff or ai_stance == "Bearish":
+        prefs.append("Defensive > AI")
+    elif ai_stance == "Bullish" or strongest == "SMH":
+        prefs.append("AI > Defensive")
+    else:
+        prefs.append("AI ≈ Defensive")
+
+    if avg_sector < -0.3:
+        prefs.append("Value > Growth")
+    elif smh_pct is not None and smh_pct > 0 and avg_sector > 0:
+        prefs.append("Growth > Value")
+    else:
+        prefs.append("Growth ≈ Value")
+
+    if qqq_pct is not None and abs(qqq_pct) > 0.3:
+        prefs.append("Momentum > Mean Reversion")
+    else:
+        prefs.append("Mean Reversion > Momentum")
+
+    judgment = " · ".join(prefs)
+    return {
+        "judgment": judgment,
+        "confidence": 0.65,
+        "one_liner": f"板块：{strongest} 最强 / {weakest} 最弱",
+        "body_md": "\n".join(f"- **{p}**" for p in prefs),
+        "preferences": prefs,
+        "scores": {},
+    }
 
 
 def _pre_holiday(raw: dict[str, Any]) -> bool:
@@ -331,11 +484,11 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         int(news_signals.get("news_ai_mentions") or 0),
         int(news_signals.get("news_macro_mentions") or 0),
     )
-    daily_driver = _daily_driver(catalysts_today, chip_selloff, smh_pct)
+    daily_driver_type, daily_driver = _daily_driver_type_and_driver(
+        catalysts_today, chip_selloff, smh_pct, strongest, qqq_pct
+    )
 
     pre_holiday = _pre_holiday(raw)
-    zero_dte = "No" if catalyst_today or pre_holiday else "Yes"
-    buy_options = "No" if catalyst_today or pre_holiday else ("Yes" if iv_level in ("Low", "Medium") else "No")
 
     stock_quotes = (raw.get("stocks") or {}).get("quotes") or {}
     nvda_pct = _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks")
@@ -414,24 +567,24 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     else:
         bias = "Neutral"
 
-    bond_driver_note = macro_driver or daily_driver
-    bond_causal = (
-        f"{bond_driver_note}↓ → Yield↓ → Growth+"
-        if bond_score > 0 and macro_driver == "NFP"
-        else f"{bond_driver_note} → 10Y {bond_direction}"
-    )
+    bond_lens = _bond_growth_lens(bond_direction, bond_score)
+    bond_causal = f"10Y {bond_direction} → {bond_lens}"
+    if macro_driver and bond_score != 0:
+        bond_causal = f"{macro_driver} → 10Y {bond_direction} → {bond_lens}"
     dollar_causal = (
-        f"{macro_driver or 'Macro'} → DXY {dxy_dir} → QQQ {dollar_qqq}"
+        f"{macro_driver} → DXY {dxy_dir} → QQQ {dollar_qqq}"
         if macro_driver
         else f"DXY {dxy_dir} → QQQ {dollar_qqq}"
     )
 
-    p2_driver = "AI Chip Selloff" if chip_selloff else daily_driver
-    p2_chain = (
-        f"{p2_driver} → SMH {smh_pct or 'N/A'}% → NVDA/META 新闻 → Nasdaq 承压"
-        if chip_selloff
-        else f"{daily_driver} → Bond → Dollar → Sector → Index"
+    p2_chain = _p2_causal_chain(
+        driver_type=daily_driver_type,
+        driver=daily_driver,
+        chip_selloff=chip_selloff,
+        macro_driver=macro_driver,
+        smh_pct=smh_pct,
     )
+    p2_driver = daily_driver if not chip_selloff else "AI Chip Selloff"
 
     parts: dict[str, Any] = {
         "P1": {
@@ -457,11 +610,14 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             "body_md": f"- **因果链**：{p2_chain}",
         },
         "P10": {
-            "judgment": daily_driver,
+            "judgment": f"Type：{daily_driver_type} · Driver：{daily_driver}",
+            "driver_type": daily_driver_type,
+            "driver": daily_driver,
             "confidence": 0.75 if catalyst_today else 0.6,
-            "one_liner": f"今日唯一 Driver：{daily_driver}（Macro 优先于 Regime）",
+            "one_liner": f"Primary Driver Type：{daily_driver_type} · {daily_driver}",
             "body_md": (
-                f"- **Daily Driver**：{daily_driver}\n"
+                f"- **Primary Driver Type**：{daily_driver_type}\n"
+                f"- **Primary Driver**：{daily_driver}\n"
                 f"- **催化剂**：{macro_driver or '无'}\n"
                 f"- **半导体**：{'AI Chip Selloff' if chip_selloff else '非主导'}"
             ),
@@ -471,9 +627,9 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             "confidence": 0.7,
             "one_liner": bond_causal,
             "body_md": (
-                f"- **Driver**：{bond_driver_note}\n"
+                f"- **10Y**：{dgs10 or 'N/A'}% ({bond_direction})\n"
                 f"- **2Y**：{dgs2 or 'N/A'}%\n"
-                f"- **10Y**：{dgs10 or 'N/A'}%\n"
+                f"- **Growth 镜头**：{bond_lens}\n"
                 f"- **因果**：{bond_causal}\n"
                 f"- **Morning Score**：Bond → {bond_score}"
             ),
@@ -520,23 +676,13 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             fmt_row=_fmt_row,
             chip_selloff=chip_selloff,
         ),
-        "P9": {
-            "judgment": f"买期权：{buy_options} · 0DTE：{zero_dte}",
-            "confidence": None,
-            "one_liner": (
-                f"事件日/节前 → Edge NO 0DTE"
-                if catalyst_today or pre_holiday
-                else f"IV {iv_level}，P/C {options.get('put_call_ratio', 'N/A')}"
-            ),
-            "body_md": (
-                f"- **QQQ IV**：{iv_level}\n"
-                f"- **是否适合买期权**：{buy_options}\n"
-                f"- **是否做 0DTE**：{zero_dte}\n"
-                f"- **事件日**：{'是' if catalyst_today else '否'} · **节前**：{'是' if pre_holiday else '否'}\n"
-                f"- **数据源**：{options.get('source', 'N/A')}"
-            ),
-            "scores": {},
-        },
+        "P9": _build_p9_options(
+            catalyst_today=catalyst_today,
+            pre_holiday=pre_holiday,
+            iv_level=iv_level,
+            total=total,
+            options=options,
+        ),
         "P11": {
             "judgment": f"Bias：{bias} · Total：{total:+d}",
             "confidence": min(0.85, 0.55 + abs(total) * 0.03),
@@ -547,13 +693,30 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             "bias": bias,
         },
         "P13": _build_p13(catalysts_today),
-        "P15": _build_p15(catalysts_today, daily_driver, chip_selloff, smh_pct),
+        "P14": _build_p14_preference(
+            ai_stance=ai_stance,
+            chip_selloff=chip_selloff,
+            strongest=strongest,
+            weakest=weakest,
+            smh_pct=smh_pct,
+            avg_sector=avg_sector,
+            qqq_pct=qqq_pct,
+        ),
+        "P15": _build_p15(
+            catalysts_today,
+            daily_driver_type,
+            daily_driver,
+            chip_selloff,
+            smh_pct,
+            qqq_pct,
+        ),
     }
     return {
         "parts": parts,
         "scores": scores,
         "total": total,
         "bias": bias,
+        "driver_type": daily_driver_type,
         "daily_driver": daily_driver,
         "catalysts_today": catalysts_today,
     }
@@ -600,33 +763,54 @@ def _build_p13(catalysts: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _build_p15(
     catalysts: list[dict[str, Any]],
-    daily_driver: str,
+    driver_type: str,
+    driver: str,
     chip_selloff: bool,
     smh_pct: float | None,
+    qqq_pct: float | None,
 ) -> dict[str, Any]:
-    catalyst = catalysts[0]["name"] if catalysts else daily_driver
+    """Verifiable trigger scenarios — no vague 'Macro利好'."""
+    catalyst = catalysts[0]["name"] if catalysts else None
     if catalyst == "NFP":
         body = "\n".join(
             [
                 "Scenario A：若 NFP 弱于预期 + 10Y 下行 → Dow/价值走强，Growth 反弹",
-                "Scenario B：若 NFP 符合预期但 SMH 续跌 → Nasdaq 承压，放弃追多",
-                "Scenario C：若 NFP 强 + 半导体反弹 → 震荡，不交易",
+                "Scenario B：若 NFP 符合预期但 SMH 续跌 → QQQ < 昨低，放弃追多",
+                "Scenario C：若 QQQ 震荡（±0.25%）→ 不交易",
             ]
         )
         primary = "B" if chip_selloff else "A"
-    else:
+    elif catalyst:
         body = "\n".join(
             [
-                f"Scenario A：若 {catalyst} 利好风险资产 → QQQ 突破",
-                f"Scenario B：若 {catalyst} 偏鹰/偏空 → 放弃交易",
-                "Scenario C：若 指数震荡 → 不交易",
+                f"Scenario A：若 {catalyst} 弱于预期 + QQQ > 昨高 → Call",
+                f"Scenario B：若 {catalyst} 强于预期 + QQQ < 昨低 → Put / 放弃",
+                "Scenario C：若 QQQ 震荡 → 不交易",
             ]
         )
         primary = "A"
+    elif chip_selloff:
+        body = "\n".join(
+            [
+                "Scenario A：若 SMH 反弹 + QQQ > 昨高 → 短线 Call",
+                "Scenario B：若 SMH 续跌 + QQQ < 昨低 → 放弃 / Put",
+                "Scenario C：若 QQQ 震荡 → 不交易",
+            ]
+        )
+        primary = "B"
+    else:
+        body = "\n".join(
+            [
+                "Scenario A：若 QQQ > 昨高 + SMH 领涨 → Call",
+                "Scenario B：若 QQQ < 昨低 → Put / 放弃",
+                "Scenario C：若 QQQ 震荡 → 不交易",
+            ]
+        )
+        primary = "A" if (qqq_pct or 0) >= 0 else "B"
     return {
         "judgment": f"最可能 Scenario：{primary}",
         "confidence": 0.65,
-        "one_liner": f"围绕 {catalyst} 的三情景",
+        "one_liner": f"围绕 {driver_type}（{driver}）的可验证情景",
         "body_md": body,
     }
 

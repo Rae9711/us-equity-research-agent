@@ -43,7 +43,13 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
     if morning_json_path(date_str).exists():
         morning = json.loads(morning_json_path(date_str).read_text(encoding="utf-8"))
 
-    morning_driver_p10 = ((morning.get("parts") or {}).get("P10") or {}).get("judgment", "")
+    morning_driver_p10 = ((morning.get("parts") or {}).get("P10") or {}).get("driver") or ""
+    if not morning_driver_p10:
+        morning_driver_p10 = ((morning.get("parts") or {}).get("P10") or {}).get("judgment", "")
+    morning_driver_type = (
+        ((morning.get("parts") or {}).get("P10") or {}).get("driver_type")
+        or morning.get("driver_type")
+    )
     morning_hypothesis = morning.get("hypothesis", {})
     hyp_id = morning_hypothesis.get("id", "") if isinstance(morning_hypothesis, dict) else ""
     hyp_statement = morning_hypothesis.get("statement", "") if isinstance(morning_hypothesis, dict) else ""
@@ -52,6 +58,7 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         morning_driver=morning_driver_p10,
         actual_driver=actual_driver,
         morning_hypothesis=morning_hypothesis,
+        morning_driver_type=morning_driver_type,
     )
 
     p15 = (morning.get("parts") or {}).get("P15") or {}
@@ -186,6 +193,8 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         "attribution": attr.model_dump(),
         "labels": {
             "actual_driver": actual_driver,
+            "agent_driver": morning_driver_p10 or None,
+            "agent_driver_type": morning_driver_type,
             "driver_splits": driver_splits,
             "hypothesis_correct": hypothesis_correct,
             "scenario_primary": scenario_primary,
@@ -245,8 +254,13 @@ def _assess_hypothesis(
     morning_driver: str,
     actual_driver: str,
     morning_hypothesis: dict | None,
+    morning_driver_type: str | None = None,
 ) -> str:
-    level = driver_match_level(morning_driver, actual_driver)
+    level = driver_match_level(
+        morning_driver,
+        actual_driver,
+        morning_driver_type=morning_driver_type,
+    )
     if level != "错":
         return level
 

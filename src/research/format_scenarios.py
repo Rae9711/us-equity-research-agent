@@ -27,6 +27,30 @@ def _normalize_scenario_line(letter: str, rest: str) -> str:
     return f"Scenario {letter}：{rest}"
 
 
+_VAGUE_TRIGGER_RE = re.compile(
+    r"macro\s*利好|利好风险|偏鹰|偏空|宏观利好|数据利好",
+    re.I,
+)
+
+
+def validate_scenario_triggers(body_md: str) -> list[str]:
+    """Return warnings for non-verifiable scenario trigger phrases."""
+    warnings: list[str] = []
+    for line in (body_md or "").replace("\r\n", "\n").split("\n"):
+        line = line.strip()
+        if not line or "scenario" not in line.lower():
+            continue
+        if _VAGUE_TRIGGER_RE.search(line):
+            warnings.append(f"模糊触发条件：{line[:120]}")
+        if "→" in line or "->" in line:
+            trigger = line.split("→")[0] if "→" in line else line.split("->")[0]
+            trigger = re.sub(r"^.*?[：:]\s*", "", trigger)
+            trigger = re.sub(r"^若\s*", "", trigger).strip()
+            if len(trigger) < 4:
+                warnings.append(f"触发条件过短：{line[:120]}")
+    return warnings
+
+
 def format_scenario_body(text: str, *, part_id: str = "P15") -> str:
     """
     Normalize P15/P16 body to WORKFLOW one-liner-per-scenario format, e.g.:

@@ -86,19 +86,45 @@ def _normalize_driver_key(driver: str) -> str:
     return "default"
 
 
-def _extract_driver(morning: dict[str, Any]) -> str:
+def _extract_driver(morning: dict[str, Any]) -> dict[str, str]:
     parts = morning.get("parts") or {}
     p10 = parts.get("P10") or {}
-    judgment = p10.get("judgment") or p10.get("one_liner") or ""
-    if judgment and judgment not in ("—", "N/A"):
-        cleaned = re.sub(r"^(Driver[：:]\s*)", "", judgment, flags=re.I).strip()
-        return cleaned[:120] or judgment[:120]
+    driver_type = (
+        p10.get("driver_type")
+        or morning.get("driver_type")
+        or ""
+    ).strip()
+    driver = (
+        p10.get("driver")
+        or morning.get("daily_driver")
+        or ""
+    ).strip()
 
-    hyp = morning.get("hypothesis") or {}
-    stmt = (hyp.get("statement") or "").strip()
-    if stmt:
-        return stmt[:120]
-    return "—"
+    if not driver:
+        judgment = p10.get("judgment") or p10.get("one_liner") or ""
+        if judgment and judgment not in ("—", "N/A"):
+            cleaned = re.sub(r"^(Driver[：:]\s*)", "", judgment, flags=re.I).strip()
+            m_type = re.search(r"Type[：:]\s*([^·•]+)", cleaned, re.I)
+            m_drv = re.search(r"Driver[：:]\s*(.+)$", cleaned, re.I)
+            if m_type:
+                driver_type = driver_type or m_type.group(1).strip()
+            if m_drv:
+                driver = m_drv.group(1).strip()
+            elif not driver:
+                driver = cleaned[:120]
+
+    if not driver:
+        hyp = morning.get("hypothesis") or {}
+        stmt = (hyp.get("statement") or "").strip()
+        if stmt:
+            driver = stmt[:120]
+
+    display = " — ".join(x for x in (driver_type, driver) if x) or "—"
+    return {
+        "driver_type": driver_type or "—",
+        "driver": driver or "—",
+        "display": display,
+    }
 
 
 def _extract_bias(morning: dict[str, Any]) -> str:
@@ -236,7 +262,8 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         return None
 
     step4 = load_step4(trading_date)
-    driver = _extract_driver(morning)
+    driver_info = _extract_driver(morning)
+    driver = driver_info["display"]
     hyp = morning.get("hypothesis") or {}
     p17 = (morning.get("parts") or {}).get("P17") or {}
 
@@ -246,6 +273,8 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
 
     return {
         "driver": driver,
+        "driver_type": driver_info["driver_type"],
+        "driver_label": driver_info["driver"],
         "bias": _extract_bias(morning),
         "trade_action": _trade_action(morning, step4),
         "invalidation": _extract_invalidation(morning),
@@ -435,12 +464,14 @@ def _actual_driver_for_date(date_str: str) -> str | None:
     return None
 
 
-def _morning_p10_driver(date_str: str) -> str:
+def _morning_p10_driver(date_str: str) -> tuple[str, str | None]:
     morning = load_morning(date_str)
     if not morning:
-        return ""
+        return "", None
     p10 = (morning.get("parts") or {}).get("P10") or {}
-    return (p10.get("judgment") or p10.get("one_liner") or "").strip()
+    driver = (p10.get("driver") or p10.get("judgment") or p10.get("one_liner") or "").strip()
+    driver_type = p10.get("driver_type") or morning.get("driver_type")
+    return driver, driver_type
 
 
 def _labeled_trading_dates() -> list[str]:
@@ -470,10 +501,10 @@ def driver_accuracy_series() -> dict[str, Any]:
 
     for date_str in _labeled_trading_dates():
         actual = _actual_driver_for_date(date_str)
-        morning_driver = _morning_p10_driver(date_str)
+        morning_driver, morning_driver_type = _morning_p10_driver(date_str)
         if not actual or not morning_driver:
             continue
-        hit = driver_hit(morning_driver, actual)
+        hit = driver_hit(morning_driver, actual, morning_driver_type=morning_driver_type)
         cum_total += 1
         if hit:
             cum_correct += 1
@@ -540,7 +571,7 @@ def agent_driver_accuracy_series() -> dict[str, Any]:
     cum_total = 0
 
     for date_str in _labeled_trading_dates():
-        morning_driver = _morning_p10_driver(date_str)
+        morning_driver, morning_driver_type = _morning_p10_driver(date_str)
         if not morning_driver:
             continue
 
@@ -561,7 +592,7 @@ def agent_driver_accuracy_series() -> dict[str, Any]:
         if not reference:
             continue
 
-        hit = driver_hit(morning_driver, reference)
+        hit = driver_hit(morning_driver, reference, morning_driver_type=morning_driver_type)
         cum_total += 1
         if hit:
             cum_correct += 1

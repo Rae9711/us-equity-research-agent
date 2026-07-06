@@ -22,7 +22,7 @@ from src.utils.trading_calendar import ET, require_trading_day, skipped_non_trad
 
 logger = logging.getLogger(__name__)
 
-RULE_PART_IDS = {"P1", "P2", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P13", "P15"}
+RULE_PART_IDS = {"P1", "P2", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P13", "P14", "P15"}
 
 
 def _is_missing(part: dict[str, Any]) -> bool:
@@ -187,6 +187,8 @@ def run_morning_research(
         "llm_used": not skip_llm and bool(llm_parts),
         "bias": rule_bundle.get("bias"),
         "total_score": rule_bundle.get("total"),
+        "driver_type": rule_bundle.get("driver_type"),
+        "daily_driver": rule_bundle.get("daily_driver"),
         "parts": parts,
         "r0": {"label": regime_model.label, "confidence": regime_model.confidence} if regime_model else None,
         "hypothesis": hypothesis_model.model_dump() if hypothesis_model else None,
@@ -209,7 +211,16 @@ def run_morning_research(
         update_case(date_str, {
             "regime": regime_model.model_dump() if regime_model else {},
             "hypothesis": hypothesis_model.model_dump() if hypothesis_model else {},
-            "morning": {"bias": rule_bundle.get("bias"), "total": rule_bundle.get("total")},
+            "morning": {
+                "bias": rule_bundle.get("bias"),
+                "total": rule_bundle.get("total"),
+                "driver_type": rule_bundle.get("driver_type"),
+                "daily_driver": rule_bundle.get("daily_driver"),
+            },
+            "labels": {
+                "agent_driver": rule_bundle.get("daily_driver"),
+                "agent_driver_type": rule_bundle.get("driver_type"),
+            },
             "features": features.model_dump() if features else {},
         })
     except Exception:
