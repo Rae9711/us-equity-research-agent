@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import yfinance as yf
 
+from src.collectors.fred_client import FredClient
 from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
 from src.utils.paths import morning_json_path, raw_data_path
@@ -45,6 +46,30 @@ def _quote(section: dict[str, Any], ticker: str) -> dict[str, Any]:
     return _quotes(section).get(ticker) or {}
 
 
+def _quote_date(q: dict[str, Any]) -> date | None:
+    raw = q.get("date")
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return None
+
+
+def _prior_close_from_raw(
+    prior_raw: dict[str, Any],
+    *,
+    section: str,
+    ticker: str,
+    prior_section: str | None = None,
+) -> float | None:
+    if not prior_raw:
+        return None
+    prior_sec = prior_raw.get(prior_section or section, {})
+    prior_q = _quote(prior_sec, ticker)
+    return _safe_float(prior_q, "close") or _safe_float(prior_q, "current_price")
+
+
 def _gap_label(gap_pct: float | None) -> str:
     if gap_pct is None:
         return "N/A"
@@ -55,18 +80,18 @@ def _gap_label(gap_pct: float | None) -> str:
     return "Flat"
 
 
-def _observation_from_quote(q: dict[str, Any]) -> dict[str, Any]:
+def _observation_from_quote(
+    q: dict[str, Any],
+    *,
+    prev_close: float | None = None,
+) -> dict[str, Any]:
     if "error" in q:
         return q
-    prev = _safe_float(q, "prev_close")
+    prev = prev_close if prev_close is not None else _safe_float(q, "prev_close")
     open_px = _safe_float(q, "open")
     last_px = _safe_float(q, "close") or _safe_float(q, "current_price") or _safe_float(q, "last")
-    gap_pct = _safe_float(q, "gap_pct")
-    if gap_pct is None:
-        gap_pct = _pct_chg(open_px, prev)
-    change_pct = _safe_float(q, "change_pct")
-    if change_pct is None:
-        change_pct = _pct_chg(last_px, prev)
+    gap_pct = _pct_chg(open_px, prev)
+    change_pct = _pct_chg(last_px, prev)
     return {
         "ticker": q.get("ticker"),
         "prev_close": round(prev, 4) if prev is not None else None,
@@ -78,21 +103,26 @@ def _observation_from_quote(q: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _intraday_quote(ticker: str) -> dict[str, Any]:
+def _intraday_quote(
+    ticker: str,
+    *,
+    prev_close: float | None = None,
+) -> dict[str, Any]:
+    if prev_close is None:
+        return {"ticker": ticker, "error": "no prior close"}
+
     t = yf.Ticker(ticker)
     hist = t.history(period="1d", interval="1m", prepost=True)
-    prev = t.fast_info.get("previous_close") or t.fast_info.get("regular_market_previous_close")
-    if hist.empty or not prev:
+    if hist.empty:
         return {"ticker": ticker, "error": "no intraday data"}
 
     open_px = float(hist.iloc[0]["Open"])
     last_px = float(hist.iloc[-1]["Close"])
-    prev_f = float(prev)
-    gap_pct = round((open_px - prev_f) / prev_f * 100, 2)
-    chg_pct = round((last_px - prev_f) / prev_f * 100, 2)
+    gap_pct = round((open_px - prev_close) / prev_close * 100, 2)
+    chg_pct = round((last_px - prev_close) / prev_close * 100, 2)
     return {
         "ticker": ticker,
-        "prev_close": round(prev_f, 4),
+        "prev_close": round(prev_close, 4),
         "open": round(open_px, 4),
         "last": round(last_px, 4),
         "gap_pct": gap_pct,
@@ -102,30 +132,101 @@ def _intraday_quote(ticker: str) -> dict[str, Any]:
     }
 
 
-def _treasury_rate(raw: dict[str, Any]) -> float | None:
+def _session_quote(
+    ticker: str,
+    trading_date: date,
+    *,
+    prev_close: float | None,
+) -> dict[str, Any]:
+    if prev_close is None:
+        return {"ticker": ticker, "error": "no prior close"}
+
+    end = trading_date + timedelta(days=1)
+    hist = yf.Ticker(ticker).history(
+        start=trading_date.isoformat(),
+        end=end.isoformat(),
+        interval="1d",
+        auto_adjust=True,
+    )
+    if hist.empty:
+        return {"ticker": ticker, "error": "no session data"}
+
+    row = hist.iloc[-1]
+    if row.name.date() != trading_date:
+        return {"ticker": ticker, "error": "no session data"}
+
+    open_px = float(row["Open"])
+    last_px = float(row["Close"])
+    gap_pct = round((open_px - prev_close) / prev_close * 100, 2)
+    chg_pct = round((last_px - prev_close) / prev_close * 100, 2)
+    return {
+        "ticker": ticker,
+        "prev_close": round(prev_close, 4),
+        "open": round(open_px, 4),
+        "last": round(last_px, 4),
+        "gap_pct": gap_pct,
+        "change_pct": chg_pct,
+        "gap": _gap_label(gap_pct),
+        "source": "session",
+    }
+
+
+def _treasury_obs(raw: dict[str, Any]) -> tuple[float | None, str | None]:
     market = raw.get("market", {})
     macro = raw.get("macro", {})
-    val = _safe_float(market.get("treasury_10y_fred") or {}, "value")
-    if val is None:
-        val = _safe_float((macro.get("series") or {}).get("DGS10") or {}, "value")
+    obs = market.get("treasury_10y_fred") or (macro.get("series") or {}).get("DGS10") or {}
+    val = _safe_float(obs, "value")
     if val is None:
         val = _safe_float(macro, "rates", "DGS10")
-    return val
+        return val, None
+    return val, obs.get("date")
 
 
-def _bond_from_raw(raw: dict[str, Any], prior_raw: dict[str, Any]) -> dict[str, Any]:
-    cur = _treasury_rate(raw)
-    prev = _treasury_rate(prior_raw)
+def _fresh_treasury_obs() -> tuple[float | None, str | None]:
+    try:
+        obs = FredClient().latest_observation("DGS10")
+    except Exception:
+        logger.warning("FRED DGS10 fetch failed", exc_info=True)
+        return None, None
+    if not obs:
+        return None, None
+    val = _safe_float(obs, "value")
+    if val is None or obs.get("value") == ".":
+        return None, obs.get("date")
+    return val, obs.get("date")
+
+
+def _bond_observation(
+    raw: dict[str, Any],
+    prior_raw: dict[str, Any],
+    trading_date: date,
+) -> dict[str, Any]:
+    cur, cur_date = _treasury_obs(raw)
+    cur_fresh, cur_fresh_date = _fresh_treasury_obs()
+    if cur_fresh is not None:
+        cur = cur_fresh
+        cur_date = cur_fresh_date
+
+    prev, prev_date = _treasury_obs(prior_raw)
+    if prev is None:
+        return {"ticker": "DGS10", "error": "no treasury data"}
     if cur is None:
         return {"ticker": "DGS10", "error": "no treasury data"}
-    change_pct = _pct_chg(cur, prev) if prev is not None else None
-    return {
+
+    change_pct = _pct_chg(cur, prev)
+    out: dict[str, Any] = {
         "ticker": "DGS10",
-        "prev_close": round(prev, 4) if prev is not None else None,
+        "prev_close": round(prev, 4),
         "last": round(cur, 4),
         "change_pct": round(change_pct, 2) if change_pct is not None else None,
-        "source": "raw",
+        "source": "fred",
+        "obs_date": cur_date,
+        "prior_obs_date": prev_date,
+        "prior_trading_day": prior_trading_day(trading_date).isoformat(),
     }
+    if cur_date and cur_date < prior_trading_day(trading_date).isoformat():
+        out["stale"] = True
+    return out
 
 
 def _load_raw(trading_date: date) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -148,27 +249,37 @@ def _quote_with_fallback(
     raw: dict[str, Any],
     prior_raw: dict[str, Any],
     *,
+    trading_date: date,
     section: str,
     prior_section: str | None = None,
 ) -> dict[str, Any]:
-    intraday = _intraday_quote(ticker)
+    prev_close = _prior_close_from_raw(
+        prior_raw,
+        section=section,
+        ticker=ticker,
+        prior_section=prior_section,
+    )
+    if prev_close is None:
+        return {"ticker": ticker, "error": "no prior close"}
+
+    intraday = _intraday_quote(ticker, prev_close=prev_close)
     if "error" not in intraday:
         return intraday
+
+    session = _session_quote(ticker, trading_date, prev_close=prev_close)
+    if "error" not in session:
+        return session
 
     sec = raw.get(section, {})
     q = _quote(sec, ticker)
     if "error" in q or q.get("close") is None:
-        return intraday
+        return session
 
-    # Enrich with prior-day close when collector omitted prev_close.
-    if q.get("prev_close") is None and prior_raw:
-        prior_sec = prior_raw.get(prior_section or section, {})
-        prior_q = _quote(prior_sec, ticker)
-        prior_close = _safe_float(prior_q, "close") or _safe_float(prior_q, "current_price")
-        if prior_close is not None:
-            q = {**q, "prev_close": prior_close}
+    # Step 0 raw may still hold the prior session when collected pre-market.
+    if _quote_date(q) != trading_date:
+        return session
 
-    obs = _observation_from_quote(q)
+    obs = _observation_from_quote(q, prev_close=prev_close)
     obs["source"] = "raw"
     return obs
 
@@ -252,16 +363,14 @@ def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
 
     raw, prior_raw = _load_raw(trading_date)
 
-    qqq = _quote_with_fallback("QQQ", raw, prior_raw, section="market")
-    smh = _quote_with_fallback("SMH", raw, prior_raw, section="sector")
+    qqq = _quote_with_fallback("QQQ", raw, prior_raw, trading_date=trading_date, section="market")
+    smh = _quote_with_fallback("SMH", raw, prior_raw, trading_date=trading_date, section="sector")
 
-    tnx = _intraday_quote("^TNX")
-    if "error" in tnx:
-        tnx = _bond_from_raw(raw, prior_raw)
+    tnx = _bond_observation(raw, prior_raw, trading_date)
 
     mag7_moves: list[dict[str, Any]] = []
     for sym in MAG7:
-        q = _quote_with_fallback(sym, raw, prior_raw, section="stocks")
+        q = _quote_with_fallback(sym, raw, prior_raw, trading_date=trading_date, section="stocks")
         if "error" not in q:
             mag7_moves.append(q)
     mag7_moves.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
@@ -283,9 +392,11 @@ def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
     bond_note = ""
     if "error" not in tnx:
         chg = tnx.get("change_pct")
+        stale = tnx.get("stale")
         if tnx.get("ticker") == "DGS10":
             chg_txt = f"{chg:+.2f}%" if chg is not None else "—"
-            bond_note = f"10Y DGS10 {tnx.get('last')} ({chg_txt} vs 前日)"
+            obs_suffix = f" (FRED {tnx['obs_date']})" if stale and tnx.get("obs_date") else ""
+            bond_note = f"10Y DGS10 {tnx.get('last')} ({chg_txt} vs 前日{obs_suffix})"
         else:
             chg_txt = f"{chg:+.2f}%" if chg is not None else "—"
             bond_note = f"10Y proxy (^TNX) {chg_txt} vs 昨收"
