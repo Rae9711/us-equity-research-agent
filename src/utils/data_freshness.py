@@ -73,9 +73,6 @@ def _iter_quotes(raw: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         quotes = ((raw.get(section) or {}).get("quotes") or {})
         for ticker, q in quotes.items():
             out.append((f"{section}.{ticker}", q))
-    treasury = (raw.get("market") or {}).get("treasury_10y_fred")
-    if treasury:
-        out.append(("market.treasury_10y_fred", treasury))
     return out
 
 
