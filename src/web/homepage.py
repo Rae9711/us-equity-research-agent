@@ -49,6 +49,26 @@ DRIVER_SYMBOL_MAP: dict[str, list[str]] = {
 DEFAULT_SYMBOLS = ["SMH", "NVDA", "SPY"]
 
 
+def _format_data_as_of_et(iso_ts: str | None) -> str | None:
+    """Format morning.json generated_at as 'HH:MM ET' for the decision card."""
+    if not iso_ts:
+        return None
+    try:
+        from datetime import datetime
+
+        from pytz import timezone
+
+        et = timezone("America/New_York")
+        dt = datetime.fromisoformat(iso_ts)
+        if dt.tzinfo is None:
+            dt = et.localize(dt)
+        else:
+            dt = dt.astimezone(et)
+        return dt.strftime("%H:%M ET")
+    except (TypeError, ValueError):
+        return iso_ts[:16] if iso_ts else None
+
+
 def load_morning(trading_date: str) -> dict[str, Any] | None:
     path = morning_json_path(trading_date)
     if not path.exists():
@@ -153,7 +173,11 @@ def _extract_bias(morning: dict[str, Any]) -> str:
 
 def _trade_action(morning: dict[str, Any], step4: dict[str, Any] | None) -> str:
     if step4 is not None:
-        return "Trade" if step4.get("should_trade") else "No Trade"
+        if step4.get("should_trade") or step4.get("stock_trade"):
+            return "Trade"
+        if step4.get("index_trade") and step4.get("index_trade") != "NO TRADE":
+            return "Trade"
+        return "No Trade"
 
     primary = (morning.get("best_trades") or {}).get("primary")
     if primary and primary.get("direction") in ("LONG", "SHORT"):
@@ -332,6 +356,8 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "watch_variables": _watch_variables(morning, driver_info["display"]),
         "hypothesis": hypothesis_line[:200],
         "has_morning": True,
+        "generated_at": morning.get("generated_at"),
+        "data_as_of_et": _format_data_as_of_et(morning.get("generated_at")),
         "advisory": "ADVISORY — 不构成投资建议",
         "trade_candidates": morning.get("trade_candidates") or [],
         "best_opportunity": best,
