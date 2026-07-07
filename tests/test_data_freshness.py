@@ -186,5 +186,58 @@ class MacroFreshnessTierTests(unittest.TestCase):
         self.assertTrue(any("已超过" in a for a in stale.attention))
 
 
+class BondProxyTests(unittest.TestCase):
+    """^TNX is a bond yield proxy — stale bars must not block equity validation."""
+
+    def test_stale_tnx_error_does_not_block(self) -> None:
+        trading_date = date(2026, 7, 7)
+        prior = prior_trading_day(trading_date)
+        raw = _minimal_raw(trading_date)
+        raw["collected_at"] = "2026-07-07T07:45:00-04:00"
+        raw["trading_date"] = trading_date.isoformat()
+        raw["prior_trading_day"] = prior.isoformat()
+        raw["market"]["quotes"] = {
+            "SPY": _quote(session=prior, prior=prior, close=550.0, prior_close=545.0),
+            "^TNX": {
+                "ticker": "^TNX",
+                "error": f"stale bar date 2026-07-02 (expected {trading_date} or {prior})",
+                "data_as_of": "2026-07-07T07:45:00-04:00",
+            },
+        }
+        raw["news"]["published_gte"] = "2026-07-06T20:00:00Z"
+
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-06T20:00:00Z"):
+            result = validate_raw_for_trading_date(raw, trading_date)
+
+        self.assertTrue(result.ok, result.reasons)
+        self.assertTrue(any("^TNX" in a and "债券数据正常滞后" in a for a in result.attention))
+        self.assertFalse(any("^TNX" in r for r in result.reasons))
+
+    def test_stale_tnx_session_date_is_attention_only(self) -> None:
+        trading_date = date(2026, 7, 7)
+        prior = prior_trading_day(trading_date)
+        stale = date(2026, 7, 2)
+        raw = _minimal_raw(trading_date)
+        raw["collected_at"] = "2026-07-07T07:45:00-04:00"
+        raw["market"]["quotes"] = {
+            "SPY": _quote(session=prior, prior=prior),
+            "^TNX": {
+                "ticker": "^TNX",
+                "close": 4.25,
+                "quote_session_date": stale.isoformat(),
+                "date": stale.isoformat(),
+                "session_type": "fallback",
+                "data_as_of": "2026-07-07T07:45:00-04:00",
+            },
+        }
+        raw["news"]["published_gte"] = "2026-07-06T20:00:00Z"
+
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-06T20:00:00Z"):
+            result = validate_raw_for_trading_date(raw, trading_date)
+
+        self.assertTrue(result.ok, result.reasons)
+        self.assertTrue(any("proxy 最新" in a for a in result.attention))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,7 @@ _MONTHLY_MACRO = frozenset(
 )
 _WEEKLY_MACRO = frozenset({"ICSA"})
 _DAILY_RATE_MACRO = frozenset({"DGS10", "DGS2"})
+_BOND_PROXY_TICKERS = frozenset({"^TNX", "TNX"})
 _ICSA_STALE_CALENDAR_DAYS = 10
 
 
@@ -86,6 +87,42 @@ def _iter_quotes(raw: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         for ticker, q in quotes.items():
             out.append((f"{section}.{ticker}", q))
     return out
+
+
+def _is_bond_proxy_label(label: str) -> bool:
+    return label.rsplit(".", 1)[-1] in _BOND_PROXY_TICKERS
+
+
+def _bond_proxy_attention(
+    label: str,
+    q: dict[str, Any],
+    *,
+    prior_day: date,
+) -> str | None:
+    """Bond yield proxies (^TNX) may lag like FRED — attention only, never blocks ok."""
+    err = q.get("error")
+    if err:
+        err_s = str(err)
+        if "stale bar date" in err_s:
+            # e.g. "stale bar date 2026-07-02 (expected ...)"
+            parts = err_s.split("stale bar date ", 1)
+            bar = parts[1].split(" ", 1)[0] if len(parts) > 1 else "?"
+            return (
+                f"{label}: proxy 最新 {bar}，上一交易日 {prior_day.isoformat()}（债券数据正常滞后）"
+            )
+        return f"{label}: {err_s}"
+
+    qsd = parse_quote_session_date(q)
+    if qsd is None:
+        if q.get("close") is None:
+            return f"{label}: 债券 proxy 无可用报价"
+        return None
+
+    if qsd < prior_day:
+        return (
+            f"{label}: proxy 最新 {qsd.isoformat()}，上一交易日 {prior_day.isoformat()}（债券数据正常滞后）"
+        )
+    return None
 
 
 def _quote_session_label(q: dict[str, Any]) -> str | None:
@@ -376,6 +413,8 @@ def validate_raw_for_trading_date(raw: dict[str, Any], trading_date: date) -> Va
 
     for label, q in _iter_quotes(raw):
         field_sessions[label] = _quote_session_label(q)
+        if _is_bond_proxy_label(label):
+            continue
         reasons.extend(
             _validate_quote(label, q, trading_date=trading_date, prior_day=prior_day)
         )
@@ -388,6 +427,12 @@ def validate_raw_for_trading_date(raw: dict[str, Any], trading_date: date) -> Va
     macro_legacy, attention, macro_reference = _validate_macro(
         raw, trading_date=trading_date, prior_day=prior_day
     )
+    for label, q in _iter_quotes(raw):
+        if not _is_bond_proxy_label(label):
+            continue
+        msg = _bond_proxy_attention(label, q, prior_day=prior_day)
+        if msg:
+            attention.append(msg)
     warnings.extend(macro_legacy)
 
     result = ValidationResult(
