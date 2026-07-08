@@ -1,0 +1,20 @@
+{% macro driver_tree_block(tree) %}
+{% if tree and tree.primary %}
+<div class="transparency-block driver-tree">
+  <h3 class="transparency-title">Driver Tree</h3>
+  <p class="muted small">Primary → Secondary → Tertiary · 盘中可更新</p>
+  <ol class="driver-tree-list">
+    {% for slot, label in [('primary', 'Primary'), ('secondary', 'Secondary'), ('tertiary', 'Tertiary')] %}
+    {% set node = tree.get(slot) %}
+    {% if node %}
+    <li class="driver-tree-node">
+      <span class="driver-slot-label">{{ label }}</span>
+      <strong>{{ node.type }}</strong> — {{ node.label }}
+      <p class="muted small">{{ node.evidence }}</p>
+    </li>
+    {% endif %}
+    {% endfor %}
+  </ol>
+</div>
+{% endif %}
+{% endmacro %}

@@ -1,0 +1,20 @@
+{% macro trade_plan_block(plan) %}
+{% if plan %}
+<div class="transparency-block trade-plan">
+  <h3 class="transparency-title">Trade Plan · IF-THEN</h3>
+  {% if plan.gate %}<p><strong>Gate：</strong><span class="trade-badge trade-{{ plan.gate | lower | replace(' ', '-') }}">{{ plan.gate }}</span></p>{% endif %}
+  {% if plan.conditions_long %}
+  <h4 class="plan-section-title plan-long">Conditions to go LONG</h4>
+  <ul class="plan-conditions">{% for c in plan.conditions_long %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if plan.conditions_short %}
+  <h4 class="plan-section-title plan-short">Conditions to go SHORT</h4>
+  <ul class="plan-conditions">{% for c in plan.conditions_short %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if plan.conditions_wait %}
+  <h4 class="plan-section-title plan-wait">Conditions to WAIT / No Trade</h4>
+  <ul class="plan-conditions">{% for c in plan.conditions_wait %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

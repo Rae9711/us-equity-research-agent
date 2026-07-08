@@ -10,6 +10,7 @@ from src.research.trade_candidates import (
     FINAL_SCORE_THRESHOLD,
     _apply_price_based_return,
     _expected_return_from_prices,
+    _geo_context_penalty,
     _instrument,
     _p16_gate,
     _return_calculation_string,
@@ -104,9 +105,86 @@ def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  
     }
 
 
-def test_candidate_symbols_order():
+def test_candidate_symbols_includes_semis():
     assert CANDIDATE_SYMBOLS[0] == "TSLA"
     assert "NVDA" in CANDIDATE_SYMBOLS
+    assert "AMD" in CANDIDATE_SYMBOLS
+    assert "MU" in CANDIDATE_SYMBOLS
+    assert "AVGO" in CANDIDATE_SYMBOLS
+    assert "META" in CANDIDATE_SYMBOLS
+    assert "ARM" in CANDIDATE_SYMBOLS
+
+
+def test_short_weak_rs_beats_strong_nvda():
+    """Bearish sector: weakest semi (MU) should outrank NVDA leader for SHORT."""
+    mu = _score_candidate_v2(
+        "MU",
+        obs={"last": 100.0, "prev_close": 102.0, "gap_pct": -1.0},
+        prior_day_chg=-2.5,
+        rs_vs_qqq=-1.8,
+        rs_vs_smh=-1.2,
+        gap_pct=-1.0,
+        news_count=1,
+        volume_ok=True,
+        vix_chg=6.0,
+        driver_type="Macro",
+        has_news_catalyst=True,
+        q={"high": 103, "low": 98},
+        direction="SHORT",
+    )
+    nvda = _score_candidate_v2(
+        "NVDA",
+        obs={"last": 140.0, "prev_close": 139.0, "gap_pct": 0.5},
+        prior_day_chg=1.5,
+        rs_vs_qqq=0.8,
+        rs_vs_smh=1.0,
+        gap_pct=0.5,
+        news_count=2,
+        volume_ok=True,
+        vix_chg=6.0,
+        driver_type="AI",
+        has_news_catalyst=True,
+        q={"high": 142, "low": 138},
+        direction="SHORT",
+    )
+    assert mu["final_score"] > nvda["final_score"]
+    assert mu["win_prob"] > nvda["win_prob"]
+    assert (mu.get("relative_weakness_score") or 0) > (nvda.get("relative_weakness_score") or 0)
+
+
+def test_long_still_rewards_positive_rs():
+    """LONG direction should still favor relative strength."""
+    strong = _score_candidate_v2(
+        "NVDA",
+        obs={"last": 140.0, "prev_close": 138.0, "gap_pct": 1.0},
+        prior_day_chg=3.0,
+        rs_vs_qqq=1.2,
+        rs_vs_smh=0.8,
+        gap_pct=1.0,
+        news_count=1,
+        volume_ok=True,
+        vix_chg=-4.0,
+        driver_type="AI",
+        has_news_catalyst=True,
+        q={"high": 142, "low": 137},
+        direction="LONG",
+    )
+    weak = _score_candidate_v2(
+        "MU",
+        obs={"last": 100.0, "prev_close": 102.0, "gap_pct": -1.0},
+        prior_day_chg=-2.0,
+        rs_vs_qqq=-1.5,
+        rs_vs_smh=-1.0,
+        gap_pct=-1.0,
+        news_count=0,
+        volume_ok=True,
+        vix_chg=-4.0,
+        driver_type="AI",
+        has_news_catalyst=False,
+        q={"high": 103, "low": 98},
+        direction="LONG",
+    )
+    assert strong["final_score"] > weak["final_score"]
 
 
 def test_split_edges_four_fields():
@@ -219,7 +297,13 @@ def test_bullish_momentum_picks_primary(_prior, _obs):
     assert primary["symbol"] == "TSLA"
     assert best["direction"] == "LONG"
     assert best["confidence"] >= 55
-    assert len(ranked) == 6
+    assert len(ranked) == len(CANDIDATE_SYMBOLS)
+    transparency = result.get("transparency") or {}
+    assert transparency.get("todays_opportunities")
+    assert primary.get("win_prob_breakdown")
+    assert primary.get("level_reasons")
+    assert primary.get("trade_economics")
+    assert primary.get("why_not_alternatives")
 
 
 @patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
@@ -426,3 +510,71 @@ def test_primary_trade_er_matches_entry_target(_prior, _obs):
         assert best["expected_return_pct"] == expected
         assert primary["return_calculation"]
         assert "trade_summary_cn" in primary
+
+
+def test_geo_penalty_on_nvda_short():
+    penalty, reason = _geo_context_penalty(
+        "NVDA",
+        "SHORT",
+        macro_calendar={
+            "catalysts": [
+                {"name": "Geopolitical Risk (Iran)", "category": "breaking", "theme": "geopolitics"}
+            ]
+        },
+        driver_tree={"primary": {"type": "Political", "label": "Geopolitical Risk (Iran)"}},
+    )
+    assert penalty >= 15
+    assert reason is not None
+
+
+def test_compute_trade_decision_top5_and_watchlist():
+    raw = _bullish_raw()
+    rule_bundle = {
+        "bias": "Bullish Bias",
+        "total": 3,
+        "driver_type": "Momentum",
+        "daily_driver": "AI Momentum",
+        "catalysts_today": [],
+        "macro_calendar": {"catalysts": [], "has_material_catalyst": False},
+        "driver_tree": {"primary": {"type": "Momentum", "label": "AI Momentum"}},
+    }
+    parts = {
+        "P9": {"buy_options": "Yes", "zero_dte": "No", "buy_call": "Yes", "buy_put": "No"},
+        "P16": {"judgment": "Wait", "trade_plan": {"gate": "Wait", "conditions_wait": ["wait"]}},
+    }
+    with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
+        result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
+    assert "top_trades" in result
+    assert len(result["top_trades"]) <= 5
+    assert "transparency" in result
+    assert "top_trades" in result["transparency"]
+
+def test_trade_candidates_direction_from_bias():
+    """Every ranked trade_candidates row carries bias-picked LONG/SHORT."""
+    raw = _bullish_raw()
+    rule_bundle = {
+        "bias": "Bullish Bias",
+        "total": 3,
+        "driver_type": "Momentum",
+        "daily_driver": "AI Momentum",
+        "catalysts_today": [],
+        "macro_calendar": {"catalysts": [], "has_material_catalyst": False},
+        "driver_tree": {"primary": {"type": "Momentum", "label": "AI Momentum"}},
+    }
+    parts = {
+        "P9": {"buy_options": "Yes", "zero_dte": "No", "buy_call": "Yes", "buy_put": "No"},
+        "P16": {"judgment": "Wait", "trade_plan": {"gate": "Wait", "conditions_wait": ["wait"]}},
+    }
+    with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
+        result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
+    for row in result["trade_candidates"]:
+        assert row.get("direction") == "LONG"
+    for slot in result["top_trades"]:
+        assert slot.get("direction") == "LONG"
+
+    bear_bundle = {**rule_bundle, "bias": "Bearish Bias", "total": -3}
+    with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
+        bear = compute_trade_decision(raw, rule_bundle=bear_bundle, parts=parts)
+    for row in bear["trade_candidates"]:
+        assert row.get("direction") == "SHORT"
+

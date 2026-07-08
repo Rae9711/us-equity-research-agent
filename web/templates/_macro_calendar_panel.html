@@ -1,0 +1,18 @@
+{% macro macro_calendar_block(calendar) %}
+{% if calendar and calendar.catalysts %}
+<div class="transparency-block macro-calendar">
+  <h3 class="transparency-title">Macro Calendar · 按市场影响排序</h3>
+  {% if calendar.headline %}<p class="macro-headline">{{ calendar.headline }}</p>{% endif %}
+  <ul class="macro-catalyst-list">
+    {% for c in calendar.catalysts %}
+    <li class="macro-catalyst macro-cat-{{ c.category }} macro-impact-{{ c.impact }}">
+      <span class="macro-cat-badge">{{ c.category }}</span>
+      <strong>{{ c.name }}</strong>
+      <span class="macro-impact-score">{{ c.impact_score }}</span>
+      <span class="muted small">{{ c.evidence or c.release }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}

@@ -78,6 +78,7 @@ def compute_edges(
     raw: dict[str, Any],
     *,
     catalysts_today: list[dict[str, Any]] | None = None,
+    macro_calendar: dict[str, Any] | None = None,
     qqq_pct: float | None = None,
     smh_pct: float | None = None,
     spy_pct: float | None = None,
@@ -87,20 +88,30 @@ def compute_edges(
     """Compute four independent edges for P13 + P18 decision tree."""
     sym_pcts = sym_pcts or {}
     catalysts = catalysts_today or []
+    cal = macro_calendar or {}
 
-    # Macro edge — only on calendar release days
-    if catalysts:
-        labels = []
+    # Macro edge — scheduled releases, breaking geo, or commodity shocks
+    material = cal.get("has_material_catalyst") if cal else bool(catalysts)
+    cal_cats = cal.get("catalysts") or catalysts
+    if material and cal_cats:
+        labels: list[str] = []
         seen: set[str] = set()
-        for c in catalysts:
+        for c in cal_cats:
             name = c.get("name") or ""
             if name and name not in seen:
                 seen.add(name)
                 labels.append(name)
-        catalyst_str = "、".join(labels) if labels else "宏观数据"
-        macro = _edge_row("YES", why=f"今日有 {catalyst_str} 发布", catalyst=catalyst_str)
+        catalyst_str = "、".join(labels[:4]) if labels else "宏观/地缘催化剂"
+        categories = {c.get("category") for c in cal_cats if c.get("category")}
+        if "breaking" in categories:
+            why = f"今日有重大催化剂（含地缘/突发）：{catalyst_str}"
+        elif "commodity" in categories:
+            why = f"今日有商品/能源冲击 + 宏观事件：{catalyst_str}"
+        else:
+            why = f"今日有 {catalyst_str} 等宏观催化剂"
+        macro = _edge_row("YES", why=why, catalyst=catalyst_str)
     else:
-        macro = _edge_row("NO", why="今日无重大宏观数据发布", catalyst=None)
+        macro = _edge_row("NO", why="今日无重大宏观/地缘/商品催化剂", catalyst=None)
 
     # Index edge — QQQ/SPY session direction at open
     if qqq_pct is not None and qqq_pct > INDEX_RS_THRESHOLD:
@@ -196,12 +207,20 @@ def format_p13_from_edges(edges: dict[str, Any]) -> dict[str, Any]:
         one_parts.append(f"板块 {sector.get('sector')}")
     one_liner = " · ".join(one_parts) if one_parts else "四路 Edge 均偏弱，依赖个股评分"
 
+    catalysts_out = edges.get("macro_edge", {}).get("catalyst")
+    catalyst_list: list[dict[str, Any]] = []
+    if catalysts_out:
+        for part in str(catalysts_out).split("、"):
+            part = part.strip()
+            if part:
+                catalyst_list.append({"name": part, "release": part})
+
     return {
         "judgment": judgment,
         "confidence": 0.55 + yes_count * 0.08,
         "one_liner": one_liner,
         "body_md": "\n".join(body_lines),
         "edges": edges,
-        "catalysts": [],
+        "catalysts": catalyst_list,
         "scores": {},
     }

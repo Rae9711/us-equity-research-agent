@@ -2,7 +2,9 @@
 {% if source %}<span class="level-source-tag">{{ source }}</span>{% endif %}
 {%- endmacro %}
 
-{% macro trade_detail_card(trade, title='Trade Detail') %}
+{% from "_transparency_panel.html" import transparency_panel %}
+
+{% macro trade_detail_card(trade, title='Trade Detail', transparency=None) %}
 {% if trade %}
 <section class="panel trade-detail-panel">
   <div class="decision-card-head">
@@ -16,7 +18,14 @@
     <div><span class="decision-label">胜率 Win Prob</span><strong>{{ trade.win_prob }}%</strong></div>
     <div>
       <span class="decision-label">预期收益 Expected Return</span>
-      <strong>{{ trade.expected_move or ('+' ~ trade.expected_return_pct ~ '%') }}</strong>
+      <strong>
+        {% if trade.trade_economics %}
+        <span class="pnl-win">+${{ trade.trade_economics.win_usd }}</span> /
+        <span class="pnl-loss">-${{ trade.trade_economics.loss_usd }}</span>
+        {% else %}
+        {{ trade.expected_move or ('+' ~ trade.expected_return_pct ~ '%') }}
+        {% endif %}
+      </strong>
       {% if trade.return_calculation %}
       <span class="muted small">（从入场到目标，已验算：{{ trade.return_calculation }}）</span>
       {% endif %}
@@ -65,22 +74,10 @@
   {% elif trade.why_chain %}
   <p><strong>Why：</strong>{{ trade.why_chain }}</p>
   {% endif %}
+  {% set tcard = transparency if transparency else trade %}
+  {{ transparency_panel(tcard, show_opportunities=false, show_index=false) }}
   {% if trade.one_liner %}
   <p class="best-opp-oneliner">「{{ trade.one_liner }}」</p>
-  {% endif %}
-  {% if trade.factor_breakdown %}
-  <details class="factor-breakdown">
-    <summary class="decision-label">Factor Breakdown</summary>
-    <ul class="factor-list">
-      {% set fb = trade.factor_breakdown %}
-      {% if fb.relative_strength_vs_qqq is not none %}<li>RS vs QQQ：{{ fb.relative_strength_vs_qqq }}%</li>{% endif %}
-      {% if fb.gap_pct is not none %}<li>Gap：{{ fb.gap_pct }}%</li>{% endif %}
-      {% if fb.beta_proxy is not none %}<li>Beta proxy：{{ fb.beta_proxy }}</li>{% endif %}
-      <li>Volume signal：{{ 'Yes' if fb.volume_signal else 'No' }}</li>
-      <li>News count：{{ fb.news_count or 0 }}</li>
-      {% if fb.extended_gap_penalty %}<li>Extended gap penalty：-{{ fb.extended_gap_penalty }}</li>{% endif %}
-    </ul>
-  </details>
   {% endif %}
 </section>
 {% endif %}

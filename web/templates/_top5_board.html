@@ -1,0 +1,54 @@
+{% macro top5_board_block(trades, watchlist=none) %}
+{% if trades %}
+<div class="transparency-block top5-board">
+  <h3 class="transparency-title">Top 5 Trade Candidates</h3>
+  <p class="advisory-banner small">ADVISORY — 不构成投资建议</p>
+  <div class="top5-scroll">
+    <table class="data-table top5-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Ticker</th>
+          <th>Dir</th>
+          <th>Win%</th>
+          <th>ER%</th>
+          <th>R:R</th>
+          <th>Entry</th>
+          <th>Stop</th>
+          <th>Target</th>
+          <th>Why Today</th>
+          <th>Catalyst</th>
+          <th>Invalidation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in trades %}
+        <tr>
+          <td>{{ t.rank }}</td>
+          <td><strong>{{ t.symbol }}</strong></td>
+          <td>{{ t.direction }}</td>
+          <td>{% if t.win_prob is not none %}{{ t.win_prob }}%{% else %}—{% endif %}</td>
+          <td>{% if t.expected_return_pct is not none %}{{ t.expected_return_pct }}%{% else %}—{% endif %}</td>
+          <td>{{ t.risk_reward or '—' }}</td>
+          <td>{% if t.entry_price is not none %}${{ t.entry_price }}{% else %}—{% endif %}</td>
+          <td>{% if t.stop_price is not none %}${{ t.stop_price }}{% else %}—{% endif %}</td>
+          <td>{% if t.target_price is not none %}${{ t.target_price }}{% else %}—{% endif %}</td>
+          <td class="muted small">{{ t.why_today or '—' }}</td>
+          <td class="muted small">{{ t.catalyst or '—' }}</td>
+          <td class="muted small">{{ t.invalidation or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if watchlist %}
+  <h4 class="watchlist-title">Watchlist</h4>
+  <ul class="watchlist-list">
+    {% for w in watchlist %}
+    <li><strong>{{ w.symbol }}</strong> · {{ w.trade_action }} · {{ w.why }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

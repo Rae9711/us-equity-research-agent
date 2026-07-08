@@ -395,3 +395,118 @@ def derive_trade_levels(
 def format_if_level(price: float, source: str) -> str:
     """P16 IF-THEN level with source tag, e.g. '711 (昨日低点)'."""
     return f"{price:.1f} ({source_label(source)})"
+
+
+def _near(px: float | None, target: float, tolerance_pct: float = 0.6) -> bool:
+    if px is None or target <= 0:
+        return False
+    return abs(px - target) / target * 100.0 <= tolerance_pct
+
+
+def _level_reason_row(
+    source: str,
+    label: str,
+    price: float | None,
+    *,
+    chosen_src: str,
+    level_px: float,
+    primary_weight: float = 35.0,
+    confluence_weight: float = 15.0,
+) -> dict[str, Any] | None:
+    if price is None:
+        return None
+    is_primary = source == chosen_src
+    matched = is_primary or _near(price, level_px)
+    if not matched:
+        return None
+    weight = primary_weight if is_primary else confluence_weight
+    return {
+        "source": source,
+        "label": label,
+        "price": round(price, 2),
+        "weight_pct": weight,
+        "matched": True,
+        "primary": is_primary,
+    }
+
+
+def build_level_reasons(
+    direction: str,
+    anchors: LevelAnchors,
+    *,
+    entry_px: float,
+    entry_src: str,
+    stop_px: float,
+    stop_src: str,
+    target_px: float,
+    target_src: str,
+    current: float,
+) -> dict[str, Any]:
+    """Auditable entry/stop/target with confluence weights."""
+    if direction == "LONG":
+        entry_anchors = [
+            ("vwap", "VWAP", anchors.vwap),
+            ("orb_high", "ORB High", anchors.orb_high),
+            ("prev_high", "Yesterday High", anchors.prev_high),
+            ("prior_close", "Prior Close", anchors.prior_close),
+        ]
+        stop_anchors = [
+            ("orb_low", "ORB Low", anchors.orb_low),
+            ("prev_low", "Yesterday Low", anchors.prev_low),
+            ("vwap", "VWAP", anchors.vwap),
+        ]
+        target_anchors = [
+            ("expected_close", "Expected Close", target_px if target_src == "expected_close" else None),
+            ("expected_high", "Expected High", target_px if target_src == "expected_high" else None),
+            ("prev_high", "Yesterday High", anchors.prev_high),
+        ]
+        if current >= (anchors.vwap or 0):
+            entry_anchors.append(("current", "Above Current", current))
+    elif direction == "SHORT":
+        entry_anchors = [
+            ("orb_low", "ORB Low", anchors.orb_low),
+            ("vwap", "VWAP", anchors.vwap),
+            ("prev_low", "Yesterday Low", anchors.prev_low),
+            ("prior_close", "Prior Close", anchors.prior_close),
+        ]
+        stop_anchors = [
+            ("orb_high", "ORB High", anchors.orb_high),
+            ("prev_high", "Yesterday High", anchors.prev_high),
+            ("vwap", "VWAP", anchors.vwap),
+        ]
+        target_anchors = [
+            ("expected_close", "Expected Close", target_px if target_src == "expected_close" else None),
+            ("expected_low", "Expected Low", target_px if target_src == "expected_low" else None),
+            ("prev_low", "Yesterday Low", anchors.prev_low),
+        ]
+        if current <= (anchors.vwap or float("inf")):
+            entry_anchors.append(("current", "Below Current", current))
+    else:
+        return {}
+
+    def _build_level(
+        anchors_list: list[tuple[str, str, float | None]],
+        chosen: str,
+        level_px: float,
+    ) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        for src, label, px in anchors_list:
+            row = _level_reason_row(src, label, px, chosen_src=chosen, level_px=level_px)
+            if row:
+                rows.append(row)
+        total_w = sum(r["weight_pct"] for r in rows) or 1.0
+        for r in rows:
+            r["weight_pct"] = round(r["weight_pct"] / total_w * 100.0, 0)
+        confidence = min(98, 55 + len(rows) * 12 + (10 if any(r["primary"] for r in rows) else 0))
+        return {
+            "price": round(level_px, 2),
+            "source": chosen,
+            "confidence": confidence,
+            "reasons": rows,
+        }
+
+    return {
+        "entry": _build_level(entry_anchors, entry_src, entry_px),
+        "stop": _build_level(stop_anchors, stop_src, stop_px),
+        "target": _build_level(target_anchors, target_src, target_px),
+    }

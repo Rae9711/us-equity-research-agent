@@ -1,0 +1,193 @@
+{% macro win_prob_breakdown_block(breakdown) %}
+{% if breakdown and breakdown.components %}
+<div class="transparency-block win-prob-breakdown">
+  <h3 class="transparency-title">Win Probability 拆解</h3>
+  <ul class="wp-breakdown-list">
+    {% for c in breakdown.components %}
+    <li>
+      <span class="wp-factor">{{ c.factor }}</span>
+      <span class="wp-points {% if c.points < 0 %}wp-neg{% else %}wp-pos{% endif %}">
+        {% if c.points > 0 %}+{% endif %}{{ c.points }}
+      </span>
+    </li>
+    {% endfor %}
+    <li class="wp-total">
+      <span class="wp-factor">Total</span>
+      <strong>{{ breakdown.total }}%</strong>
+    </li>
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro level_reasons_block(level_reasons) %}
+{% if level_reasons %}
+<div class="transparency-block level-reasons">
+  <h3 class="transparency-title">价位来源 Level Reasons</h3>
+  {% for key, label in [('entry', 'Entry'), ('stop', 'Stop'), ('target', 'Target')] %}
+  {% set lvl = level_reasons.get(key) %}
+  {% if lvl %}
+  <div class="level-reason-row">
+    <div class="level-reason-head">
+      <strong>{{ label }} ${{ lvl.price }}</strong>
+      {% if lvl.confidence %}<span class="level-conf">Confidence {{ lvl.confidence }}</span>{% endif %}
+      <span class="level-source-tag">{{ lvl.source }}</span>
+    </div>
+    {% if lvl.reasons %}
+    <ul class="level-reason-list">
+      {% for r in lvl.reasons %}
+      <li>
+        <span class="reason-check">✓</span>
+        {{ r.label }}
+        {% if r.price is not none %}<span class="muted small">${{ r.price }}</span>{% endif %}
+        <span class="reason-weight">{{ r.weight_pct | int }}%</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro trade_economics_block(economics) %}
+{% if economics %}
+<div class="transparency-block trade-economics">
+  <h3 class="transparency-title">美元盈亏 · 非抽象 ER%</h3>
+  <div class="economics-grid">
+    <div>
+      <span class="decision-label">账户 Account</span>
+      <strong>${{ "{:,.0f}".format(economics.account_size) }}</strong>
+    </div>
+    <div>
+      <span class="decision-label">成功 Win</span>
+      <strong class="pnl-win">+${{ economics.win_usd }}</strong>
+    </div>
+    <div>
+      <span class="decision-label">失败 Loss</span>
+      <strong class="pnl-loss">-${{ economics.loss_usd }}</strong>
+    </div>
+    <div>
+      <span class="decision-label">每股价差</span>
+      <span class="muted small">Reward ${{ economics.reward_per_share }} / Risk ${{ economics.risk_per_share }}</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro position_sizing_block(sizing) %}
+{% if sizing %}
+<div class="transparency-block position-sizing">
+  <h3 class="transparency-title">仓位 Position Size</h3>
+  <div class="sizing-chain">
+    <span>Risk {{ sizing.risk_pct }}%</span>
+    <span class="sizing-arrow">↓</span>
+    <span>Position {{ sizing.position_pct }}%</span>
+    <span class="sizing-arrow">↓</span>
+    <span>{{ sizing.contracts or sizing.shares }} unit(s)</span>
+    <span class="sizing-arrow">↓</span>
+    <span>Max Loss ${{ sizing.max_loss_usd }}</span>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro why_wins_today_block(items) %}
+{% if items %}
+<div class="transparency-block why-wins">
+  <h3 class="transparency-title">Why This Trade Wins Today</h3>
+  <ol class="why-wins-list">
+    {% for item in items %}
+    <li>
+      <strong>{{ item.label }}</strong>
+      <span class="muted small">{{ item.primary_value }}{% if item.runner_up_value is not none %} vs {{ item.runner_up_value }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro why_not_alternatives_block(items) %}
+{% if items %}
+<div class="transparency-block why-not-alts">
+  <h3 class="transparency-title">Why Not the Alternatives</h3>
+  <ul class="why-not-list">
+    {% for alt in items %}
+    <li>
+      <strong>{{ alt.symbol }}</strong> (#{{ alt.rank }})
+      <ul>{% for r in alt.reasons %}<li class="muted small">{{ r }}</li>{% endfor %}</ul>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro index_rejection_block(reasons) %}
+{% if reasons %}
+<div class="transparency-block index-rejection">
+  <h3 class="transparency-title">Why Index Rejected</h3>
+  <ul class="rejection-list">
+    {% for r in reasons %}
+    <li>
+      <strong>{{ r.factor }}</strong>
+      <span class="rejection-status">{{ r.status }}</span>
+      <span class="muted small">{{ r.detail }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro day_risks_block(day_risks) %}
+{% if day_risks and (day_risks.risks or day_risks.donts) %}
+<div class="transparency-block day-risks">
+  <h3 class="transparency-title">Today's Biggest Risk</h3>
+  {% if day_risks.headline %}<p class="risk-headline">{{ day_risks.headline }}</p>{% endif %}
+  {% if day_risks.risks %}
+  <ul class="risk-list">{% for r in day_risks.risks %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if day_risks.donts %}
+  <ul class="dont-list">{% for d in day_risks.donts %}<li class="dont-item">{{ d }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro todays_opportunities_block(opportunities) %}
+{% if opportunities %}
+<div class="transparency-block opportunities-board">
+  <h3 class="transparency-title">Today's Opportunities</h3>
+  <p class="muted small">先给机会，再给分析 — 无需翻页</p>
+  <ul class="opportunities-list">
+    {% for opp in opportunities %}
+    <li class="opp-row {% if opp.is_primary %}opp-primary{% endif %}">
+      <span class="opp-stars">{{ opp.stars }}</span>
+      <span class="opp-label">{{ opp.label }}</span>
+      {% if opp.win_prob is not none %}<span class="opp-wp">{{ opp.win_prob }}%</span>{% endif %}
+      <span class="opp-action opp-{{ opp.action | lower }}">{{ opp.action }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro transparency_panel(card, show_opportunities=true, show_index=true) %}
+<div class="transparency-panel">
+  {% if show_opportunities %}{{ todays_opportunities_block(card.todays_opportunities) }}{% endif %}
+  {{ why_wins_today_block(card.why_wins_today) }}
+  {{ win_prob_breakdown_block(card.win_prob_breakdown) }}
+  {{ trade_economics_block(card.trade_economics) }}
+  {{ position_sizing_block(card.position_sizing) }}
+  {{ level_reasons_block(card.level_reasons) }}
+  {{ why_not_alternatives_block(card.why_not_alternatives) }}
+  {% if show_index %}{{ index_rejection_block(card.index_rejection_reasons) }}{% endif %}
+  {{ day_risks_block(card.day_risks) }}
+</div>
+{% endmacro %}

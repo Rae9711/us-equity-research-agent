@@ -335,6 +335,9 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     elif best.get("direction") in ("LONG", "SHORT") and trade_action == "Wait":
         trade_action = "Trade"
 
+    transparency = morning.get("transparency") or {}
+    index_trade = morning.get("index_trade") or best_trades.get("index_trade")
+
     return {
         "driver": driver_info["display"],
         "driver_type": exec_sum.get("driver_type") or driver_info["driver_type"],
@@ -362,6 +365,16 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "why_vs_runner_up": exec_sum.get("why_vs_runner_up") or (primary or {}).get("why_vs_runner_up"),
         "edge_type": exec_sum.get("edge_type") or (primary or {}).get("edge_type"),
         "win_prob": (primary or {}).get("win_prob") or best.get("win_prob"),
+        "win_prob_breakdown": exec_sum.get("win_prob_breakdown") or (primary or {}).get("win_prob_breakdown"),
+        "level_reasons": exec_sum.get("level_reasons") or (primary or {}).get("level_reasons"),
+        "trade_economics": exec_sum.get("trade_economics") or (primary or {}).get("trade_economics"),
+        "position_sizing": exec_sum.get("position_sizing") or (primary or {}).get("position_sizing"),
+        "why_wins_today": exec_sum.get("why_wins_today") or transparency.get("why_wins_today") or [],
+        "why_not_alternatives": exec_sum.get("why_not_alternatives") or transparency.get("why_not_alternatives") or [],
+        "todays_opportunities": transparency.get("todays_opportunities") or [],
+        "index_rejection_reasons": transparency.get("index_rejection_reasons") or [],
+        "day_risks": transparency.get("day_risks") or {},
+        "index_trade": index_trade,
         "expected_return_pct": exec_sum.get("expected_return_pct") or (primary or {}).get("expected_return_pct") or best.get("expected_return_pct"),
         "expected_move": exec_sum.get("expected_move") or (primary or {}).get("expected_move") or best.get("expected_move"),
         "return_calculation": exec_sum.get("return_calculation") or (primary or {}).get("return_calculation") or best.get("return_calculation"),
@@ -384,6 +397,11 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "trade_candidates": morning.get("trade_candidates") or [],
         "best_opportunity": best,
         "primary_trade": primary,
+        "macro_calendar": morning.get("macro_calendar") or transparency.get("macro_calendar"),
+        "driver_tree": morning.get("driver_tree") or (morning.get("parts") or {}).get("P10", {}).get("driver_tree"),
+        "trade_plan": morning.get("trade_plan") or transparency.get("trade_plan"),
+        "top_trades": transparency.get("top_trades") or morning.get("top_trades") or [],
+        "watchlist": transparency.get("watchlist") or morning.get("watchlist") or [],
     }
 
 

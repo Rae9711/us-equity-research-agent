@@ -4,8 +4,16 @@ import json
 from datetime import date, time, timedelta
 from typing import Any, Literal
 
+from src.research.driver_tree import build_driver_tree, driver_tree_display, primary_from_tree
 from src.research.edges import compute_edges, format_p13_from_edges
 from src.research.level_sources import format_if_level
+from src.research.macro_calendar import (
+    build_macro_calendar,
+    catalysts_for_edges,
+    catalysts_on_date,
+    extract_catalysts,
+    top_catalyst_name,
+)
 from src.utils.paths import raw_data_path
 from src.utils.quote_resolve import session_change_pct
 from src.utils.trading_calendar import prior_trading_day
@@ -25,79 +33,13 @@ DRIVER_TYPES: list[str] = [
     "No Catalyst",
 ]
 
-# Order matters: labor/inflation before generic Fed/FOMC.
-_CATALYST_KEYWORDS: list[tuple[str, str]] = [
-    ("employment situation", "NFP"),
-    ("nonfarm payrolls", "NFP"),
-    ("nonfarm", "NFP"),
-    ("consumer price index", "CPI"),
-    ("cpi", "CPI"),
-    ("producer price index", "PPI"),
-    ("personal income and outlays", "PCE"),
-    ("pce price", "PCE"),
-    ("retail sales", "Retail Sales"),
-    ("ism manufacturing", "ISM Mfg"),
-    ("ism services", "ISM Services"),
-    ("gross domestic product", "GDP"),
-    ("gdp", "GDP"),
-    ("jolts", "JOLTS"),
-    ("initial claims", "Jobless Claims"),
-    ("jobless claims", "Jobless Claims"),
-    ("adp employment", "ADP"),
-    ("fomc minutes", "FOMC Minutes"),
-    ("fomc meeting", "FOMC"),
-    ("fomc statement", "FOMC"),
-    ("federal open market committee meeting", "FOMC"),
-    ("federal open market committee", "FOMC"),
-]
-
-
 def _extract_catalysts(
     calendar: list[dict[str, Any]],
     *,
     target_date: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Pick major macro releases from Step 0 economic_calendar.
-
-    When target_date is set, only events scheduled on that date are included.
-    """
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for event in calendar or []:
-        event_date = str(event.get("date") or "")
-        if target_date and event_date != target_date:
-            continue
-        release = str(event.get("release_name") or "").strip()
-        if not release:
-            continue
-        lowered = release.lower()
-        label: str | None = None
-        for needle, tag in _CATALYST_KEYWORDS:
-            if needle in lowered:
-                label = tag
-                break
-        if not label:
-            continue
-        key = f"{label}|{event_date}"
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(
-            {
-                "name": label,
-                "release": release,
-                "date": event.get("date"),
-                "consensus": event.get("consensus"),
-                "forecast": event.get("forecast"),
-                "estimate": event.get("estimate"),
-            }
-        )
-    return out
-
-
-def catalysts_on_date(calendar: list[dict[str, Any]], target_date: str) -> list[dict[str, Any]]:
-    """Macro catalysts from economic_calendar scheduled on target_date."""
-    return [c for c in _extract_catalysts(calendar) if c.get("date") == target_date]
+    """Backward-compatible alias — prefer macro_calendar.extract_catalysts."""
+    return extract_catalysts(calendar, target_date=target_date)
 
 
 def _pct(q: dict[str, Any]) -> float | None:
@@ -479,9 +421,12 @@ def compute_rule_parts(
             iv_level = "High"
 
     calendar = (raw.get("macro") or {}).get("economic_calendar") or []
-    catalysts_today = _extract_catalysts(calendar, target_date=trading_date or None)
-    catalyst_today = bool(catalysts_today)
-    macro_driver = _daily_macro_driver(catalysts_today)
+    macro_calendar = build_macro_calendar(
+        raw, trading_date=trading_date or None, prior_raw=prior_raw
+    )
+    catalysts_today = catalysts_for_edges(macro_calendar)
+    catalyst_today = bool(macro_calendar.get("has_material_catalyst"))
+    macro_driver = top_catalyst_name(macro_calendar) or _daily_macro_driver(catalysts_today)
 
     from src.utils.news_signals import extract_news_signals
 
@@ -493,9 +438,27 @@ def compute_rule_parts(
         int(news_signals.get("news_ai_mentions") or 0),
         int(news_signals.get("news_macro_mentions") or 0),
     )
-    daily_driver_type, daily_driver = _daily_driver_type_and_driver(
-        catalysts_today, chip_selloff, smh_pct, strongest, qqq_pct
+    driver_tree = build_driver_tree(
+        macro_calendar=macro_calendar,
+        chip_selloff=chip_selloff,
+        smh_pct=smh_pct,
+        strongest_sector=strongest,
+        weakest_sector=weakest,
+        qqq_pct=qqq_pct,
+        news_signals=news_signals,
     )
+    daily_driver_type, daily_driver = primary_from_tree(driver_tree)
+    # Backward compat when tree is empty
+    if daily_driver == "No dominant catalyst" and not macro_calendar.get("catalysts"):
+        daily_driver_type, daily_driver = _daily_driver_type_and_driver(
+            catalysts_today, chip_selloff, smh_pct, strongest, qqq_pct
+        )
+        driver_tree["primary"] = {
+            "type": daily_driver_type,
+            "label": daily_driver,
+            "evidence": "Legacy single-driver fallback",
+            "score": 40,
+        }
 
     pre_holiday = _pre_holiday(raw)
 
@@ -600,6 +563,7 @@ def compute_rule_parts(
     edges = compute_edges(
         raw,
         catalysts_today=catalysts_today,
+        macro_calendar=macro_calendar,
         qqq_pct=qqq_pct,
         smh_pct=smh_pct,
         spy_pct=spy_pct,
@@ -614,6 +578,7 @@ def compute_rule_parts(
     )
     p13_part = format_p13_from_edges(edges)
     p13_part["catalysts"] = catalysts_today
+    p13_part["macro_calendar"] = macro_calendar
 
     parts: dict[str, Any] = {
         "P1": {
@@ -639,17 +604,13 @@ def compute_rule_parts(
             "body_md": f"- **因果链**：{p2_chain}",
         },
         "P10": {
-            "judgment": f"Type：{daily_driver_type} · Driver：{daily_driver}",
+            "judgment": f"Primary：{daily_driver_type} · {daily_driver}",
             "driver_type": daily_driver_type,
             "driver": daily_driver,
+            "driver_tree": driver_tree,
             "confidence": 0.75 if catalyst_today else 0.6,
-            "one_liner": f"Primary Driver Type：{daily_driver_type} · {daily_driver}",
-            "body_md": (
-                f"- **Primary Driver Type**：{daily_driver_type}\n"
-                f"- **Primary Driver**：{daily_driver}\n"
-                f"- **催化剂**：{macro_driver or '无'}\n"
-                f"- **半导体**：{'AI Chip Selloff' if chip_selloff else '非主导'}"
-            ),
+            "one_liner": driver_tree_display(driver_tree),
+            "body_md": _format_driver_tree_md(driver_tree, macro_calendar),
         },
         "P4": {
             "judgment": f"Growth：{'Bearish' if bond_score < 0 else 'Bullish' if bond_score > 0 else 'Neutral'} · Score：{bond_score}",
@@ -747,6 +708,8 @@ def compute_rule_parts(
             catalyst_today=catalyst_today,
             chip_selloff=chip_selloff,
             p16_gate_hint="Trade" if total >= 2 else "Wait",
+            macro_calendar=macro_calendar,
+            driver_tree=driver_tree,
         ),
     }
     return {
@@ -756,6 +719,9 @@ def compute_rule_parts(
         "bias": bias,
         "driver_type": daily_driver_type,
         "daily_driver": daily_driver,
+        "driver_tree": driver_tree,
+        "macro_calendar": macro_calendar,
+        "trade_plan": parts["P16"].get("trade_plan"),
         "catalysts_today": catalysts_today,
         "edges": edges,
     }
@@ -854,6 +820,28 @@ def _build_p15(
     }
 
 
+def _format_driver_tree_md(
+    driver_tree: dict[str, Any],
+    macro_calendar: dict[str, Any],
+) -> str:
+    lines = ["- **Driver Tree**（盘中可更新）"]
+    for slot, title in (
+        ("primary", "Primary"),
+        ("secondary", "Secondary"),
+        ("tertiary", "Tertiary"),
+    ):
+        node = driver_tree.get(slot)
+        if node:
+            lines.append(
+                f"  - **{title}** [{node.get('type')}]: {node.get('label')} — {node.get('evidence', '')}"
+            )
+    if macro_calendar.get("headline"):
+        lines.append(f"- **Macro Calendar**：{macro_calendar['headline']}")
+    if macro_calendar.get("summary"):
+        lines.append(f"- **催化剂摘要**：{macro_calendar['summary']}")
+    return "\n".join(lines)
+
+
 def _build_p16(
     *,
     qqq_q: dict[str, Any],
@@ -863,8 +851,10 @@ def _build_p16(
     catalyst_today: bool,
     chip_selloff: bool,
     p16_gate_hint: str,
+    macro_calendar: dict[str, Any] | None = None,
+    driver_tree: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Trading plan with labeled IF/THEN levels (source tags on every price)."""
+    """Trading plan with labeled IF/THEN levels and explicit LONG/SHORT/WAIT blocks."""
     prior_qqq = ((prior_raw.get("market") or {}).get("quotes") or {}).get("QQQ") or {}
     prev_high = prior_qqq.get("high") or qqq_q.get("high")
     prev_low = prior_qqq.get("low") or qqq_q.get("low")
@@ -880,36 +870,120 @@ def _build_p16(
     low_tag = _lvl(prev_low, "prev_low") if prev_low is not None else "—"
     close_tag = _lvl(prior_close, "prior_close") if prior_close is not None else "—"
 
+    macro_calendar = macro_calendar or {}
+    driver_tree = driver_tree or {}
+    primary = driver_tree.get("primary") or {}
+    primary_label = str(primary.get("label") or "")
+
+    conditions_long: list[str] = []
+    conditions_short: list[str] = []
+    conditions_wait: list[str] = []
+
+    geo_day = any(
+        c.get("category") == "breaking" and "geo" in str(c.get("name", "")).lower()
+        for c in (macro_calendar.get("catalysts") or [])
+    )
+    fed_minutes = any(
+        "FOMC Minutes" in str(c.get("name", ""))
+        for c in (macro_calendar.get("catalysts") or [])
+    )
+    oil_day = any(c.get("category") == "commodity" for c in (macro_calendar.get("catalysts") or []))
+
+    conditions_long.append(
+        f"IF QQQ > {high_tag} AND breadth positive THEN LONG QQQ / Call（突破昨高）"
+    )
+    conditions_short.append(
+        f"IF QQQ < {low_tag} AND risk-off confirmed THEN SHORT / Put（破位昨低）"
+    )
+    conditions_wait.append(
+        f"IF QQQ between {low_tag} and {high_tag} THEN WAIT — no edge in range"
+    )
+
+    if geo_day:
+        conditions_wait.insert(
+            0,
+            "IF geopolitical headlines escalate AND VIX spikes THEN WAIT — reduce size, no chase",
+        )
+        conditions_long.append(
+            "IF de-escalation headline + QQQ reclaims prior high THEN LONG risk-on bounce"
+        )
+        conditions_short.append(
+            "IF oil spike + SMH breaks prior low THEN SHORT SMH / defensive hedge"
+        )
+
+    if fed_minutes:
+        conditions_wait.insert(
+            0 if not geo_day else 1,
+            "IF before 14:00 ET AND QQQ inside prior range THEN WAIT for FOMC Minutes",
+        )
+        conditions_long.append(
+            f"IF post-Minutes dovish + QQQ > {high_tag} THEN LONG（数据利好突破）"
+        )
+        conditions_short.append(
+            f"IF post-Minutes hawkish + QQQ < {low_tag} THEN SHORT / exit longs"
+        )
+
+    if oil_day:
+        conditions_wait.append("IF oil whipsaw ±2% intraday THEN WAIT — energy volatility")
+        conditions_long.append("IF oil stabilizes + XLE fades AND QQQ holds THEN LONG growth")
+        conditions_short.append("IF oil breaks higher + semis weak THEN SHORT SMH")
+
     if chip_selloff:
-        lines = [
-            f"IF QQQ < {low_tag} THEN 放弃追多 / 观望 SMH 续跌",
-            f"IF QQQ > {high_tag} THEN 短线反弹 Call（需 SMH 同步走强）",
-            f"IF QQQ 在 {low_tag}–{high_tag} 区间内 THEN Wait",
-        ]
+        conditions_long.append(
+            f"IF SMH reclaims strength + QQQ > {high_tag} THEN SHORT-cover / tactical LONG"
+        )
+        conditions_short.append(
+            f"IF SMH continues lower + QQQ < {low_tag} THEN avoid dip-buy; SHORT semis"
+        )
+        conditions_wait.append("IF chip selloff continues without QQQ breakdown THEN WAIT")
+
+    if catalyst_today and not fed_minutes:
+        conditions_wait.insert(
+            0,
+            "IF major data not yet released THEN WAIT — no pre-release index bets",
+        )
+
+    gate = p16_gate_hint
+    if chip_selloff and total < 2:
+        gate = "Wait"
+    elif catalyst_today and geo_day:
         gate = "Wait"
     elif catalyst_today:
-        lines = [
-            f"IF QQQ > {high_tag} THEN 数据利好突破 → Call",
-            f"IF QQQ < {low_tag} THEN 数据利空破位 → Put / 放弃",
-            f"IF QQQ 在 {close_tag} 附近震荡 THEN Wait",
-        ]
         gate = p16_gate_hint
     else:
-        lines = [
-            f"IF QQQ > {high_tag} THEN 突破做多 / Call",
-            f"IF QQQ < {low_tag} THEN 破位放弃 / Put",
-            f"IF QQQ 在区间内 THEN Wait",
-        ]
         gate = "Trade" if total >= 2 and "bull" in bias.lower() else "Wait"
 
     if total <= -2:
         gate = "No Trade"
 
+    lines = conditions_long[:2] + conditions_short[:1] + conditions_wait[:1]
+
+    trade_plan = {
+        "gate": gate,
+        "conditions_long": conditions_long,
+        "conditions_short": conditions_short,
+        "conditions_wait": conditions_wait,
+        "primary_driver": primary_label,
+        "macro_headline": macro_calendar.get("headline"),
+    }
+
+    body_sections = [
+        "**Conditions to go LONG**",
+        *[f"- {c}" for c in conditions_long],
+        "",
+        "**Conditions to go SHORT**",
+        *[f"- {c}" for c in conditions_short],
+        "",
+        "**Conditions to WAIT / No Trade**",
+        *[f"- {c}" for c in conditions_wait],
+    ]
+
     return {
         "judgment": f"计划：{gate}",
         "confidence": 0.65,
-        "one_liner": lines[0],
-        "body_md": "\n".join(lines),
+        "one_liner": conditions_wait[0] if conditions_wait else lines[0],
+        "body_md": "\n".join(body_sections),
+        "trade_plan": trade_plan,
         "levels": {
             "qqq_prev_high": prev_high,
             "qqq_prev_low": prev_low,

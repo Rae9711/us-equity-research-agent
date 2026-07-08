@@ -265,6 +265,7 @@ def run_morning_research(
             driver=rule_bundle.get("daily_driver") or "",
             best=trade_decision.get("best_opportunity") or {},
             best_trades=trade_decision.get("best_trades"),
+            driver_tree=rule_bundle.get("driver_tree"),
         )
 
     payload: dict[str, Any] = {
@@ -288,6 +289,12 @@ def run_morning_research(
         "edges": trade_decision.get("edges") or rule_bundle.get("edges") or {},
         "index_trade": trade_decision.get("index_trade"),
         "stock_trades": trade_decision.get("stock_trades") or [],
+        "transparency": trade_decision.get("transparency") or {},
+        "macro_calendar": rule_bundle.get("macro_calendar") or {},
+        "driver_tree": rule_bundle.get("driver_tree") or {},
+        "trade_plan": rule_bundle.get("trade_plan") or (parts.get("P16") or {}).get("trade_plan"),
+        "top_trades": trade_decision.get("top_trades") or [],
+        "watchlist": trade_decision.get("watchlist") or [],
         "executive_summary": executive_summary,
     }
 

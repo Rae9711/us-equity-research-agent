@@ -35,14 +35,44 @@
       {% if meta.get('index_trade') %}
       <p><strong>Index Trade：</strong>{{ meta.index_trade }}</p>
       {% endif %}
+      {% if transparency.index_rejection_reasons %}
+      {{ index_rejection_block(transparency.index_rejection_reasons) }}
+      {% endif %}
     </section>
     {% endif %}
 
     {% set best_trades = meta.get('best_trades') or {} %}
     {% set primary = best_trades.get('primary') %}
+    {% set transparency = meta.get('transparency') or {} %}
     {% from "_trade_detail_panel.html" import trade_detail_card %}
+    {% from "_transparency_panel.html" import todays_opportunities_block, index_rejection_block, day_risks_block %}
+    {% from "_macro_calendar_panel.html" import macro_calendar_block %}
+    {% from "_driver_tree_panel.html" import driver_tree_block %}
+    {% from "_trade_plan_panel.html" import trade_plan_block %}
+    {% from "_top5_board.html" import top5_board_block %}
+
+    {% if meta.get('macro_calendar') or transparency.macro_calendar %}
+    <section class="panel architecture-panel">
+      {{ macro_calendar_block(meta.macro_calendar or transparency.macro_calendar) }}
+      {{ driver_tree_block(meta.get('driver_tree') or ((meta.get('parts') or {}).get('P10') or {}).get('driver_tree')) }}
+      {{ trade_plan_block(meta.trade_plan or transparency.trade_plan) }}
+    </section>
+    {% endif %}
+
+    {% if transparency.top_trades or meta.get('top_trades') %}
+    <section class="panel top5-hero" id="top5">
+      {{ top5_board_block(transparency.top_trades or meta.top_trades, transparency.watchlist or meta.watchlist) }}
+    </section>
+    {% endif %}
+    {% if transparency.todays_opportunities or transparency.index_rejection_reasons or transparency.day_risks %}
+    <section class="panel transparency-hero">
+      {{ todays_opportunities_block(transparency.todays_opportunities) }}
+      {{ index_rejection_block(transparency.index_rejection_reasons) }}
+      {{ day_risks_block(transparency.day_risks) }}
+    </section>
+    {% endif %}
     {% if primary %}
-    {{ trade_detail_card(primary, '🥇 Primary Trade · #' ~ primary.rank|string) }}
+    {{ trade_detail_card(primary, '🥇 Primary Trade · #' ~ primary.rank|string, transparency=transparency) }}
     {% if meta.get('best_opportunity') and meta.best_opportunity.one_liner %}
     <p class="best-opp-oneliner">「{{ meta.best_opportunity.one_liner }}」</p>
     {% endif %}
@@ -125,6 +155,12 @@
                     <p>Win {{ row.win_prob }}% · ER {{ row.expected_return_pct }}% · R:R {{ row.risk_reward }} · Score {{ row.final_score }}</p>
                     {% if row.rank == 1 and row.why_vs_runner_up and row.why_vs_runner_up != '—' %}
                     <p><strong>Why vs #2：</strong>{{ row.why_vs_runner_up }}</p>
+                    {% endif %}
+                    {% if row.win_prob_breakdown %}
+                    <p><strong>Win% breakdown：</strong>
+                      {% for c in row.win_prob_breakdown.components %}{{ c.factor }} {{ c.points }}{% if not loop.last %} · {% endif %}{% endfor %}
+                      → {{ row.win_prob_breakdown.total }}%
+                    </p>
                     {% endif %}
                     <ul class="why-factors">
                       {% for f in row.why_factors or [] %}<li>{{ f }}</li>{% endfor %}

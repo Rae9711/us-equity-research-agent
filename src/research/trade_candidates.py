@@ -15,17 +15,32 @@ import json
 from datetime import date, time
 from typing import Any, Literal
 
+from src.research.decision_transparency import (
+    add_win_prob_delta,
+    build_decision_transparency,
+    build_top5_board,
+    enrich_trade_slot,
+    finalize_win_prob_breakdown,
+    init_win_prob_breakdown,
+)
 from src.research.edges import compute_edges
-from src.research.level_sources import compute_anchors, derive_trade_levels
+from src.research.level_sources import build_level_reasons, compute_anchors, derive_trade_levels
+from src.research.macro_calendar import has_geopolitical_risk
 from src.utils.paths import data_root
 from src.utils.quote_resolve import session_observation
 from src.utils.trading_calendar import prior_trading_day
 
-CANDIDATE_SYMBOLS = ["TSLA", "NVDA", "SMH", "QQQ", "SPY", "TQQQ"]
+CANDIDATE_SYMBOLS = [
+    "TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM",
+    "SMH", "QQQ", "SPY", "TQQQ",
+]
 ADVISORY_TAG = "ADVISORY — 不构成投资建议"
 FINAL_SCORE_THRESHOLD = 2.5
 EXTENDED_GAP_PCT = 4.0
 MIN_UPSIDE_PCT = 1.0
+
+_STOCK_SYMBOLS = frozenset({"TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM"})
+_SEMI_SYMBOLS = frozenset({"NVDA", "AMD", "MU", "AVGO", "ARM", "SMH"})
 
 _SYMBOL_SECTION: dict[str, str] = {
     "QQQ": "market",
@@ -34,7 +49,24 @@ _SYMBOL_SECTION: dict[str, str] = {
     "SMH": "sector",
     "NVDA": "stocks",
     "TSLA": "stocks",
+    "AMD": "stocks",
+    "MU": "stocks",
+    "AVGO": "stocks",
+    "META": "stocks",
+    "ARM": "stocks",
 }
+
+
+def _has_market_data(obs: dict[str, Any], q: dict[str, Any]) -> bool:
+    if obs.get("error") and not q:
+        return False
+    current = (
+        _safe_float(obs.get("last"))
+        or _safe_float(obs.get("close"))
+        or _safe_float(q.get("close"))
+        or _safe_float(q.get("last"))
+    )
+    return current is not None and current > 0
 
 
 def _quote(raw: dict[str, Any], symbol: str) -> dict[str, Any]:
@@ -171,7 +203,7 @@ def _instrument(symbol: str, direction: str, p9: dict[str, Any]) -> str:
             return f"{symbol} 0DTE Call"
         if buy_options and buy_call:
             return f"{symbol} Call"
-        return "Stock" if symbol in ("NVDA", "TSLA") else "ETF"
+        return "Stock" if symbol in _STOCK_SYMBOLS else "ETF"
     if direction == "SHORT":
         if zero_dte and buy_put:
             return f"{symbol} 0DTE Put"
@@ -199,6 +231,69 @@ def _beta_proxy(sym_pct: float | None, qqq_pct: float | None) -> float | None:
     return round(sym_pct / qqq_pct, 2)
 
 
+def _geo_context_penalty(
+    symbol: str,
+    direction: str,
+    *,
+    macro_calendar: dict[str, Any] | None,
+    driver_tree: dict[str, Any] | None,
+) -> tuple[float, str | None]:
+    """Penalize trades that fight geopolitical/macro context (e.g. blind NVDA short on Iran day)."""
+    macro_calendar = macro_calendar or {}
+    driver_tree = driver_tree or {}
+    primary = driver_tree.get("primary") or {}
+    primary_type = str(primary.get("type") or "")
+    primary_label = str(primary.get("label") or "").lower()
+    geo = has_geopolitical_risk(macro_calendar) or primary_type == "Political" or "geo" in primary_label
+
+    if not geo:
+        return 0.0, None
+
+    sym = symbol.upper()
+    if direction == "SHORT" and sym in ("NVDA", "SMH", "TQQQ"):
+        return 18.0, f"Geo-risk day — avoid blind {sym} short vs escalation"
+    if direction == "LONG" and sym in ("XLE", "USO"):
+        return 0.0, None
+    if direction == "LONG" and sym in ("NVDA", "SMH") and "oil" in primary_label:
+        return 8.0, "Oil shock day — semis long needs confirmation"
+    return 0.0, None
+
+
+def _catalyst_for_symbol(symbol: str, macro_calendar: dict[str, Any] | None) -> str:
+    macro_calendar = macro_calendar or {}
+    cats = macro_calendar.get("catalysts") or []
+    if not cats:
+        return "—"
+    names = [c.get("name") for c in cats[:2] if c.get("name")]
+    sym = symbol.upper()
+    if sym in _SEMI_SYMBOLS and any(
+        any(k in n for k in ("Chip", "AI", "Semi", "HBM", "Memory"))
+        for n in names
+    ):
+        return " / ".join(names)
+    if sym == "META" and any("Social" in n or "Ad" in n for n in names):
+        return " / ".join(names)
+    return " · ".join(names) if names else "—"
+
+
+def _invalidation_for_slot(slot: dict[str, Any], macro_calendar: dict[str, Any] | None) -> str:
+    stop = slot.get("stop_price")
+    sym = slot.get("symbol", "")
+    direction = slot.get("direction", "")
+    parts: list[str] = []
+    if stop is not None:
+        if direction == "LONG":
+            parts.append(f"Close below stop ${stop}")
+        elif direction == "SHORT":
+            parts.append(f"Close above stop ${stop}")
+    geo = has_geopolitical_risk(macro_calendar or {})
+    if geo:
+        parts.append("Geopolitical escalation invalidates mean-reversion")
+    if not parts:
+        return f"{sym} thesis breaks on stop breach"
+    return " · ".join(parts)
+
+
 def _extended_gap_penalty(gap_pct: float | None, has_news_catalyst: bool) -> float:
     if gap_pct is None or has_news_catalyst:
         return 0.0
@@ -217,9 +312,9 @@ def _infer_edge_type(
     edges: dict[str, Any] | None,
 ) -> str:
     edges = edges or {}
-    if symbol in ("NVDA", "TSLA") and edges.get("stock_edge", {}).get("edge") == "YES":
+    if symbol in _STOCK_SYMBOLS and edges.get("stock_edge", {}).get("edge") == "YES":
         return "Stock Edge"
-    if edges.get("sector_edge", {}).get("edge") == "YES" and symbol in ("SMH", "NVDA"):
+    if edges.get("sector_edge", {}).get("edge") == "YES" and symbol in _SEMI_SYMBOLS:
         return "Sector Edge"
     if rs_vs_qqq is not None and rs_vs_qqq < -0.3:
         return "Relative Weakness"
@@ -265,6 +360,7 @@ def _why_vs_runner_up(top: dict[str, Any], runner_up: dict[str, Any] | None) -> 
 def _build_factor_breakdown(
     *,
     rs_vs_qqq: float | None,
+    rs_vs_smh: float | None = None,
     gap_pct: float | None,
     beta: float | None,
     volume_ok: bool,
@@ -272,9 +368,14 @@ def _build_factor_breakdown(
     extended_gap_penalty: float,
     vix_chg: float | None,
     prior_day_chg: float | None,
+    relative_weakness_score: float | None = None,
 ) -> dict[str, Any]:
     return {
         "relative_strength_vs_qqq": round(rs_vs_qqq, 2) if rs_vs_qqq is not None else None,
+        "relative_strength_vs_smh": round(rs_vs_smh, 2) if rs_vs_smh is not None else None,
+        "relative_weakness_score": (
+            round(relative_weakness_score, 2) if relative_weakness_score is not None else None
+        ),
         "gap_pct": round(gap_pct, 2) if gap_pct is not None else None,
         "beta_proxy": beta,
         "volume_signal": volume_ok,
@@ -383,12 +484,80 @@ def _rr_weight(rr: float) -> float:
     return max(0.5, min(1.5, rr / 2.0))
 
 
+def _relative_weakness_score(
+    rs_vs_qqq: float | None,
+    rs_vs_smh: float | None,
+) -> float | None:
+    """Higher = weaker vs benchmarks (better short candidate)."""
+    parts: list[float] = []
+    if rs_vs_qqq is not None:
+        parts.append(-rs_vs_qqq)
+    if rs_vs_smh is not None:
+        parts.append(-rs_vs_smh * 0.6)
+    if not parts:
+        return None
+    return round(sum(parts), 2)
+
+
+def _apply_rs_win_prob(
+    wp: dict[str, float],
+    why_factors: list[str],
+    *,
+    rs_vs_qqq: float | None,
+    rs_vs_smh: float | None,
+    symbol: str,
+    is_short: bool,
+) -> None:
+    """Direction-aware RS adjustments — shorts reward weakness, longs reward strength."""
+    if rs_vs_qqq is not None:
+        if is_short:
+            if rs_vs_qqq < -0.5:
+                add_win_prob_delta(wp, "rs", 12)
+                why_factors.append(f"RS弱于QQQ {rs_vs_qqq:+.2f}%")
+            elif rs_vs_qqq < -0.15:
+                add_win_prob_delta(wp, "rs", 6)
+                why_factors.append(f"RS弱于QQQ {rs_vs_qqq:+.2f}%")
+            elif rs_vs_qqq > 0.5:
+                add_win_prob_delta(wp, "rs", -12)
+                why_factors.append(f"板块内相对强势 {rs_vs_qqq:+.2f}%")
+            elif rs_vs_qqq > 0.15:
+                add_win_prob_delta(wp, "rs", -6)
+        else:
+            if rs_vs_qqq > 0.5:
+                add_win_prob_delta(wp, "rs", 12)
+                why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%")
+            elif rs_vs_qqq > 0.15:
+                add_win_prob_delta(wp, "rs", 6)
+                why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%")
+            elif rs_vs_qqq < -0.5:
+                add_win_prob_delta(wp, "rs", -10)
+                why_factors.append(f"RS 弱于 QQQ {rs_vs_qqq:+.2f}%")
+
+    if rs_vs_smh is not None and symbol in _SEMI_SYMBOLS:
+        if is_short:
+            if rs_vs_smh < -0.5:
+                add_win_prob_delta(wp, "rs", 8)
+                why_factors.append(f"RS弱于SMH {rs_vs_smh:+.2f}%")
+            elif rs_vs_smh < -0.15:
+                add_win_prob_delta(wp, "rs", 4)
+            elif rs_vs_smh > 0.5:
+                add_win_prob_delta(wp, "rs", -10)
+                why_factors.append(f"半导体内领涨 {rs_vs_smh:+.2f}%")
+        else:
+            if rs_vs_smh > 0.5:
+                add_win_prob_delta(wp, "rs", 6)
+                why_factors.append(f"RS vs SMH {rs_vs_smh:+.2f}%")
+            elif rs_vs_smh < -0.5:
+                add_win_prob_delta(wp, "rs", -6)
+
+
 def _score_candidate_v2(
     symbol: str,
     *,
     obs: dict[str, Any],
     prior_day_chg: float | None,
     rs_vs_qqq: float | None,
+    rs_vs_smh: float | None = None,
     gap_pct: float | None,
     news_count: int,
     volume_ok: bool,
@@ -398,8 +567,12 @@ def _score_candidate_v2(
     q: dict[str, Any],
     qqq_pct: float | None = None,
     edges: dict[str, Any] | None = None,
+    direction: str = "LONG",
+    macro_calendar: dict[str, Any] | None = None,
+    driver_tree: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score one symbol for today's tradeability at ~8:00 AM."""
+    is_short = direction == "SHORT"
     current = _safe_float(obs.get("last")) or _safe_float(obs.get("close"))
     prior_close = _safe_float(obs.get("prev_close")) or _safe_float(q.get("prior_close"))
     if current is None or current <= 0:
@@ -415,87 +588,144 @@ def _score_candidate_v2(
 
     why_factors: list[str] = []
 
-    win_prob = 50.0
-    if rs_vs_qqq is not None:
-        if rs_vs_qqq > 0.5:
-            win_prob += 12
-            why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%")
-        elif rs_vs_qqq > 0.15:
-            win_prob += 6
-            why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%")
-        elif rs_vs_qqq < -0.5:
-            win_prob -= 10
-            why_factors.append(f"RS 弱于 QQQ {rs_vs_qqq:+.2f}%")
+    wp = init_win_prob_breakdown()
+    _apply_rs_win_prob(
+        wp,
+        why_factors,
+        rs_vs_qqq=rs_vs_qqq,
+        rs_vs_smh=rs_vs_smh,
+        symbol=symbol,
+        is_short=is_short,
+    )
 
     if prior_day_chg is not None and prior_day_chg > 2.0:
         if gap_pct is not None and abs(gap_pct) < EXTENDED_GAP_PCT:
-            win_prob += 10
-            why_factors.append(f"昨日强势 {prior_day_chg:+.1f}% 今日 gap 可控")
+            if not is_short:
+                add_win_prob_delta(wp, "trend", 10)
+                why_factors.append(f"昨日强势 {prior_day_chg:+.1f}% 今日 gap 可控")
+            else:
+                add_win_prob_delta(wp, "trend", -6)
+                why_factors.append(f"昨日强势 {prior_day_chg:+.1f}% 做空逆风")
         elif gap_pct is not None and gap_pct >= EXTENDED_GAP_PCT and not has_news_catalyst:
-            win_prob -= 8
+            add_win_prob_delta(wp, "trend", -8 if not is_short else 4)
             why_factors.append(f"昨日涨后 gap 过大 {gap_pct:+.1f}%")
+
+    if prior_day_chg is not None and prior_day_chg < -2.0 and is_short:
+        if gap_pct is not None and abs(gap_pct) < EXTENDED_GAP_PCT:
+            add_win_prob_delta(wp, "trend", 8)
+            why_factors.append(f"昨日弱势 {prior_day_chg:+.1f}% 延续下行")
 
     if gap_pct is not None:
         if abs(gap_pct) < 1.5:
-            win_prob += 5
+            add_win_prob_delta(wp, "gap", 5)
             why_factors.append("Gap 未过度延伸")
         elif gap_pct >= EXTENDED_GAP_PCT and not has_news_catalyst:
-            win_prob -= 12
-            why_factors.append(f"Extended gap {gap_pct:+.1f}%")
+            if is_short and gap_pct > 0:
+                add_win_prob_delta(wp, "gap", 6)
+                why_factors.append(f"Extended gap {gap_pct:+.1f}% 回落空间")
+            else:
+                add_win_prob_delta(wp, "gap", -12)
+                why_factors.append(f"Extended gap {gap_pct:+.1f}%")
 
     if news_count >= 1:
-        win_prob += 5
-        why_factors.append(f"News {news_count}")
+        if is_short:
+            add_win_prob_delta(wp, "catalyst", -5)
+            why_factors.append(f"News {news_count} (利空做空)")
+        else:
+            add_win_prob_delta(wp, "catalyst", 5)
+            why_factors.append(f"News {news_count}")
     if volume_ok:
-        win_prob += 4
+        add_win_prob_delta(wp, "volume", 4)
         why_factors.append("Volume 信号")
     if vix_chg is not None and vix_chg < -3:
-        win_prob += 4
-        why_factors.append("VIX 回落")
+        if not is_short:
+            add_win_prob_delta(wp, "macro", 4)
+            why_factors.append("VIX 回落")
+        else:
+            add_win_prob_delta(wp, "macro", -3)
+            why_factors.append("VIX 回落 (做空逆风)")
     elif vix_chg is not None and vix_chg > 5:
-        win_prob -= 6
-        why_factors.append("VIX 走高")
+        if is_short:
+            add_win_prob_delta(wp, "macro", 6)
+            why_factors.append("VIX 走高")
+        else:
+            add_win_prob_delta(wp, "macro", -6)
+            why_factors.append("VIX 走高")
 
     dt = (driver_type or "").lower()
-    if dt in ("momentum", "ai") and symbol in ("NVDA", "SMH", "TSLA", "TQQQ"):
-        win_prob += 5
-        why_factors.append(f"{driver_type} driver")
+    if dt in ("momentum", "ai") and symbol in (*_SEMI_SYMBOLS, "TSLA", "TQQQ"):
+        if is_short:
+            add_win_prob_delta(wp, "catalyst", -4)
+            why_factors.append(f"{driver_type} driver (做空逆风)")
+        else:
+            add_win_prob_delta(wp, "catalyst", 5)
+            why_factors.append(f"{driver_type} driver")
 
-    win_prob = max(15.0, min(92.0, win_prob))
+    geo_penalty, geo_reason = _geo_context_penalty(
+        symbol,
+        direction,
+        macro_calendar=macro_calendar,
+        driver_tree=driver_tree,
+    )
+    if geo_penalty:
+        add_win_prob_delta(wp, "macro", -geo_penalty)
+        if geo_reason:
+            why_factors.append(geo_reason)
+
+    raw_win_prob = sum(wp.values())
+    win_prob = max(15.0, min(92.0, raw_win_prob))
+    win_prob_breakdown = finalize_win_prob_breakdown(wp, clamped=win_prob)
 
     mom_adj = 0.0
     if rs_vs_qqq is not None:
-        mom_adj += rs_vs_qqq * 0.20
+        mom_adj += (-rs_vs_qqq if is_short else rs_vs_qqq) * 0.20
+    if rs_vs_smh is not None and symbol in _SEMI_SYMBOLS:
+        mom_adj += (-rs_vs_smh if is_short else rs_vs_smh) * 0.12
     if prior_day_chg is not None:
-        mom_adj += prior_day_chg * 0.06
+        mom_adj += (-prior_day_chg if is_short else prior_day_chg) * 0.06
     if gap_pct is not None:
-        mom_adj += gap_pct * 0.08
+        mom_adj += (-gap_pct if is_short else gap_pct) * 0.08
 
     # Continuation: prior strength + controlled gap → today's ER not capped by yesterday alone
     if (
-        prior_day_chg is not None
+        not is_short
+        and prior_day_chg is not None
         and prior_day_chg > 3.0
         and gap_pct is not None
         and abs(gap_pct) < EXTENDED_GAP_PCT
     ):
         mom_adj += min(prior_day_chg * 0.35, 5.0)
+    if (
+        is_short
+        and prior_day_chg is not None
+        and prior_day_chg < -3.0
+        and gap_pct is not None
+        and abs(gap_pct) < EXTENDED_GAP_PCT
+    ):
+        mom_adj += min(abs(prior_day_chg) * 0.35, 5.0)
 
-    expected_close = current * (1 + mom_adj / 100.0)
-    expected_high = max(expected_close, prior_high, current * (1 + max(mom_adj, 0.5) / 100.0))
-    expected_low = min(expected_close, prior_low, current * (1 - max(abs(mom_adj), 0.8) / 100.0))
-
-    expected_return_pct = (expected_close - current) / current * 100.0
+    expected_close = current * (1 + (-mom_adj if is_short else mom_adj) / 100.0)
+    if is_short:
+        expected_high = max(current * (1 + max(abs(mom_adj), 0.5) / 100.0), prior_high, current)
+        expected_low = min(expected_close, prior_low, current * (1 - max(mom_adj, 0.8) / 100.0))
+        expected_return_pct = (current - expected_close) / current * 100.0
+        upside_pct = (current - expected_low) / current * 100.0
+        downside_risk_pct = (expected_high - current) / current * 100.0
+    else:
+        expected_high = max(expected_close, prior_high, current * (1 + max(mom_adj, 0.5) / 100.0))
+        expected_low = min(expected_close, prior_low, current * (1 - max(abs(mom_adj), 0.8) / 100.0))
+        expected_return_pct = (expected_close - current) / current * 100.0
+        upside_pct = (expected_high - current) / current * 100.0
+        downside_risk_pct = (current - expected_low) / current * 100.0
 
     if gap_pct is not None and gap_pct > 3.0:
         if expected_return_pct < 0.5 and not has_news_catalyst:
             expected_return_pct *= 0.3
             why_factors.append("Gap>3% 且剩余空间小")
-        elif gap_pct > EXTENDED_GAP_PCT and not has_news_catalyst:
+        elif gap_pct > EXTENDED_GAP_PCT and not has_news_catalyst and not is_short:
             expected_return_pct *= 0.6
             why_factors.append("Extended gap 压缩 ER")
 
-    upside_pct = (expected_high - current) / current * 100.0
-    downside_risk_pct = (current - expected_low) / current * 100.0
     if downside_risk_pct < 0.1:
         downside_risk_pct = 0.8
 
@@ -503,6 +733,7 @@ def _score_candidate_v2(
     rr_w = _rr_weight(risk_reward)
     final_score = round(win_prob * max(expected_return_pct, 0) * rr_w / 100.0, 2)
 
+    weakness = _relative_weakness_score(rs_vs_qqq, rs_vs_smh)
     sym_pct = obs.get("change_pct")
     beta = _beta_proxy(
         _safe_float(sym_pct) if sym_pct is not None else None,
@@ -511,6 +742,7 @@ def _score_candidate_v2(
     gap_penalty = _extended_gap_penalty(gap_pct, has_news_catalyst)
     factor_breakdown = _build_factor_breakdown(
         rs_vs_qqq=rs_vs_qqq,
+        rs_vs_smh=rs_vs_smh,
         gap_pct=gap_pct,
         beta=beta,
         volume_ok=volume_ok,
@@ -518,6 +750,7 @@ def _score_candidate_v2(
         extended_gap_penalty=gap_penalty,
         vix_chg=vix_chg,
         prior_day_chg=prior_day_chg,
+        relative_weakness_score=weakness,
     )
     edge_type = _infer_edge_type(
         symbol, rs_vs_qqq=rs_vs_qqq, driver_type=driver_type, edges=edges
@@ -537,6 +770,7 @@ def _score_candidate_v2(
     return {
         "symbol": symbol,
         "win_prob": round(win_prob, 1),
+        "win_prob_breakdown": win_prob_breakdown,
         "expected_return_pct": round(expected_return_pct, 2),
         "expected_high": round(expected_high, 2),
         "expected_low": round(expected_low, 2),
@@ -550,6 +784,8 @@ def _score_candidate_v2(
         "trade": trade_action,
         "gap_pct": round(gap_pct, 2) if gap_pct is not None else None,
         "relative_strength": round(rs_vs_qqq, 2) if rs_vs_qqq is not None else None,
+        "relative_strength_vs_smh": round(rs_vs_smh, 2) if rs_vs_smh is not None else None,
+        "relative_weakness_score": weakness,
         "prior_day_change_pct": round(prior_day_chg, 2) if prior_day_chg is not None else None,
         "why_factors": why_factors[:6],
         "why": " · ".join(why_factors[:4]) if why_factors else "—",
@@ -589,6 +825,7 @@ def _build_trade_slot(
     section: str,
     q: dict[str, Any],
     as_of_et: time | Literal["now"] | None = None,
+    macro_calendar: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     current = _safe_float(obs.get("last")) or _safe_float(obs.get("close")) or row["current_price"]
     anchors = compute_anchors(
@@ -622,9 +859,11 @@ def _build_trade_slot(
         "expected_move": f"{row['expected_return_pct']:+.2f}%",
         "expected_return_pct": row["expected_return_pct"],
         "win_prob": row["win_prob"],
+        "win_prob_breakdown": row.get("win_prob_breakdown"),
         "risk_reward": row["risk_reward"],
         "final_score": row["final_score"],
         "trade_action": row["trade_action"],
+        "relative_strength": row.get("relative_strength"),
         "entry": levels["entry"],
         "entry_source": levels.get("entry_source"),
         "entry_price": levels.get("entry_price"),
@@ -647,14 +886,32 @@ def _build_trade_slot(
         "expected_close": row["expected_close"],
         "current_price": row["current_price"],
         "upside_pct": row["upside_pct"],
+        "downside_risk_pct": row.get("downside_risk_pct"),
         "why_factors": row["why_factors"],
+        "why_today": row.get("why_chain") or " · ".join(row.get("why_factors") or []),
+        "catalyst": _catalyst_for_symbol(row["symbol"], macro_calendar),
+        "invalidation": "—",
         "advisory": True,
     }
-    return _apply_price_based_return(
+    if levels.get("entry_price") is not None:
+        slot["level_reasons"] = build_level_reasons(
+            direction,
+            anchors,
+            entry_px=levels["entry_price"],
+            entry_src=levels.get("entry_source") or "",
+            stop_px=levels.get("stop_price") or 0,
+            stop_src=levels.get("stop_source") or "",
+            target_px=levels.get("target_price") or 0,
+            target_src=levels.get("target_source") or "",
+            current=current,
+        )
+    slot = _apply_price_based_return(
         slot,
         direction=direction,
         heuristic_er=row["expected_return_pct"],
     )
+    slot["invalidation"] = _invalidation_for_slot(slot, macro_calendar)
+    return slot
 
 
 def _index_trade_label(
@@ -678,27 +935,25 @@ def _select_stock_picks(
     edges: dict[str, Any],
     tradeable: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Pick primary/secondary/watchlist stocks — independent of P16 index gate."""
-    macro_no = edges.get("macro_edge", {}).get("edge") == "NO"
-    index_no = edges.get("index_edge", {}).get("edge") == "NO"
+    """Pick primary/secondary/watchlist stocks from opportunity ranking (not theme leader)."""
     stock_yes = edges.get("stock_edge", {}).get("edge") == "YES"
     top = ranked[0] if ranked else None
     score_ok = bool(top and top["final_score"] > FINAL_SCORE_THRESHOLD)
 
+    stock_tradeable = [r for r in tradeable if r["symbol"] in _STOCK_SYMBOLS]
+    if stock_tradeable:
+        return stock_tradeable[:3]
+
     if not stock_yes and not score_ok:
         return []
 
-    if tradeable:
-        if macro_no and index_no:
-            stock_only = [r for r in tradeable if r["symbol"] in ("NVDA", "TSLA")]
-            return (stock_only or tradeable)[:3]
-        return tradeable[:3]
-
-    if stock_yes:
-        stocks = [r for r in ranked if r["symbol"] in ("NVDA", "TSLA")]
-        if stocks:
-            return stocks[:3]
-    if score_ok and top:
+    stocks = [
+        r for r in ranked
+        if r["symbol"] in _STOCK_SYMBOLS and r["trade_action"] != "Pass"
+    ]
+    if stocks:
+        return stocks[:3]
+    if score_ok and top and top["symbol"] in _STOCK_SYMBOLS:
         return [top]
     return []
 
@@ -716,11 +971,56 @@ def _decision_tree(
     trading_day: date | None,
     quote_by_sym: dict[str, dict[str, Any]],
     as_of_et: time | Literal["now"] | None = None,
+    macro_calendar: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
 
     picks = _select_stock_picks(ranked, edges, tradeable)
+    # Top 5 board: best tradeable rows regardless of P16 index gate
+    top5_rows = tradeable[:5] if tradeable else ranked[:5]
+    top_trades: list[dict[str, Any]] = []
+    for i, row in enumerate(top5_rows):
+        sym = row["symbol"]
+        row_dir = direction
+        section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
+        slot = _build_trade_slot(
+            row,
+            rank=i + 1,
+            direction=row_dir,
+            p9=p9,
+            obs=obs_by_sym.get(sym, {}),
+            raw=raw,
+            prior_raw=prior_raw,
+            trading_day=trading_day or date.today(),
+            section=section,
+            q=quote_by_sym.get(sym, {}),
+            as_of_et=as_of_et,
+            macro_calendar=macro_calendar,
+        )
+        slot = enrich_trade_slot(slot, ranked=ranked, trade_action=row["trade_action"])
+        top_trades.append(slot)
+
+    watchlist: list[dict[str, Any]] = []
+    top5_syms = {t["symbol"] for t in top_trades}
+    for row in ranked:
+        if row["symbol"] in top5_syms:
+            continue
+        if row.get("trade_action") == "Pass" or row.get("final_score", 0) < FINAL_SCORE_THRESHOLD * 0.6:
+            watchlist.append(
+                {
+                    "symbol": row["symbol"],
+                    "rank": row.get("rank"),
+                    "win_prob": row.get("win_prob"),
+                    "expected_return_pct": row.get("expected_return_pct"),
+                    "trade_action": row.get("trade_action"),
+                    "why": row.get("why") or "—",
+                    "note": "Monitor — below trade threshold",
+                }
+            )
+        if len(watchlist) >= 5:
+            break
+
     threshold_msg: str | None = None
     if not picks:
         threshold_msg = "今日无任何标的达到交易阈值"
@@ -738,6 +1038,8 @@ def _decision_tree(
         "index_trade": index_trade,
         "threshold_message": threshold_msg,
         "stock_trades": [],
+        "top_trades": top_trades,
+        "watchlist_items": watchlist,
         "advisory": True,
     }
 
@@ -757,6 +1059,12 @@ def _decision_tree(
             section=section,
             q=quote_by_sym.get(sym, {}),
             as_of_et=as_of_et,
+            macro_calendar=macro_calendar,
+        )
+        slot = enrich_trade_slot(
+            slot,
+            ranked=ranked,
+            trade_action=row["trade_action"],
         )
         slots[slot_names[i]] = slot
         slots["stock_trades"].append({
@@ -825,6 +1133,7 @@ def _to_best_opportunity(
             "edge_type": primary.get("edge_type"),
             "score_formula_display": primary.get("score_formula_display"),
             "win_prob": primary.get("win_prob"),
+            "win_prob_breakdown": primary.get("win_prob_breakdown"),
             "expected_return_pct": primary.get("expected_return_pct"),
             "expected_move": primary.get("expected_move"),
             "return_calculation": primary.get("return_calculation"),
@@ -832,6 +1141,11 @@ def _to_best_opportunity(
             "risk_reward": primary.get("risk_reward"),
             "final_score": primary.get("final_score"),
             "level_anchors": primary.get("level_anchors"),
+            "level_reasons": primary.get("level_reasons"),
+            "trade_economics": primary.get("trade_economics"),
+            "position_sizing": primary.get("position_sizing"),
+            "why_wins_today": primary.get("why_wins_today"),
+            "why_not_alternatives": primary.get("why_not_alternatives"),
             "avoid": [],
             "one_liner": one_liner,
             "p16_gate": p16_gate,
@@ -885,6 +1199,8 @@ def compute_trade_decision(
     bias = rule_bundle.get("bias") or "Neutral"
     total = int(rule_bundle.get("total") or 0)
     driver_type = rule_bundle.get("driver_type") or ""
+    macro_calendar = rule_bundle.get("macro_calendar") or {}
+    driver_tree = rule_bundle.get("driver_tree") or {}
     p9 = parts.get("P9") or {}
     catalysts = rule_bundle.get("catalysts_today") or []
 
@@ -909,6 +1225,7 @@ def compute_trade_decision(
         edges = compute_edges(
             raw,
             catalysts_today=catalysts,
+            macro_calendar=macro_calendar,
             qqq_pct=qqq_pct,
             smh_pct=smh_pct,
             spy_pct=spy_pct,
@@ -928,9 +1245,25 @@ def compute_trade_decision(
         q = _quote(raw, sym)
         quote_by_sym[sym] = q
         obs = obs_by_sym.get(sym, {})
+        if not _has_market_data(obs, q):
+            ranked.append({
+                "symbol": sym,
+                "win_prob": 50.0,
+                "expected_return_pct": 0.0,
+                "final_score": 0.0,
+                "trade_action": "Pass",
+                "trade": "Pass",
+                "risk_reward": 0.0,
+                "why_factors": ["No quote data"],
+                "why": "No quote data",
+                "relative_strength": None,
+                "advisory": True,
+            })
+            continue
         sym_pct = sym_pcts.get(sym)
         prior_chg = _prior_day_change(sym, prior_raw, prior_day) if prior_day else None
         rs = (sym_pct - qqq_pct) if sym_pct is not None and qqq_pct is not None else None
+        rs_smh = (sym_pct - smh_pct) if sym_pct is not None and smh_pct is not None else None
         gap_pct = obs.get("gap_pct")
         prior_close = _safe_float(obs.get("prev_close")) or _safe_float(q.get("prior_close"))
         open_px = _safe_float(obs.get("open")) or _safe_float(q.get("open"))
@@ -949,6 +1282,7 @@ def compute_trade_decision(
             obs=obs,
             prior_day_chg=prior_chg,
             rs_vs_qqq=rs,
+            rs_vs_smh=rs_smh,
             gap_pct=gap_pct,
             news_count=news_n,
             volume_ok=vol_ok,
@@ -958,12 +1292,16 @@ def compute_trade_decision(
             q=q,
             qqq_pct=qqq_pct,
             edges=edges,
+            direction=direction,
+            macro_calendar=macro_calendar,
+            driver_tree=driver_tree,
         )
         ranked.append(row)
 
     ranked.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
     for i, row in enumerate(ranked, start=1):
         row["rank"] = i
+        row["direction"] = direction
     if len(ranked) >= 2:
         ranked[0]["why_vs_runner_up"] = _why_vs_runner_up(ranked[0], ranked[1])
 
@@ -979,6 +1317,7 @@ def compute_trade_decision(
         trading_day=trading_day,
         quote_by_sym=quote_by_sym,
         as_of_et=as_of_et,
+        macro_calendar=macro_calendar,
     )
     best_opportunity = _to_best_opportunity(
         best_trades.get("primary"),
@@ -987,14 +1326,39 @@ def compute_trade_decision(
         duration=duration,
     )
 
+    gap_pct_market = None
+    qqq_obs = obs_by_sym.get("QQQ", {})
+    if qqq_obs.get("gap_pct") is not None:
+        gap_pct_market = _safe_float(qqq_obs.get("gap_pct"))
+
+    transparency = build_decision_transparency(
+        ranked=ranked,
+        best_trades=best_trades,
+        edges=edges,
+        p16_gate=p16_gate,
+        index_trade=best_trades.get("index_trade"),
+        direction=direction,
+        catalysts=catalysts,
+        vix_chg=vix_chg,
+        qqq_pct=qqq_pct,
+        smh_pct=smh_pct,
+        total_score=int(rule_bundle.get("total") or 0),
+        gap_pct_market=gap_pct_market,
+        macro_calendar=macro_calendar,
+        trade_plan=(parts.get("P16") or {}).get("trade_plan"),
+    )
+
     return {
         "edges": edges,
         "trade_candidates": ranked,
         "best_trades": best_trades,
         "best_opportunity": best_opportunity,
+        "top_trades": best_trades.get("top_trades") or [],
+        "watchlist": best_trades.get("watchlist_items") or [],
         "bias_stars": _bias_stars(bias),
         "index_trade": best_trades.get("index_trade"),
         "stock_trades": best_trades.get("stock_trades") or [],
+        "transparency": transparency,
     }
 
 
@@ -1047,6 +1411,7 @@ def build_executive_summary(
     driver: str,
     best: dict[str, Any],
     best_trades: dict[str, Any] | None = None,
+    driver_tree: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     primary = (best_trades or {}).get("primary")
     threshold_msg = (best_trades or {}).get("threshold_message")
@@ -1113,6 +1478,7 @@ def build_executive_summary(
         "bias_stars": bias_stars,
         "driver_type": driver_type,
         "driver": driver,
+        "driver_tree": driver_tree,
         "driver_display": " — ".join(x for x in (driver_type, driver) if x) or "—",
         "best_trade": best_trade,
         "primary_trade": primary,
@@ -1136,6 +1502,12 @@ def build_executive_summary(
         "why_factors": why_factors if primary else [],
         "why_vs_runner_up": why_vs_runner_up if primary else None,
         "edge_type": edge_type if primary else None,
+        "win_prob_breakdown": (primary or {}).get("win_prob_breakdown"),
+        "level_reasons": (primary or {}).get("level_reasons"),
+        "trade_economics": (primary or {}).get("trade_economics"),
+        "position_sizing": (primary or {}).get("position_sizing"),
+        "why_wins_today": (primary or {}).get("why_wins_today") or [],
+        "why_not_alternatives": (primary or {}).get("why_not_alternatives") or [],
         "one_liner": one_liner,
         "threshold_message": threshold_msg,
         "index_trade": (best_trades or {}).get("index_trade"),
