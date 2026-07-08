@@ -58,14 +58,31 @@
       <h2 class="section-title">🥇 Best Opportunity Today</h2>
       <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
       <div class="best-opp-grid">
-        <div><span class="decision-label">Direction</span><strong>{{ best.direction }}</strong></div>
-        <div><span class="decision-label">Symbol</span><strong>{{ best.symbol }}</strong></div>
-        <div><span class="decision-label">Instrument</span><strong>{{ best.instrument }}</strong></div>
-        <div><span class="decision-label">Confidence</span><strong>{{ best.confidence }}%</strong></div>
-        <div><span class="decision-label">Entry</span><strong>{{ best.entry }}</strong></div>
-        <div><span class="decision-label">Stop</span><strong>{{ best.stop }}</strong></div>
-        <div><span class="decision-label">Target</span><strong>{{ best.target }}</strong></div>
+        <div><span class="decision-label">方向 Direction</span><strong>{{ best.direction }}</strong></div>
+        <div><span class="decision-label">标的 Symbol</span><strong>{{ best.symbol }}</strong></div>
+        <div><span class="decision-label">工具 Instrument</span><strong>{{ best.instrument }}</strong></div>
+        <div><span class="decision-label">置信度 Confidence</span><strong>{{ best.confidence }}%</strong></div>
+        <div>
+          <span class="decision-label">入场价 Entry</span>
+          <strong>{% if best.entry_price is not none %}${{ best.entry_price }}{% endif %} {{ best.entry }}</strong>
+        </div>
+        <div>
+          <span class="decision-label">止损价 Stop</span>
+          <strong>{% if best.stop_price is not none %}${{ best.stop_price }}{% endif %} {{ best.stop }}</strong>
+        </div>
+        <div>
+          <span class="decision-label">目标价 Target</span>
+          <strong>{% if best.target_price is not none %}${{ best.target_price }}{% endif %} {{ best.target }}{% if best.target_action %} ({{ best.target_action }}){% endif %}</strong>
+        </div>
+        <div>
+          <span class="decision-label">预期收益 Expected Return</span>
+          <strong>{{ best.expected_move or ('+' ~ best.expected_return_pct ~ '%') }}</strong>
+          {% if best.return_calculation %}<span class="muted small">（{{ best.return_calculation }}）</span>{% endif %}
+        </div>
       </div>
+      {% if best.trade_summary_cn %}
+      <p class="trade-summary-cn"><strong>{{ best.trade_summary_cn }}</strong></p>
+      {% endif %}
       <p><strong>Why：</strong>{{ best.why_chain or (best.why | join(' · ')) }}</p>
       <p class="best-opp-oneliner">「{{ best.one_liner }}」</p>
     </section>

@@ -98,23 +98,46 @@
           <span class="decision-value decision-best-trade">{{ decision_card.best_trade }}</span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">4 · Confidence</span>
+          <span class="decision-label">4 · 方向 Direction</span>
+          <span class="decision-value">{{ decision_card.direction or '—' }}</span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">5 · Confidence</span>
           <span class="decision-value">{% if decision_card.confidence is not none %}{{ decision_card.confidence }}%{% else %}—{% endif %}</span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">5 · Entry</span>
-          <span class="decision-value">{{ decision_card.entry }}{% if decision_card.entry_source %} <span class="level-source-tag">{{ decision_card.entry_source }}</span>{% endif %}</span>
+          <span class="decision-label">6 · 入场价 Entry</span>
+          <span class="decision-value">
+            {% if decision_card.entry_price is not none %}${{ decision_card.entry_price }}{% endif %}
+            {{ decision_card.entry }}{% if decision_card.entry_source %} <span class="level-source-tag">{{ decision_card.entry_source }}</span>{% endif %}
+          </span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">6 · Stop</span>
-          <span class="decision-value">{{ decision_card.stop }}{% if decision_card.stop_source %} <span class="level-source-tag">{{ decision_card.stop_source }}</span>{% endif %}</span>
+          <span class="decision-label">7 · 止损价 Stop</span>
+          <span class="decision-value">
+            {% if decision_card.stop_price is not none %}${{ decision_card.stop_price }}{% endif %}
+            {{ decision_card.stop }}{% if decision_card.stop_source %} <span class="level-source-tag">{{ decision_card.stop_source }}</span>{% endif %}
+          </span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">7 · Target</span>
-          <span class="decision-value">{{ decision_card.target }}{% if decision_card.target_source %} <span class="level-source-tag">{{ decision_card.target_source }}</span>{% endif %}</span>
+          <span class="decision-label">8 · 目标价 Target</span>
+          <span class="decision-value">
+            {% if decision_card.target_price is not none %}${{ decision_card.target_price }}{% endif %}
+            {{ decision_card.target }}{% if decision_card.target_action %} ({{ decision_card.target_action }}){% endif %}
+            {% if decision_card.target_source %} <span class="level-source-tag">{{ decision_card.target_source }}</span>{% endif %}
+          </span>
+        </div>
+        <div class="decision-field">
+          <span class="decision-label">9 · 预期收益 Expected Return</span>
+          <span class="decision-value">
+            {% if decision_card.expected_move %}{{ decision_card.expected_move }}{% elif decision_card.expected_return_pct is not none %}+{{ decision_card.expected_return_pct }}%{% else %}—{% endif %}
+            {% if decision_card.return_calculation %}
+            <span class="muted small">（已验算：{{ decision_card.return_calculation }}）</span>
+            {% endif %}
+          </span>
         </div>
         <div class="decision-field decision-field-wide">
-          <span class="decision-label">8 · Why</span>
+          <span class="decision-label">10 · Why</span>
           <span class="decision-value">
             {% if decision_card.why_factors %}
             {{ decision_card.why_factors[:3] | join(' · ') }}
@@ -124,8 +147,8 @@
           </span>
         </div>
       </div>
-      {% if decision_card.one_liner and decision_card.one_liner != '—' %}
-      <p class="decision-oneliner">「{{ decision_card.one_liner }}」</p>
+      {% if decision_card.trade_summary_cn or (decision_card.one_liner and decision_card.one_liner != '—') %}
+      <p class="decision-oneliner">「{{ decision_card.trade_summary_cn or decision_card.one_liner }}」</p>
       {% endif %}
       <div class="decision-meta-row">
         {% set ta = decision_card.trade_action %}

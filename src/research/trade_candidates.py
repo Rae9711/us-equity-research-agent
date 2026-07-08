@@ -291,6 +291,94 @@ def _rr_numeric(upside_pct: float, downside_pct: float) -> float:
     return round(upside_pct / downside_pct, 2)
 
 
+def _expected_return_from_prices(
+    direction: str,
+    entry_price: float | None,
+    target_price: float | None,
+) -> float | None:
+    """Single source of truth: ER from entry/target prices."""
+    if entry_price is None or target_price is None or entry_price <= 0:
+        return None
+    if direction == "LONG":
+        return round((target_price - entry_price) / entry_price * 100.0, 2)
+    if direction == "SHORT":
+        return round((entry_price - target_price) / entry_price * 100.0, 2)
+    return None
+
+
+def _return_calculation_string(
+    direction: str,
+    entry_price: float,
+    target_price: float,
+    expected_return_pct: float,
+) -> str:
+    if direction == "LONG":
+        return (
+            f"({target_price}-{entry_price})/{entry_price}"
+            f"={expected_return_pct:.2f}%"
+        )
+    if direction == "SHORT":
+        return (
+            f"({entry_price}-{target_price})/{entry_price}"
+            f"={expected_return_pct:.2f}%"
+        )
+    return ""
+
+
+def _risk_reward_from_levels(
+    entry_price: float | None,
+    stop_price: float | None,
+    expected_return_pct: float,
+) -> float | None:
+    if entry_price is None or stop_price is None or entry_price <= 0:
+        return None
+    risk_pct = abs(entry_price - stop_price) / entry_price * 100.0
+    if risk_pct <= 0:
+        return None
+    return round(expected_return_pct / risk_pct, 2)
+
+
+def _apply_price_based_return(
+    slot: dict[str, Any],
+    *,
+    direction: str,
+    heuristic_er: float,
+) -> dict[str, Any]:
+    """Reconcile displayed ER / R:R with entry, target, and stop prices."""
+    entry_px = _safe_float(slot.get("entry_price"))
+    target_px = _safe_float(slot.get("target_price"))
+    stop_px = _safe_float(slot.get("stop_price"))
+    price_er = _expected_return_from_prices(direction, entry_px, target_px)
+    if price_er is None:
+        slot["expected_return_pct"] = heuristic_er
+        slot["expected_move"] = f"{heuristic_er:+.2f}%"
+        return slot
+
+    slot["expected_return_pct"] = price_er
+    slot["expected_move"] = f"{price_er:+.2f}%"
+    slot["return_calculation"] = _return_calculation_string(
+        direction, entry_px, target_px, price_er
+    )
+    slot["heuristic_expected_return_pct"] = heuristic_er
+
+    rr_from_stop = _risk_reward_from_levels(entry_px, stop_px, price_er)
+    if rr_from_stop is not None:
+        slot["risk_reward"] = rr_from_stop
+
+    sym = slot.get("symbol", "")
+    if direction == "LONG":
+        slot["target_action"] = "卖出/获利"
+        slot["trade_summary_cn"] = (
+            f"做多 {sym}：在 {entry_px} 附近入场，目标 {target_px}，预期 {price_er:+.2f}%"
+        )
+    elif direction == "SHORT":
+        slot["target_action"] = "买入/平空仓"
+        slot["trade_summary_cn"] = (
+            f"做空 {sym}：在 {entry_px} 附近入场，目标 {target_px}，预期 {price_er:+.2f}%"
+        )
+    return slot
+
+
 def _rr_weight(rr: float) -> float:
     return max(0.5, min(1.5, rr / 2.0))
 
@@ -524,7 +612,7 @@ def _build_trade_slot(
     inst = _instrument(row["symbol"], direction, p9)
     conf = int(min(95, max(40, row["win_prob"])))
     conf_stars = "★" * min(5, max(1, conf // 20)) + "☆" * (5 - min(5, max(1, conf // 20)))
-    return {
+    slot = {
         "rank": rank,
         "symbol": row["symbol"],
         "direction": direction,
@@ -562,6 +650,11 @@ def _build_trade_slot(
         "why_factors": row["why_factors"],
         "advisory": True,
     }
+    return _apply_price_based_return(
+        slot,
+        direction=direction,
+        heuristic_er=row["expected_return_pct"],
+    )
 
 
 def _index_trade_label(
@@ -686,13 +779,29 @@ def _to_best_opportunity(
     duration: str = "Intraday",
 ) -> dict[str, Any]:
     if primary:
-        dir_word = "buy" if primary["direction"] == "LONG" else "sell"
-        one_liner = (
-            f"Today {dir_word} {primary['symbol']} {primary['entry'].lower()}, "
+        entry_px = primary.get("entry_price")
+        target_px = primary.get("target_price")
+        er = primary.get("expected_return_pct")
+        direction = primary["direction"]
+        trade_summary_cn = primary.get("trade_summary_cn")
+        if not trade_summary_cn and entry_px is not None and target_px is not None and er is not None:
+            if direction == "SHORT":
+                trade_summary_cn = (
+                    f"做空 {primary['symbol']}：在 {entry_px} 附近入场，"
+                    f"目标 {target_px}，预期 {er:+.2f}%"
+                )
+            else:
+                trade_summary_cn = (
+                    f"做多 {primary['symbol']}：在 {entry_px} 附近入场，"
+                    f"目标 {target_px}，预期 {er:+.2f}%"
+                )
+        one_liner = trade_summary_cn or (
+            f"Today {'buy' if direction == 'LONG' else 'sell short'} "
+            f"{primary['symbol']} near ${entry_px}, target ${target_px}, "
             f"expected {primary['expected_move']}"
         )
         return {
-            "direction": primary["direction"],
+            "direction": direction,
             "symbol": primary["symbol"],
             "instrument": primary["instrument"],
             "confidence": primary["confidence"],
@@ -706,6 +815,7 @@ def _to_best_opportunity(
             "target": primary["target"],
             "target_source": primary.get("target_source"),
             "target_price": primary.get("target_price"),
+            "target_action": primary.get("target_action"),
             "targets": primary.get("targets") or [],
             "duration": duration,
             "why": primary.get("why") or [],
@@ -716,6 +826,9 @@ def _to_best_opportunity(
             "score_formula_display": primary.get("score_formula_display"),
             "win_prob": primary.get("win_prob"),
             "expected_return_pct": primary.get("expected_return_pct"),
+            "expected_move": primary.get("expected_move"),
+            "return_calculation": primary.get("return_calculation"),
+            "trade_summary_cn": trade_summary_cn,
             "risk_reward": primary.get("risk_reward"),
             "final_score": primary.get("final_score"),
             "level_anchors": primary.get("level_anchors"),
@@ -945,8 +1058,9 @@ def build_executive_summary(
             f"{primary['symbol']} · {primary['direction']} · "
             f"{primary.get('instrument', '—')} · ER {primary.get('expected_move')}"
         )
-        one_liner = best.get("one_liner") or (
-            f"Today LONG {primary['symbol']} {primary.get('entry', '')}, "
+        one_liner = best.get("one_liner") or primary.get("trade_summary_cn") or (
+            f"Today {primary['direction']} {primary['symbol']} "
+            f"entry ${primary.get('entry_price')} → target ${primary.get('target_price')}, "
             f"expected {primary.get('expected_move')}"
         )
         confidence = primary.get("confidence")
@@ -960,12 +1074,21 @@ def build_executive_summary(
         target_source = primary.get("target_source")
         edge_type = primary.get("edge_type")
         why_vs_runner_up = primary.get("why_vs_runner_up")
+        entry_price = primary.get("entry_price")
+        target_price = primary.get("target_price")
+        stop_price = primary.get("stop_price")
+        expected_return_pct = primary.get("expected_return_pct")
+        return_calculation = primary.get("return_calculation")
+        trade_summary_cn = primary.get("trade_summary_cn")
+        target_action = primary.get("target_action")
     elif threshold_msg:
         best_trade = threshold_msg
         one_liner = threshold_msg
         confidence = None
         entry = stop = target = "—"
         why_chain = threshold_msg
+        entry_price = target_price = stop_price = None
+        expected_return_pct = return_calculation = trade_summary_cn = target_action = None
     else:
         best_trade = (
             f"{best.get('symbol', '—')} · {best.get('direction', '—')} · "
@@ -977,6 +1100,13 @@ def build_executive_summary(
         stop = best.get("stop", "—")
         target = best.get("target", "—")
         why_chain = best.get("why_chain", "—")
+        entry_price = best.get("entry_price")
+        target_price = best.get("target_price")
+        stop_price = best.get("stop_price")
+        expected_return_pct = best.get("expected_return_pct")
+        return_calculation = best.get("return_calculation")
+        trade_summary_cn = best.get("trade_summary_cn")
+        target_action = best.get("target_action")
 
     return {
         "bias": bias,
@@ -989,10 +1119,19 @@ def build_executive_summary(
         "confidence": confidence,
         "entry": entry,
         "entry_source": entry_source if primary else None,
+        "entry_price": entry_price if primary else best.get("entry_price"),
         "stop": stop,
         "stop_source": stop_source if primary else None,
+        "stop_price": stop_price if primary else best.get("stop_price"),
         "target": target,
         "target_source": target_source if primary else None,
+        "target_price": target_price if primary else best.get("target_price"),
+        "target_action": target_action if primary else best.get("target_action"),
+        "direction": (primary or best or {}).get("direction"),
+        "expected_return_pct": expected_return_pct if primary else best.get("expected_return_pct"),
+        "expected_move": (primary or best or {}).get("expected_move"),
+        "return_calculation": return_calculation if primary else best.get("return_calculation"),
+        "trade_summary_cn": trade_summary_cn if primary else best.get("trade_summary_cn"),
         "why_chain": why_chain,
         "why_factors": why_factors if primary else [],
         "why_vs_runner_up": why_vs_runner_up if primary else None,

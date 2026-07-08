@@ -11,28 +11,44 @@
   </div>
   <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
   <div class="best-opp-grid trade-detail-grid">
-    <div><span class="decision-label">Direction</span><strong>{{ trade.direction }}</strong></div>
-    <div><span class="decision-label">Symbol</span><strong>{{ trade.symbol }}</strong></div>
-    <div><span class="decision-label">Win Prob</span><strong>{{ trade.win_prob }}%</strong></div>
-    <div><span class="decision-label">Expected Return</span><strong>{{ trade.expected_move or (trade.expected_return_pct ~ '%') }}</strong></div>
-    <div><span class="decision-label">R:R</span><strong>{{ trade.risk_reward }}</strong></div>
-    <div><span class="decision-label">Confidence</span><strong>{{ trade.confidence }}% {{ trade.confidence_stars or '' }}</strong></div>
+    <div><span class="decision-label">方向 Direction</span><strong>{{ trade.direction }}</strong></div>
+    <div><span class="decision-label">标的 Symbol</span><strong>{{ trade.symbol }}</strong></div>
+    <div><span class="decision-label">胜率 Win Prob</span><strong>{{ trade.win_prob }}%</strong></div>
+    <div>
+      <span class="decision-label">预期收益 Expected Return</span>
+      <strong>{{ trade.expected_move or ('+' ~ trade.expected_return_pct ~ '%') }}</strong>
+      {% if trade.return_calculation %}
+      <span class="muted small">（从入场到目标，已验算：{{ trade.return_calculation }}）</span>
+      {% endif %}
+    </div>
+    <div><span class="decision-label">盈亏比 R:R</span><strong>{{ trade.risk_reward }}</strong></div>
+    <div><span class="decision-label">置信度 Confidence</span><strong>{{ trade.confidence }}% {{ trade.confidence_stars or '' }}</strong></div>
     <div class="trade-level-field">
-      <span class="decision-label">Entry</span>
-      <strong>{{ trade.entry }}</strong>
-      {{ level_tag(trade.entry_source) }}
+      <span class="decision-label">入场价 Entry</span>
+      <strong>
+        {% if trade.entry_price is not none %}${{ trade.entry_price }}{% endif %}
+        {% if trade.entry %} ({{ trade.entry }}{% if trade.entry_source %} / {{ trade.entry_source }}{% endif %}){% endif %}
+      </strong>
     </div>
     <div class="trade-level-field">
-      <span class="decision-label">Stop</span>
-      <strong>{{ trade.stop }}</strong>
-      {{ level_tag(trade.stop_source) }}
+      <span class="decision-label">止损价 Stop</span>
+      <strong>
+        {% if trade.stop_price is not none %}${{ trade.stop_price }}{% endif %}
+        {% if trade.stop %} ({{ trade.stop }}{% if trade.stop_source %} / {{ trade.stop_source }}{% endif %}){% endif %}
+      </strong>
     </div>
     <div class="trade-level-field">
-      <span class="decision-label">Target</span>
-      <strong>{{ trade.target }}</strong>
+      <span class="decision-label">目标价 Target</span>
+      <strong>
+        {% if trade.target_price is not none %}${{ trade.target_price }}{% endif %}
+        {% if trade.target %} ({{ trade.target }}{% if trade.target_action %} / {{ trade.target_action }}{% endif %}){% endif %}
+      </strong>
       {{ level_tag(trade.target_source) }}
     </div>
   </div>
+  {% if trade.trade_summary_cn %}
+  <p class="trade-summary-cn"><strong>{{ trade.trade_summary_cn }}</strong></p>
+  {% endif %}
   {% if trade.score_formula_display %}
   <p class="score-formula muted small">{{ trade.score_formula_display }}</p>
   {% endif %}

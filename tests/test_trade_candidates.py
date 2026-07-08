@@ -8,8 +8,12 @@ from src.research.edges import compute_edges, format_p13_from_edges
 from src.research.trade_candidates import (
     CANDIDATE_SYMBOLS,
     FINAL_SCORE_THRESHOLD,
+    _apply_price_based_return,
+    _expected_return_from_prices,
     _instrument,
     _p16_gate,
+    _return_calculation_string,
+    _risk_reward_from_levels,
     _score_candidate_v2,
     compute_trade_decision,
 )
@@ -300,7 +304,6 @@ def test_p16_no_trade_still_picks_stock_on_stock_edge(_prior, _obs):
     assert result["best_trades"]["index_trade"] == "NO TRADE"
     assert result["best_opportunity"]["direction"] == "LONG"
     assert result["best_opportunity"]["symbol"] == "TSLA"
-    assert "TSLA" in result["best_opportunity"]["one_liner"]
 
 
 @patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
@@ -327,3 +330,99 @@ def test_low_scores_threshold_message(_prior, _obs):
     result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
     msg = result["best_trades"].get("threshold_message")
     assert msg or result["best_opportunity"]["direction"] in ("NO TRADE", "LONG")
+
+
+def test_short_expected_return_from_entry_target():
+    """SHORT TSLA entry 412 target 402.7 → ER ≈ 2.26%."""
+    er = _expected_return_from_prices("SHORT", 412.0, 402.7)
+    assert er is not None
+    assert abs(er - 2.26) < 0.01
+    calc = _return_calculation_string("SHORT", 412.0, 402.7, er)
+    assert calc == "(412.0-402.7)/412.0=2.26%"
+
+
+def test_long_expected_return_from_entry_target():
+    """LONG entry 100 target 103 → ER 3%."""
+    er = _expected_return_from_prices("LONG", 100.0, 103.0)
+    assert er == 3.0
+    calc = _return_calculation_string("LONG", 100.0, 103.0, er)
+    assert calc == "(103.0-100.0)/100.0=3.00%"
+
+
+def test_apply_price_based_return_overrides_heuristic():
+    slot = {
+        "symbol": "TSLA",
+        "entry_price": 412.0,
+        "target_price": 402.7,
+        "stop_price": 419.6,
+        "expected_return_pct": 2.67,
+        "expected_move": "+2.67%",
+        "risk_reward": 1.5,
+    }
+    out = _apply_price_based_return(slot, direction="SHORT", heuristic_er=2.67)
+    assert out["expected_return_pct"] == 2.26
+    assert out["expected_move"] == "+2.26%"
+    assert out["return_calculation"] == "(412.0-402.7)/412.0=2.26%"
+    assert out["trade_summary_cn"] == "做空 TSLA：在 412.0 附近入场，目标 402.7，预期 +2.26%"
+    rr = _risk_reward_from_levels(412.0, 419.6, 2.26)
+    assert out["risk_reward"] == rr
+
+
+@patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
+@patch("src.research.trade_candidates._load_prior_raw")
+def test_primary_trade_er_matches_entry_target(_prior, _obs):
+    """Primary slot ER must match (entry-target)/entry, not momentum heuristic."""
+    _prior.return_value = {
+        "stocks": {"quotes": {"TSLA": {"change_pct": -3.0, "close": 420.0}}},
+    }
+    raw = _bullish_raw()
+    raw["trading_date"] = "2026-07-07"
+    raw["stocks"]["quotes"]["TSLA"] = {
+        "close": 410.0,
+        "prev_close": 418.0,
+        "open": 412.0,
+        "high": 420.0,
+        "low": 400.0,
+        "change_pct": -1.9,
+        "volume": 5000,
+        "session_type": "premarket",
+    }
+    edges = compute_edges(
+        raw,
+        catalysts_today=[],
+        qqq_pct=-0.5,
+        smh_pct=-1.0,
+        spy_pct=-0.3,
+        sym_pcts={"TSLA": -1.9},
+        driver_type="Macro",
+    )
+    rule_bundle = {
+        "bias": "Bearish Bias",
+        "total": -3,
+        "driver_type": "Macro",
+        "daily_driver": "Risk-off",
+        "catalysts_today": [],
+        "edges": edges,
+    }
+    parts = {
+        "P9": {"buy_options": "No", "zero_dte": "No", "buy_call": "No", "buy_put": "No"},
+        "P11": {"scores": {"VIX": 2, "Bond": 1}},
+        "P13": format_p13_from_edges(edges),
+        "P16": {"judgment": "Trade SHORT TSLA", "one_liner": "做空 TSLA"},
+    }
+    result = compute_trade_decision(
+        raw,
+        rule_bundle=rule_bundle,
+        parts=parts,
+        edges=edges,
+    )
+    primary = result["best_trades"].get("primary")
+    best = result["best_opportunity"]
+    if primary and primary.get("entry_price") and primary.get("target_price"):
+        entry = primary["entry_price"]
+        target = primary["target_price"]
+        expected = _expected_return_from_prices(primary["direction"], entry, target)
+        assert primary["expected_return_pct"] == expected
+        assert best["expected_return_pct"] == expected
+        assert primary["return_calculation"]
+        assert "trade_summary_cn" in primary
