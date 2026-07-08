@@ -9,6 +9,7 @@ from src.steps.base import save_step_result
 from src.research.format_body import normalize_body_md
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import morning_json_path, step_json_path
+from src.utils.pit_snapshots import save_snapshot, step_label
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day
 
 logger = logging.getLogger(__name__)
@@ -234,4 +235,9 @@ def run_step4_trade_decision(trading_date: date | None = None) -> dict[str, Any]
         },
     )
     payload["disclaimer"] = DISCLAIMER
+    save_snapshot(
+        trading_date,
+        step_label(4),
+        {"step4": payload, "morning": morning},
+    )
     return payload

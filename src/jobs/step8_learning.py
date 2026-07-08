@@ -17,6 +17,7 @@ from src.engines.playbook import store_case
 from src.steps.base import save_step_result
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import step_json_path
+from src.utils.pit_snapshots import save_snapshot, step_label
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,21 @@ def run_step8_learning(trading_date: date | None = None) -> dict[str, Any]:
             "posterior_weights": posterior_weights,
             "playbook_case_id": playbook_case_id,
             "actual_driver": actual_driver,
+        },
+    )
+    save_snapshot(
+        trading_date,
+        step_label(8),
+        {
+            "step8": payload,
+            "learning_summary": {
+                "bayesian_summary": bayesian_summary,
+                "playbook_summary": playbook_summary,
+                "prior_weights": prior_weights,
+                "posterior_weights": posterior_weights,
+                "playbook_case_id": playbook_case_id,
+                "actual_driver": actual_driver,
+            },
         },
     )
     return payload

@@ -17,6 +17,7 @@ from src.steps.base import save_step_result
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.driver_match import driver_match_level
 from src.utils.paths import morning_json_path, raw_data_path, step_json_path
+from src.utils.pit_snapshots import save_snapshot, step_label
 from src.utils.scenario_match import assess_scenarios
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
@@ -252,6 +253,16 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
             "s7": {"actual_driver": actual_driver, "attribution": attr.model_dump()},
         },
     })
+
+    case_partial = load_case(date_str)
+    save_snapshot(
+        trading_date,
+        step_label(7),
+        {
+            "step7": payload,
+            "case": case_partial.model_dump() if case_partial else {},
+        },
+    )
 
     return payload
 

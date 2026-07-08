@@ -2,13 +2,17 @@
 
 Each scheduled step saves an immutable snapshot at its decision boundary so
 afternoon reruns replay the same prices as the original run — not live data.
+
+Paths: ``data/snapshots/YYYY-MM-DD/{label}.json`` (e.g. step0_0745.json).
+First successful write wins; later reruns are skipped unless ``--force``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any, Literal
 
 from pytz import timezone
@@ -34,6 +38,21 @@ STEP_PIT: dict[int, tuple[str, time]] = {
 
 LABEL_TO_STEP: dict[str, int] = {label: num for num, (label, _) in STEP_PIT.items()}
 
+PRIOR_SNAPSHOT: dict[int, str] = {
+    1: "step0_0745",
+    2: "step1_0800",
+    3: "step2_0930",
+    4: "step3_1000",
+    5: "step4_1015",
+    6: "step5_1200",
+    7: "step6_1400",
+    8: "step7_1610",
+}
+
+
+class PITSnapshotMissingError(FileNotFoundError):
+    """Raised when a required PIT snapshot is absent for replay."""
+
 
 def step_label(step_num: int) -> str:
     return STEP_PIT[step_num][0]
@@ -53,22 +72,33 @@ def snapshots_dir(trading_date: date | str) -> str:
 
 
 def snapshot_path(trading_date: date | str, as_of_et: time) -> str:
-    """Return path: data/snapshots/YYYY-MM-DD/HHMM.json"""
+    """Return legacy HHMM path (for backward-compat reads only)."""
     d = trading_date.isoformat() if isinstance(trading_date, date) else trading_date
     return str(data_root() / "snapshots" / d / f"{_hhmm(as_of_et)}.json")
 
 
 def snapshot_path_for_label(trading_date: date | str, label: str) -> str:
-    """Map step label (e.g. step0_0745) to HHMM.json path."""
+    """Return path: data/snapshots/YYYY-MM-DD/{label}.json"""
+    d = trading_date.isoformat() if isinstance(trading_date, date) else trading_date
+    return str(data_root() / "snapshots" / d / f"{label}.json")
+
+
+def _legacy_hhmm_path(trading_date: date | str, label: str) -> Path | None:
     step_num = LABEL_TO_STEP.get(label)
-    if step_num is not None:
-        return snapshot_path(trading_date, step_scheduled_time(step_num))
-    # fallback: extract trailing HHMM from label
-    suffix = label.rsplit("_", 1)[-1]
-    if len(suffix) == 4 and suffix.isdigit():
-        hh, mm = int(suffix[:2]), int(suffix[2:])
-        return snapshot_path(trading_date, time(hh, mm))
-    raise ValueError(f"Unknown snapshot label: {label}")
+    if step_num is None:
+        return None
+    d = trading_date.isoformat() if isinstance(trading_date, date) else trading_date
+    return data_root() / "snapshots" / d / f"{_hhmm(step_scheduled_time(step_num))}.json"
+
+
+def _resolve_snapshot_path(trading_date: date | str, label: str) -> Path:
+    primary = Path(snapshot_path_for_label(trading_date, label))
+    if primary.exists():
+        return primary
+    legacy = _legacy_hhmm_path(trading_date, label)
+    if legacy and legacy.exists():
+        return legacy
+    return primary
 
 
 def parse_as_of(
@@ -114,15 +144,11 @@ def format_as_of_display(as_of: time | Literal["now"], *, step_num: int | None =
 
 
 def snapshot_exists(trading_date: date | str, label: str) -> bool:
-    from pathlib import Path
-
-    return Path(snapshot_path_for_label(trading_date, label)).exists()
+    return _resolve_snapshot_path(trading_date, label).exists()
 
 
 def load_snapshot(trading_date: date | str, label: str) -> dict[str, Any] | None:
-    from pathlib import Path
-
-    path = Path(snapshot_path_for_label(trading_date, label))
+    path = _resolve_snapshot_path(trading_date, label)
     if not path.exists():
         return None
     try:
@@ -152,13 +178,10 @@ def save_snapshot(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist PIT snapshot. Refuses overwrite unless force=True."""
-    from pathlib import Path
-
     path = Path(snapshot_path_for_label(trading_date, label))
     if path.exists() and not force:
-        logger.info("Snapshot %s already exists — skipping (use --force to overwrite)", path)
-        existing = json.loads(path.read_text(encoding="utf-8"))
-        return existing
+        logger.info("PIT snapshot skipped: already exists — %s (use --force to overwrite)", label)
+        return json.loads(path.read_text(encoding="utf-8"))
 
     d = date.fromisoformat(trading_date) if isinstance(trading_date, str) else trading_date
     step_num = LABEL_TO_STEP.get(label)
@@ -180,8 +203,37 @@ def save_snapshot(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("Saved PIT snapshot %s (label=%s)", path, label)
+    logger.info("PIT snapshot saved: %s (immutable)", label)
     return payload
+
+
+# Alias required by runner wiring spec
+save_pit_snapshot = save_snapshot
+
+
+def require_pit_raw(
+    trading_date: date,
+    step_num: int,
+    *,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Load prior-step raw for replay. Raises if snapshot missing."""
+    label = label or PRIOR_SNAPSHOT.get(step_num, "")
+    if not label:
+        raise PITSnapshotMissingError(f"No prior snapshot configured for step {step_num}")
+    snap_raw = load_snapshot_raw(trading_date, label)
+    if snap_raw:
+        return snap_raw
+    path = snapshot_path_for_label(trading_date, label)
+    logger.error(
+        "PIT SNAPSHOT MISSING: %s for %s — rerun will NOT use live prices. "
+        "Run the scheduled job first or pass --force after manual collect.",
+        label,
+        trading_date.isoformat(),
+    )
+    raise PITSnapshotMissingError(
+        f"Required PIT snapshot missing: {path} (needed for step {step_num} replay)"
+    )
 
 
 def pit_raw_for_step(
@@ -189,27 +241,83 @@ def pit_raw_for_step(
     step_num: int,
     *,
     fallback_raw: dict[str, Any] | None = None,
+    allow_fallback: bool = False,
 ) -> dict[str, Any]:
     """Load the raw data snapshot appropriate for running step_num."""
     if step_num == 0:
         return fallback_raw or {}
-    # Step 1 reads step0 snapshot; step 2+ read prior step snapshot or step0
-    prior_labels = {
-        1: "step0_0745",
-        2: "step1_0800",
-        3: "step2_0930",
-        4: "step3_1000",
-        5: "step4_1015",
-        6: "step5_1200",
-        7: "step6_1400",
-        8: "step7_1610",
-    }
-    label = prior_labels.get(step_num)
+    label = PRIOR_SNAPSHOT.get(step_num)
     if label:
         snap_raw = load_snapshot_raw(trading_date, label)
         if snap_raw:
             return snap_raw
-    # Step 1 fallback: step0 raw file
-    if step_num == 1 and fallback_raw:
+        if not allow_fallback:
+            return {}
+    if allow_fallback and fallback_raw:
         return fallback_raw
     return fallback_raw or {}
+
+
+def list_snapshots(trading_date: date | str) -> list[dict[str, Any]]:
+    """List all PIT snapshots for a trading day (scheduled + any extras)."""
+    d = trading_date.isoformat() if isinstance(trading_date, date) else trading_date
+    snap_dir = data_root() / "snapshots" / d
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for step_num in sorted(STEP_PIT):
+        label, sched = STEP_PIT[step_num]
+        path = _resolve_snapshot_path(d, label)
+        exists = path.exists()
+        seen.add(path.name)
+        rows.append({
+            "step": step_num,
+            "label": label,
+            "scheduled_et": sched.strftime("%H:%M"),
+            "exists": exists,
+            "path": str(path),
+            "size_bytes": path.stat().st_size if exists else 0,
+        })
+
+    if snap_dir.is_dir():
+        for p in sorted(snap_dir.glob("*.json")):
+            if p.name in seen:
+                continue
+            rows.append({
+                "step": None,
+                "label": p.stem,
+                "scheduled_et": None,
+                "exists": True,
+                "path": str(p),
+                "size_bytes": p.stat().st_size,
+            })
+    return rows
+
+
+def prune_old_snapshots(*, keep_days: int = 90, dry_run: bool = False) -> list[str]:
+    """Remove snapshot directories older than keep_days. Returns removed paths."""
+    root = data_root() / "snapshots"
+    if not root.is_dir():
+        return []
+    cutoff = today_et() - timedelta(days=keep_days)
+    removed: list[str] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        try:
+            d = date.fromisoformat(child.name)
+        except ValueError:
+            continue
+        if d >= cutoff:
+            continue
+        removed.append(str(child))
+        if not dry_run:
+            import shutil
+            shutil.rmtree(child)
+            logger.info("Pruned old PIT snapshots: %s", child)
+    return removed
+
+
+def today_et() -> date:
+    from src.utils.trading_calendar import today_et as _today_et
+    return _today_et()

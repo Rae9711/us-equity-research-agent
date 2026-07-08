@@ -14,6 +14,7 @@ from src.db.market_case_service import update_case
 from src.steps.base import save_step_result
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import step_json_path
+from src.utils.pit_snapshots import save_snapshot, step_label
 from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
@@ -98,4 +99,5 @@ def run_step6_afternoon(trading_date: date | None = None) -> dict[str, Any]:
         "intraday": {"s6": {"trade_valid": trade_valid, "action": action}},
     })
 
+    save_snapshot(trading_date, step_label(6), {"step6": payload})
     return payload

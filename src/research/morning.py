@@ -19,9 +19,10 @@ from src.research.rules import compute_rule_parts
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path
 from src.utils.pit_snapshots import (
+    PITSnapshotMissingError,
     as_of_et_iso,
     format_as_of_display,
-    pit_raw_for_step,
+    require_pit_raw,
     save_snapshot,
     step_label,
     step_scheduled_time,
@@ -121,15 +122,15 @@ def run_morning_research(
 
     logger.info("Morning research starting for %s", date_str)
 
-    raw, stale = guard_fresh_raw(trading_date, step="run_morning_research")
-    if stale:
-        return stale
-
-    # Use Step 0 PIT snapshot when replaying (not live raw)
     if pit_as_of != "now":
-        pit_raw = pit_raw_for_step(trading_date, 1, fallback_raw=raw)
-        if pit_raw:
-            raw = pit_raw
+        try:
+            raw = require_pit_raw(trading_date, 1)
+        except PITSnapshotMissingError:
+            raise
+    else:
+        raw, stale = guard_fresh_raw(trading_date, step="run_morning_research")
+        if stale:
+            return stale
 
     # Step 1a: R0 Regime Engine (must run before P1-P16)
     regime_model = None

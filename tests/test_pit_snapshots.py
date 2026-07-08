@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from src.utils import pit_snapshots as pit
+from src.utils.pit_snapshots import PITSnapshotMissingError
 from src.utils.quote_resolve import session_observation
 
 
@@ -17,9 +18,9 @@ def snap_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_snapshot_path_hhmm(snap_dir):
-    path = pit.snapshot_path(date(2026, 7, 7), time(8, 0))
-    assert "2026-07-07/0800.json" in path
+def test_snapshot_path_uses_label(snap_dir):
+    path = pit.snapshot_path_for_label(date(2026, 7, 7), "step0_0745")
+    assert path.endswith("2026-07-07/step0_0745.json")
 
 
 def test_save_snapshot_immutable(snap_dir):
@@ -41,6 +42,44 @@ def test_load_snapshot_raw_step1_wraps_raw(snap_dir):
     inner = {"trading_date": "2026-07-07", "market": {"quotes": {}}}
     pit.save_snapshot(d, "step1_0800", {"raw": inner, "morning": {}})
     assert pit.load_snapshot_raw(d, "step1_0800") == inner
+
+
+def test_step1_rerun_uses_0745_not_live(snap_dir):
+    """PIT replay for step 1 must read step0_0745 only — no live fallback."""
+    d = date(2026, 7, 7)
+    pit_raw = {
+        "trading_date": "2026-07-07",
+        "market": {"quotes": {"TSLA": {"close": 399.0}}},
+        "source": "pit_0745",
+    }
+    live_raw = {
+        "trading_date": "2026-07-07",
+        "market": {"quotes": {"TSLA": {"close": 419.0}}},
+        "source": "live",
+    }
+    pit.save_snapshot(d, "step0_0745", pit_raw)
+
+    loaded = pit.require_pit_raw(d, 1)
+    assert loaded["source"] == "pit_0745"
+    assert loaded["market"]["quotes"]["TSLA"]["close"] == 399.0
+
+    # Without snapshot, must not silently use live
+    d2 = date(2026, 7, 8)
+    with pytest.raises(PITSnapshotMissingError):
+        pit.require_pit_raw(d2, 1)
+
+    fallback = pit.pit_raw_for_step(d2, 1, fallback_raw=live_raw, allow_fallback=False)
+    assert fallback == {}
+
+
+def test_list_snapshots(snap_dir):
+    d = date(2026, 7, 7)
+    pit.save_snapshot(d, "step0_0745", {"v": 1})
+    rows = pit.list_snapshots(d)
+    step0 = next(r for r in rows if r["label"] == "step0_0745")
+    assert step0["exists"] is True
+    step1 = next(r for r in rows if r["label"] == "step1_0800")
+    assert step1["exists"] is False
 
 
 def test_parse_as_of_defaults_to_step_schedule():

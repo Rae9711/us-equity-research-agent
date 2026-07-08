@@ -132,6 +132,10 @@ Agent 每完成一个 Part / Step，**必须**输出结构化 **结论**块，�
 
 > **Step 1 对内三段：** 1a **R0 Regime** → 1b **P1–P16** → 1c **P17 Hypothesis**（对外仍显示为 8:00 Morning）。
 
+### PIT 快照（Point-in-Time Backups）
+
+每个定时 Step 成功完成后，系统自动将**当时**的原始数据与决策输出写入不可变快照：`data/snapshots/YYYY-MM-DD/{label}.json`（如 `step0_0745.json`、`step1_0800.json`）。**首次写入胜出**——晚间手动重跑 Step 0 或部署后重跑不会覆盖 07:45 快照，除非显式 `--force`。下午重跑 Step 1（`python -m src.jobs.step1_morning --date D`）**只读** `step0_0745.json`，缺失则报错，不会静默回退到实时行情。查看某日快照：`python -m src.jobs.pit_status --date YYYY-MM-DD`。
+
 ---
 
 ## 核心资产：Market Case

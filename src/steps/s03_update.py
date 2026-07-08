@@ -13,6 +13,7 @@ from src.steps.base import save_step_result
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.news_signals import detect_high_signal_news, summarize_signals
 from src.utils.paths import morning_json_path, step_json_path
+from src.utils.pit_snapshots import save_snapshot, step_label
 from src.utils.trading_calendar import market_open_et, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,7 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             + (f"\n- 突发信号：{breaking_summary.get('high', 0)} high" if breaking_summary.get("has_high") else "")
         )
 
-    return save_step_result(
+    payload = save_step_result(
         3,
         trading_date,
         step_id="S3",
@@ -198,3 +199,5 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             "breaking_summary": breaking_summary,
         },
     )
+    save_snapshot(trading_date, step_label(3), {"step3": payload, "context": context})
+    return payload
