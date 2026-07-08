@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
-from typing import Any
+from datetime import date, time
+from typing import Any, Literal
 
 from src.collectors.fred_client import FredClient
 from src.research.format_body import normalize_body_md
 from src.steps.base import save_step_result
 from src.utils.data_freshness import dgs10_fred_stale, guard_fresh_raw
 from src.utils.paths import morning_json_path, raw_data_path
+from src.utils.pit_snapshots import (
+    as_of_et_iso,
+    format_as_of_display,
+    pit_raw_for_step,
+    save_snapshot,
+    step_label,
+    step_scheduled_time,
+)
 from src.utils.quote_resolve import intraday_session_quote, session_observation
 from src.utils.trading_calendar import prior_trading_day, require_trading_day, skipped_non_trading_day, today_et
 
@@ -192,26 +200,42 @@ def _classify_open(
     return market, conf, notes
 
 
-def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
+def run_step2_open(
+    trading_date: date | None = None,
+    *,
+    as_of_et: time | Literal["now"] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
     d = require_trading_day(trading_date, job="run_step2_open")
     if d is None:
         return skipped_non_trading_day(trading_date)
     trading_date = d
-    logger.info("Step 2 Open report for %s", trading_date)
+    pit_as_of = as_of_et if as_of_et is not None else step_scheduled_time(2)
+    logger.info("Step 2 Open report for %s (as-of %s)", trading_date, pit_as_of)
 
     _, stale = guard_fresh_raw(trading_date, step="run_step2_open")
     if stale:
         return stale
 
     raw, prior_raw = _load_raw(trading_date)
+    if pit_as_of != "now":
+        pit_raw = pit_raw_for_step(trading_date, 2, fallback_raw=raw)
+        if pit_raw:
+            raw = pit_raw
 
-    qqq = session_observation("QQQ", raw, prior_raw, trading_date, section="market")
-    smh = session_observation("SMH", raw, prior_raw, trading_date, section="sector")
+    qqq = session_observation(
+        "QQQ", raw, prior_raw, trading_date, section="market", as_of_et=pit_as_of
+    )
+    smh = session_observation(
+        "SMH", raw, prior_raw, trading_date, section="sector", as_of_et=pit_as_of
+    )
     tnx = _bond_observation(trading_date, raw, prior_raw)
 
     mag7_moves: list[dict[str, Any]] = []
     for sym in MAG7:
-        q = session_observation(sym, raw, prior_raw, trading_date, section="stocks")
+        q = session_observation(
+            sym, raw, prior_raw, trading_date, section="stocks", as_of_et=pit_as_of
+        )
         if "error" not in q:
             mag7_moves.append(q)
     mag7_moves.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
@@ -287,6 +311,8 @@ def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
         conclusion=conclusion,
         body_md=normalize_body_md("\n".join(body_lines)),
         extra={
+            "decision_as_of": as_of_et_iso(trading_date, pit_as_of),
+            "decision_as_of_et": format_as_of_display(pit_as_of, step_num=2),
             "observations": {
                 "qqq": qqq,
                 "smh": smh,
@@ -297,4 +323,11 @@ def run_step2_open(trading_date: date | None = None) -> dict[str, Any]:
             "market": market,
         },
     )
+    if pit_as_of != "now":
+        save_snapshot(
+            trading_date,
+            step_label(2),
+            {"raw": raw, "step2": payload},
+            force=force,
+        )
     return payload

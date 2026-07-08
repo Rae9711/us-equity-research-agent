@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
-from typing import Any
+from datetime import date, time, timedelta
+from typing import Any, Literal
 
 from src.research.edges import compute_edges, format_p13_from_edges
 from src.research.level_sources import format_if_level
@@ -123,9 +123,12 @@ def _session_pct(
     q: dict[str, Any],
     *,
     section: str,
+    as_of_et: time | Literal["now"] | None = None,
 ) -> float | None:
     if trading_day is not None:
-        pct = session_change_pct(ticker, raw, prior_raw, trading_day, section=section)
+        pct = session_change_pct(
+            ticker, raw, prior_raw, trading_day, section=section, as_of_et=as_of_et
+        )
         if pct is not None:
             return pct
     return _pct(q)
@@ -372,7 +375,11 @@ def _pre_holiday(raw: dict[str, Any]) -> bool:
     return (next_trading_day(d) - d).days > 1
 
 
-def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
+def compute_rule_parts(
+    raw: dict[str, Any],
+    *,
+    as_of_et: time | Literal["now"] | None = None,
+) -> dict[str, Any]:
     trading_date = str(raw.get("trading_date") or "")
     trading_day: date | None = None
     if trading_date:
@@ -400,7 +407,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         elif dgs10 <= 4.0:
             bond_direction, bond_score = "Down", 1
 
-    dxy_pct = _session_pct("DX-Y.NYB", raw, prior_raw, trading_day, dxy, section="market")
+    dxy_pct = _session_pct("DX-Y.NYB", raw, prior_raw, trading_day, dxy, section="market", as_of_et=as_of_et)
     dxy_dir = _score_direction(dxy_pct)
     dollar_score = 0
     if dxy_dir == "Up":
@@ -411,7 +418,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         "Negative" if dollar_score < 0 else "Positive" if dollar_score > 0 else "Neutral"
     )
 
-    vix_pct = _session_pct("^VIX", raw, prior_raw, trading_day, vix, section="market")
+    vix_pct = _session_pct("^VIX", raw, prior_raw, trading_day, vix, section="market", as_of_et=as_of_et)
     vix_dir = _score_direction(vix_pct, threshold=2.0)
     vix_score = 0
     panic = "Low"
@@ -431,7 +438,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             {
                 "sector": name,
                 "change_pct": _session_pct(
-                    name, raw, prior_raw, trading_day, q, section="sector"
+                    name, raw, prior_raw, trading_day, q, section="sector", as_of_et=as_of_et
                 ),
                 "close": q.get("close"),
             }
@@ -445,12 +452,12 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
         else 0
     )
 
-    spy_pct = _session_pct("SPY", raw, prior_raw, trading_day, spy_q, section="market")
-    qqq_pct = _session_pct("QQQ", raw, prior_raw, trading_day, qqq_q, section="market")
-    dow_pct = _session_pct("DIA", raw, prior_raw, trading_day, dia_q, section="market")
+    spy_pct = _session_pct("SPY", raw, prior_raw, trading_day, spy_q, section="market", as_of_et=as_of_et)
+    qqq_pct = _session_pct("QQQ", raw, prior_raw, trading_day, qqq_q, section="market", as_of_et=as_of_et)
+    dow_pct = _session_pct("DIA", raw, prior_raw, trading_day, dia_q, section="market", as_of_et=as_of_et)
     smh = sector_quotes.get("SMH") or {}
     xlk = sector_quotes.get("XLK") or {}
-    smh_pct = _session_pct("SMH", raw, prior_raw, trading_day, smh, section="sector")
+    smh_pct = _session_pct("SMH", raw, prior_raw, trading_day, smh, section="sector", as_of_et=as_of_et)
 
     p1_label, is_divergence = _index_divergence(dow_pct, spy_pct, qqq_pct, smh_pct)
     if is_divergence:
@@ -482,7 +489,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     nvda_q = (raw.get("stocks") or {}).get("quotes", {}).get("NVDA") or {}
     chip_selloff = _chip_selloff_signal(
         smh_pct,
-        _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks"),
+        _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks", as_of_et=as_of_et),
         int(news_signals.get("news_ai_mentions") or 0),
         int(news_signals.get("news_macro_mentions") or 0),
     )
@@ -493,7 +500,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     pre_holiday = _pre_holiday(raw)
 
     stock_quotes = (raw.get("stocks") or {}).get("quotes") or {}
-    nvda_pct = _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks")
+    nvda_pct = _session_pct("NVDA", raw, prior_raw, trading_day, nvda_q, section="stocks", as_of_et=as_of_et)
 
     ai_score = 0
     if smh_pct is not None and smh_pct > 0:
@@ -505,7 +512,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     mag7_rows: list[dict[str, Any]] = []
     for sym in mag7_syms:
         q = stock_quotes.get(sym) or {}
-        pct = _session_pct(sym, raw, prior_raw, trading_day, q, section="stocks")
+        pct = _session_pct(sym, raw, prior_raw, trading_day, q, section="stocks", as_of_et=as_of_et)
         if pct is None:
             continue
         mag7_rows.append({"symbol": sym, "change_pct": pct})
@@ -589,7 +596,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
     p2_driver = daily_driver if not chip_selloff else "AI Chip Selloff"
 
     tsla_q = stock_quotes.get("TSLA") or {}
-    tsla_pct = _session_pct("TSLA", raw, prior_raw, trading_day, tsla_q, section="stocks")
+    tsla_pct = _session_pct("TSLA", raw, prior_raw, trading_day, tsla_q, section="stocks", as_of_et=as_of_et)
     edges = compute_edges(
         raw,
         catalysts_today=catalysts_today,
@@ -689,7 +696,7 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             ai_signals=ai_signals,
             smh_pct=smh_pct,
             nvda_pct=nvda_pct,
-            xlk_pct=_session_pct("XLK", raw, prior_raw, trading_day, xlk, section="sector"),
+            xlk_pct=_session_pct("XLK", raw, prior_raw, trading_day, xlk, section="sector", as_of_et=as_of_et),
             mag7_rows=mag7_rows,
             mag7_breadth=mag7_breadth,
             mag7_avg=mag7_avg,

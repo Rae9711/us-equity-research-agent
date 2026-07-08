@@ -77,6 +77,8 @@
         <div class="decision-card-head-meta">
           {% if decision_card.data_as_of_et %}
           <span class="muted decision-data-ts">数据截至 {{ decision_card.data_as_of_et }}</span>
+          {% elif decision_card.generated_at %}
+          <span class="muted decision-data-ts">生成于 {{ decision_card.generated_at[:16] }}</span>
           {% endif %}
           <a class="muted" href="/today?date={{ day.trading_date }}">完整 Morning →</a>
         </div>

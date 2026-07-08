@@ -6,8 +6,8 @@ ADVISORY ONLY — 不构成投资建议.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import date, datetime, time, timedelta
+from typing import Any, Literal
 
 import yfinance as yf
 
@@ -140,7 +140,23 @@ def _ohlcv_bars_from_raw(raw: dict[str, Any], symbol: str, trading_date: date) -
     return []
 
 
-def _ohlcv_bars_yfinance(ticker: str, trading_date: date) -> list[dict[str, Any]]:
+def _filter_bars_as_of(
+    bars: list[dict[str, Any]],
+    trading_date: date,
+    as_of_et: time | Literal["now"] | None,
+) -> list[dict[str, Any]]:
+    if not bars or as_of_et is None or as_of_et == "now":
+        return bars
+    cutoff = ET.localize(datetime.combine(trading_date, as_of_et))
+    return [b for b in bars if b["ts"] <= cutoff]
+
+
+def _ohlcv_bars_yfinance(
+    ticker: str,
+    trading_date: date,
+    *,
+    as_of_et: time | Literal["now"] | None = None,
+) -> list[dict[str, Any]]:
     try:
         df = yf.Ticker(ticker).history(
             start=trading_date.isoformat(),
@@ -169,7 +185,7 @@ def _ohlcv_bars_yfinance(ticker: str, trading_date: date) -> list[dict[str, Any]
                 "volume": float(row.get("Volume") or 0),
             }
         )
-    return out
+    return _filter_bars_as_of(out, trading_date, as_of_et)
 
 
 def _compute_vwap(bars: list[dict[str, Any]]) -> float | None:
@@ -229,8 +245,10 @@ def compute_anchors(
     section: str,
     q: dict[str, Any],
     obs: dict[str, Any],
+    as_of_et: time | Literal["now"] | None = None,
 ) -> LevelAnchors:
     """VWAP / ORB from minute bars when available; else prior-day high/low fallback."""
+    pit = as_of_et is not None and as_of_et != "now"
     prior_q = _prior_quote(prior_raw, symbol, section=section)
     prev_high = _safe_float(prior_q.get("high")) or _safe_float(q.get("high"))
     prev_low = _safe_float(prior_q.get("low")) or _safe_float(q.get("low"))
@@ -241,8 +259,11 @@ def compute_anchors(
     )
 
     bars = _ohlcv_bars_from_raw(raw, symbol, trading_day)
-    if not bars:
-        bars = _ohlcv_bars_yfinance(symbol, trading_day)
+    bars = _filter_bars_as_of(bars, trading_day, as_of_et)
+    if not bars and not pit:
+        bars = _ohlcv_bars_yfinance(symbol, trading_day, as_of_et=as_of_et)
+    elif not bars and pit and as_of_et is not None and as_of_et != "now":
+        bars = _ohlcv_bars_yfinance(symbol, trading_day, as_of_et=as_of_et)
 
     vwap = _compute_vwap(bars) if bars else None
     orb_high, orb_low = _compute_orb(bars, trading_day) if bars else (None, None)

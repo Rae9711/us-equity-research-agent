@@ -79,7 +79,7 @@ def _bullish_raw() -> dict:
     }
 
 
-def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day):  # noqa: ARG001
+def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  # noqa: ARG001
     section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
         "sector" if symbol == "SMH" else "stocks"
     )

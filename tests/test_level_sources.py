@@ -102,7 +102,7 @@ def test_why_vs_runner_up():
     assert "RS" in text
 
 
-def _mock_obs(symbol, raw, prior_raw, trading_day):  # noqa: ARG001
+def _mock_obs(symbol, raw, prior_raw, trading_day, **kwargs):  # noqa: ARG001
     section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
         "sector" if symbol == "SMH" else "stocks"
     )

@@ -1,13 +1,22 @@
-"""Resolve session quotes across holidays and stale Step 0 snapshots."""
+"""Resolve session quotes across holidays and stale Step 0 snapshots.
+
+Point-in-time (PIT): when *as_of_et* is a scheduled time (not ``now``), quotes
+are resolved from frozen snapshots / raw only — never live intraday.
+"""
 
 from __future__ import annotations
 
-from datetime import date
-from typing import Any
+import logging
+from datetime import date, datetime, time
+from typing import Any, Literal, Union
 
 import yfinance as yf
 
-from src.utils.trading_calendar import prior_trading_day
+from src.utils.trading_calendar import ET, prior_trading_day
+
+logger = logging.getLogger(__name__)
+
+AsOf = Union[time, Literal["now"], None]
 
 
 def _safe_float(d: dict[str, Any], *keys: str, default: float | None = None) -> float | None:
@@ -106,14 +115,41 @@ def observation_from_quote(
     }
 
 
+def _as_of_cutoff(trading_date: date, as_of_et: time) -> datetime:
+    return ET.localize(datetime.combine(trading_date, as_of_et))
+
+
+def _filter_yfinance_bars(hist, trading_date: date, as_of_et: time):
+    """Return hist rows up to as_of_et (inclusive)."""
+    if hist.empty:
+        return hist
+    cutoff = _as_of_cutoff(trading_date, as_of_et)
+    mask = []
+    for idx in hist.index:
+        ts = idx.to_pydatetime()
+        if ts.tzinfo is None:
+            ts = ET.localize(ts)
+        else:
+            ts = ts.astimezone(ET)
+        mask.append(ts <= cutoff)
+    return hist[mask]
+
+
 def intraday_session_quote(
     ticker: str,
     trading_date: date,
     prior_close: float | None = None,
+    *,
+    as_of_et: AsOf = None,
 ) -> dict[str, Any]:
-    """Today's open/last vs prior trading session close (yfinance 1m bars)."""
+    """Today's open/last vs prior close (yfinance 1m bars).
+
+    When *as_of_et* is a time, only bars up to that moment are used.
+    """
     t = yf.Ticker(ticker)
     hist = t.history(period="1d", interval="1m", prepost=True)
+    if as_of_et is not None and as_of_et != "now":
+        hist = _filter_yfinance_bars(hist, trading_date, as_of_et)
     if hist.empty:
         return {"ticker": ticker, "error": "no intraday data"}
 
@@ -134,7 +170,7 @@ def intraday_session_quote(
     last_px = float(hist.iloc[-1]["Close"])
     gap_pct = round((open_px - prev_f) / prev_f * 100, 2)
     chg_pct = round((last_px - prev_f) / prev_f * 100, 2)
-    return {
+    obs: dict[str, Any] = {
         "ticker": ticker,
         "prev_close": round(prev_f, 4),
         "open": round(open_px, 4),
@@ -144,6 +180,9 @@ def intraday_session_quote(
         "gap": _gap_label(gap_pct),
         "source": "intraday",
     }
+    if as_of_et is not None and as_of_et != "now":
+        obs["price_as_of"] = _as_of_cutoff(trading_date, as_of_et).isoformat()
+    return obs
 
 
 def _observation_from_raw(
@@ -167,10 +206,51 @@ def _observation_from_raw(
     pc = prior_close if prior_close is not None else _safe_float(q, "prev_close")
     obs = observation_from_quote(q, prev_close=pc)
     obs["source"] = "raw"
-    price_as_of = q.get("data_as_of") or raw.get("collected_at")
+    price_as_of = q.get("data_as_of") or raw.get("collected_at") or raw.get("data_as_of")
     if price_as_of:
         obs["price_as_of"] = price_as_of
     return obs
+
+
+def _is_pit(as_of_et: AsOf, prefer_raw: bool) -> bool:
+    if as_of_et == "now":
+        return False
+    if as_of_et is not None:
+        return True
+    return prefer_raw
+
+
+def get_quote(
+    symbol: str,
+    trading_date: date,
+    as_of_et: AsOf = None,
+    *,
+    raw: dict[str, Any] | None = None,
+    prior_raw: dict[str, Any] | None = None,
+    section: str = "market",
+    prior_section: str | None = None,
+) -> dict[str, Any]:
+    """Resolve a quote as-of a decision boundary.
+
+    Never uses live intraday unless *as_of_et* is ``now``.
+    """
+    if as_of_et == "now":
+        logger.warning(
+            "get_quote(%s, %s, as_of=now) — using LIVE intraday (debug only)",
+            symbol,
+            trading_date,
+        )
+    prefer_raw = _is_pit(as_of_et, prefer_raw=False)
+    return session_observation(
+        symbol,
+        raw or {},
+        prior_raw or {},
+        trading_date,
+        section=section,
+        prior_section=prior_section,
+        prefer_raw=prefer_raw,
+        as_of_et=as_of_et,
+    )
 
 
 def session_observation(
@@ -182,13 +262,10 @@ def session_observation(
     section: str = "market",
     prior_section: str | None = None,
     prefer_raw: bool = False,
+    as_of_et: AsOf = None,
 ) -> dict[str, Any]:
-    """Best-effort quote for trading_date.
-
-    When *prefer_raw* is True (Step 1 morning snapshot), use the Step 0 raw
-    quote so afternoon reruns do not rewrite entry levels with live intraday.
-    Otherwise prefer live intraday, then fall back to raw.
-    """
+    """Best-effort quote for trading_date at a decision boundary."""
+    pit = _is_pit(as_of_et, prefer_raw)
     prior_day = prior_trading_day(trading_date)
     prior_close = prior_close_from_raw(
         prior_raw,
@@ -196,22 +273,27 @@ def session_observation(
         ticker=ticker,
         prior_section=prior_section,
     )
-    if prior_close is None:
+    if prior_close is None and not pit:
         prior_close = prior_close_from_yfinance(ticker, prior_day)
 
-    if prefer_raw:
-        raw_obs = _observation_from_raw(
-            ticker, raw, trading_date, section=section, prior_close=prior_close
-        )
+    raw_obs = _observation_from_raw(
+        ticker, raw, trading_date, section=section, prior_close=prior_close
+    )
+
+    if pit:
         if raw_obs is not None:
+            if as_of_et is not None and as_of_et != "now":
+                raw_obs["price_as_of"] = _as_of_cutoff(trading_date, as_of_et).isoformat()
             return raw_obs
-        intraday = intraday_session_quote(ticker, trading_date, prior_close)
-        if "error" not in intraday:
-            intraday["source"] = "intraday"
-            return intraday
+        if as_of_et is not None and as_of_et != "now":
+            intraday = intraday_session_quote(
+                ticker, trading_date, prior_close, as_of_et=as_of_et
+            )
+            if "error" not in intraday:
+                return intraday
         return {
             "ticker": ticker,
-            "error": "no raw or intraday quote",
+            "error": "no PIT quote available",
             "prev_close": round(prior_close, 4) if prior_close is not None else None,
         }
 
@@ -220,9 +302,6 @@ def session_observation(
         intraday["source"] = "intraday"
         return intraday
 
-    raw_obs = _observation_from_raw(
-        ticker, raw, trading_date, section=section, prior_close=prior_close
-    )
     if raw_obs is not None:
         return raw_obs
 
@@ -243,6 +322,7 @@ def session_change_pct(
     *,
     section: str = "market",
     prior_section: str | None = None,
+    as_of_et: AsOf = None,
 ) -> float | None:
     obs = session_observation(
         ticker,
@@ -251,6 +331,7 @@ def session_change_pct(
         trading_date,
         section=section,
         prior_section=prior_section,
+        as_of_et=as_of_et,
     )
     if "error" in obs:
         return None

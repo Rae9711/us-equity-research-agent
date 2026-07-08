@@ -5,6 +5,7 @@ import logging
 
 from src.db import init_db
 from src.research.morning import run_morning_research
+from src.utils.pit_snapshots import parse_as_of
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +26,16 @@ def main() -> None:
         action="store_true",
         help="Re-render report + DB conclusions from existing morning.json",
     )
+    parser.add_argument(
+        "--as-of",
+        dest="as_of",
+        help="Decision time (HH:MM ET). Default: 08:00. Use 'now' for live debug.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing morning.json / PIT snapshot",
+    )
     args = parser.parse_args()
 
     init_db()
@@ -41,7 +52,12 @@ def main() -> None:
         print(f"Morning resync done — {payload.get('trading_date')}")
         return
 
-    payload = run_morning_research(trading_date, skip_llm=args.skip_llm)
+    payload = run_morning_research(
+        trading_date,
+        skip_llm=args.skip_llm,
+        as_of_et=parse_as_of(args.as_of, step_num=1),
+        force=args.force,
+    )
     print(f"Morning research done — Bias: {payload.get('bias')} · LLM: {payload.get('llm_used')}")
 
 

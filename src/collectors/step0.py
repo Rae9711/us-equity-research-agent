@@ -17,6 +17,7 @@ from src.db import ConclusionRecord, DailyRun
 from src.db.session import get_session
 from src.utils.data_freshness import freshness_dict
 from src.utils.paths import raw_data_path
+from src.utils.pit_snapshots import save_snapshot, step_label
 from src.utils.trading_calendar import ET, prior_trading_day, prior_close_utc_iso, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ def _flatten_missing(checklist: dict[str, Any], prefix: str) -> list[str]:
     return missing
 
 
-def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
+def collect_step0(trading_date: date | None = None, *, force: bool = False) -> dict[str, Any]:
     trading_date = trading_date or today_et()
     prior_day = prior_trading_day(trading_date)
     collected_at = datetime.now(ET).isoformat()
@@ -119,6 +120,8 @@ def collect_step0(trading_date: date | None = None) -> dict[str, Any]:
     out_path = raw_data_path(trading_date.isoformat())
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("Wrote raw data to %s (ready=%s)", out_path, data_ready)
+
+    save_snapshot(trading_date, step_label(0), payload, force=force)
     return payload
 
 
@@ -162,10 +165,10 @@ def _persist_run(payload: dict[str, Any]) -> None:
         session.close()
 
 
-def run_step0(trading_date: date | None = None) -> dict[str, Any]:
+def run_step0(trading_date: date | None = None, *, force: bool = False) -> dict[str, Any]:
     d = require_trading_day(trading_date, job="run_step0")
     if d is None:
         return skipped_non_trading_day(trading_date)
-    payload = collect_step0(d)
+    payload = collect_step0(d, force=force)
     _persist_run(payload)
     return payload

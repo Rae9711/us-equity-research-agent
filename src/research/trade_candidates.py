@@ -12,8 +12,8 @@ final_score formula (documented):
 from __future__ import annotations
 
 import json
-from datetime import date
-from typing import Any
+from datetime import date, time
+from typing import Any, Literal
 
 from src.research.edges import compute_edges
 from src.research.level_sources import compute_anchors, derive_trade_levels
@@ -103,10 +103,18 @@ def _observation(
     raw: dict[str, Any],
     prior_raw: dict[str, Any],
     trading_day: date,
+    *,
+    as_of_et: time | Literal["now"] | None = None,
 ) -> dict[str, Any]:
     section = _SYMBOL_SECTION.get(symbol.upper(), "stocks")
     return session_observation(
-        symbol, raw, prior_raw, trading_day, section=section, prefer_raw=True
+        symbol,
+        raw,
+        prior_raw,
+        trading_day,
+        section=section,
+        prefer_raw=True,
+        as_of_et=as_of_et,
     )
 
 
@@ -492,10 +500,18 @@ def _build_trade_slot(
     trading_day: date,
     section: str,
     q: dict[str, Any],
+    as_of_et: time | Literal["now"] | None = None,
 ) -> dict[str, Any]:
     current = _safe_float(obs.get("last")) or _safe_float(obs.get("close")) or row["current_price"]
     anchors = compute_anchors(
-        row["symbol"], raw, prior_raw, trading_day, section=section, q=q, obs=obs
+        row["symbol"],
+        raw,
+        prior_raw,
+        trading_day,
+        section=section,
+        q=q,
+        obs=obs,
+        as_of_et=as_of_et,
     )
     levels = derive_trade_levels(
         direction,
@@ -606,6 +622,7 @@ def _decision_tree(
     prior_raw: dict[str, Any],
     trading_day: date | None,
     quote_by_sym: dict[str, dict[str, Any]],
+    as_of_et: time | Literal["now"] | None = None,
 ) -> dict[str, Any]:
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
@@ -646,6 +663,7 @@ def _decision_tree(
             trading_day=trading_day or date.today(),
             section=section,
             q=quote_by_sym.get(sym, {}),
+            as_of_et=as_of_et,
         )
         slots[slot_names[i]] = slot
         slots["stock_trades"].append({
@@ -736,6 +754,7 @@ def compute_trade_decision(
     regime_label: str = "Range",
     regime_confidence: float = 0.5,
     edges: dict[str, Any] | None = None,
+    as_of_et: time | Literal["now"] | None = None,
 ) -> dict[str, Any]:
     """Rank trade candidates and pick best trades for morning.json (v2)."""
     del regime_label, regime_confidence  # kept for API compat
@@ -764,7 +783,7 @@ def compute_trade_decision(
     obs_by_sym: dict[str, dict[str, Any]] = {}
     if trading_day:
         for sym in CANDIDATE_SYMBOLS:
-            obs = _observation(sym, raw, prior_raw, trading_day)
+            obs = _observation(sym, raw, prior_raw, trading_day, as_of_et=as_of_et)
             obs_by_sym[sym] = obs
             if "error" not in obs:
                 sym_pcts[sym] = obs.get("change_pct")
@@ -846,6 +865,7 @@ def compute_trade_decision(
         prior_raw=prior_raw,
         trading_day=trading_day,
         quote_by_sym=quote_by_sym,
+        as_of_et=as_of_et,
     )
     best_opportunity = _to_best_opportunity(
         best_trades.get("primary"),

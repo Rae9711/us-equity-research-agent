@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
-from typing import Any
+from datetime import date, datetime, time
+from typing import Any, Literal
 
 from pytz import timezone
 
@@ -18,6 +18,14 @@ from src.research.report import render_morning_report
 from src.research.rules import compute_rule_parts
 from src.utils.data_freshness import guard_fresh_raw
 from src.utils.paths import morning_json_path, morning_report_path, raw_data_path
+from src.utils.pit_snapshots import (
+    as_of_et_iso,
+    format_as_of_display,
+    pit_raw_for_step,
+    save_snapshot,
+    step_label,
+    step_scheduled_time,
+)
 from src.utils.trading_calendar import ET, require_trading_day, skipped_non_trading_day, today_et
 
 logger = logging.getLogger(__name__)
@@ -83,17 +91,45 @@ def run_morning_research(
     trading_date: date | None = None,
     *,
     skip_llm: bool = False,
+    as_of_et: time | Literal["now"] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     d = require_trading_day(trading_date, job="run_morning_research")
     if d is None:
         return skipped_non_trading_day(trading_date)
     trading_date = d
     date_str = trading_date.isoformat()
+    pit_as_of = as_of_et if as_of_et is not None else step_scheduled_time(1)
+    if pit_as_of != "now":
+        logger.info(
+            "Morning research PIT mode — decision as-of %s ET",
+            pit_as_of.strftime("%H:%M"),
+        )
+    elif as_of_et == "now":
+        logger.warning("Morning research LIVE mode (--as-of now) — debug only")
+
+    # Protect morning.json from afternoon overwrite
+    mpath = morning_json_path(date_str)
+    if mpath.exists() and not force and pit_as_of != "now":
+        existing = json.loads(mpath.read_text(encoding="utf-8"))
+        if existing.get("decision_as_of"):
+            logger.info(
+                "morning.json exists with decision_as_of=%s — skipping (use --force)",
+                existing.get("decision_as_of"),
+            )
+            return existing
+
     logger.info("Morning research starting for %s", date_str)
 
     raw, stale = guard_fresh_raw(trading_date, step="run_morning_research")
     if stale:
         return stale
+
+    # Use Step 0 PIT snapshot when replaying (not live raw)
+    if pit_as_of != "now":
+        pit_raw = pit_raw_for_step(trading_date, 1, fallback_raw=raw)
+        if pit_raw:
+            raw = pit_raw
 
     # Step 1a: R0 Regime Engine (must run before P1-P16)
     regime_model = None
@@ -112,7 +148,7 @@ def run_morning_research(
     context = build_research_context(raw)
     # Inject regime context so LLM can use it
     context["r0_regime"] = {"label": regime_model.label, "confidence": regime_model.confidence}
-    rule_bundle = compute_rule_parts(raw)
+    rule_bundle = compute_rule_parts(raw, as_of_et=pit_as_of)
 
     llm_parts: dict[str, Any] = {}
     if not skip_llm:
@@ -194,6 +230,7 @@ def run_morning_research(
             regime_label=regime_model.label,
             regime_confidence=regime_model.confidence,
             edges=rule_bundle.get("edges"),
+            as_of_et=pit_as_of,
         )
         parts["P18"] = build_p18_part(
             trade_decision["trade_candidates"],
@@ -231,6 +268,8 @@ def run_morning_research(
 
     payload: dict[str, Any] = {
         "generated_at": datetime.now(ET).isoformat(),
+        "decision_as_of": as_of_et_iso(trading_date, pit_as_of),
+        "decision_as_of_et": format_as_of_display(pit_as_of, step_num=1),
         "trading_date": date_str,
         "prior_trading_day": raw.get("prior_trading_day"),
         "data_ready": raw.get("data_ready"),
@@ -267,6 +306,15 @@ def run_morning_research(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     logger.info("Wrote morning report to %s", morning_report_path(date_str))
+
+    # Save Step 1 PIT snapshot (morning decision output + raw used)
+    if pit_as_of != "now":
+        save_snapshot(
+            trading_date,
+            step_label(1),
+            {"raw": raw, "morning": payload},
+            force=force,
+        )
 
     # Update Market Case with morning data
     try:

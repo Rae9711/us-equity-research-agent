@@ -368,7 +368,10 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "hypothesis": hypothesis_line[:200],
         "has_morning": True,
         "generated_at": morning.get("generated_at"),
-        "data_as_of_et": _format_data_as_of_et(morning.get("generated_at")),
+        "decision_as_of": morning.get("decision_as_of"),
+        "data_as_of_et": morning.get("decision_as_of_et")
+        or _format_data_as_of_et(morning.get("decision_as_of"))
+        or _format_data_as_of_et(morning.get("generated_at")),
         "advisory": "ADVISORY — 不构成投资建议",
         "trade_candidates": morning.get("trade_candidates") or [],
         "best_opportunity": best,
