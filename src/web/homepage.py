@@ -347,9 +347,20 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         ),
         "confidence": exec_sum.get("confidence") or best.get("confidence"),
         "entry": exec_sum.get("entry") or best.get("entry", "—"),
+        "entry_source": exec_sum.get("entry_source") or (primary or {}).get("entry_source"),
         "stop": exec_sum.get("stop") or best.get("stop", "—"),
+        "stop_source": exec_sum.get("stop_source") or (primary or {}).get("stop_source"),
         "target": exec_sum.get("target") or best.get("target", "—"),
+        "target_source": exec_sum.get("target_source") or (primary or {}).get("target_source"),
         "why_chain": exec_sum.get("why_chain") or best.get("why_chain", "—"),
+        "why_factors": exec_sum.get("why_factors") or (primary or {}).get("why_factors") or [],
+        "why_vs_runner_up": exec_sum.get("why_vs_runner_up") or (primary or {}).get("why_vs_runner_up"),
+        "edge_type": exec_sum.get("edge_type") or (primary or {}).get("edge_type"),
+        "win_prob": (primary or {}).get("win_prob") or best.get("win_prob"),
+        "expected_return_pct": (primary or {}).get("expected_return_pct") or best.get("expected_return_pct"),
+        "risk_reward": (primary or {}).get("risk_reward") or best.get("risk_reward"),
+        "score_formula_display": (primary or {}).get("score_formula_display") or best.get("score_formula_display"),
+        "confidence_stars": (primary or {}).get("confidence_stars"),
         "one_liner": exec_sum.get("one_liner") or best.get("one_liner", "—"),
         "trade_action": trade_action,
         "invalidation": _extract_invalidation(morning),
@@ -361,6 +372,7 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "advisory": "ADVISORY — 不构成投资建议",
         "trade_candidates": morning.get("trade_candidates") or [],
         "best_opportunity": best,
+        "primary_trade": primary,
     }
 
 

@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from src.research.edges import compute_edges, format_p13_from_edges
+from src.research.level_sources import format_if_level
 from src.utils.paths import raw_data_path
 from src.utils.quote_resolve import session_change_pct
 from src.utils.trading_calendar import prior_trading_day
@@ -731,6 +732,15 @@ def compute_rule_parts(raw: dict[str, Any]) -> dict[str, Any]:
             smh_pct,
             qqq_pct,
         ),
+        "P16": _build_p16(
+            qqq_q=qqq_q,
+            prior_raw=prior_raw,
+            total=total,
+            bias=bias,
+            catalyst_today=catalyst_today,
+            chip_selloff=chip_selloff,
+            p16_gate_hint="Trade" if total >= 2 else "Wait",
+        ),
     }
     return {
         "parts": parts,
@@ -834,6 +844,70 @@ def _build_p15(
         "confidence": 0.65,
         "one_liner": f"围绕 {driver_type}（{driver}）的可验证情景",
         "body_md": body,
+    }
+
+
+def _build_p16(
+    *,
+    qqq_q: dict[str, Any],
+    prior_raw: dict[str, Any],
+    total: int,
+    bias: str,
+    catalyst_today: bool,
+    chip_selloff: bool,
+    p16_gate_hint: str,
+) -> dict[str, Any]:
+    """Trading plan with labeled IF/THEN levels (source tags on every price)."""
+    prior_qqq = ((prior_raw.get("market") or {}).get("quotes") or {}).get("QQQ") or {}
+    prev_high = prior_qqq.get("high") or qqq_q.get("high")
+    prev_low = prior_qqq.get("low") or qqq_q.get("low")
+    prior_close = prior_qqq.get("close") or qqq_q.get("prev_close")
+
+    def _lvl(px: Any, src: str) -> str:
+        try:
+            return format_if_level(float(px), src)
+        except (TypeError, ValueError):
+            return "—"
+
+    high_tag = _lvl(prev_high, "prev_high") if prev_high is not None else "—"
+    low_tag = _lvl(prev_low, "prev_low") if prev_low is not None else "—"
+    close_tag = _lvl(prior_close, "prior_close") if prior_close is not None else "—"
+
+    if chip_selloff:
+        lines = [
+            f"IF QQQ < {low_tag} THEN 放弃追多 / 观望 SMH 续跌",
+            f"IF QQQ > {high_tag} THEN 短线反弹 Call（需 SMH 同步走强）",
+            f"IF QQQ 在 {low_tag}–{high_tag} 区间内 THEN Wait",
+        ]
+        gate = "Wait"
+    elif catalyst_today:
+        lines = [
+            f"IF QQQ > {high_tag} THEN 数据利好突破 → Call",
+            f"IF QQQ < {low_tag} THEN 数据利空破位 → Put / 放弃",
+            f"IF QQQ 在 {close_tag} 附近震荡 THEN Wait",
+        ]
+        gate = p16_gate_hint
+    else:
+        lines = [
+            f"IF QQQ > {high_tag} THEN 突破做多 / Call",
+            f"IF QQQ < {low_tag} THEN 破位放弃 / Put",
+            f"IF QQQ 在区间内 THEN Wait",
+        ]
+        gate = "Trade" if total >= 2 and "bull" in bias.lower() else "Wait"
+
+    if total <= -2:
+        gate = "No Trade"
+
+    return {
+        "judgment": f"计划：{gate}",
+        "confidence": 0.65,
+        "one_liner": lines[0],
+        "body_md": "\n".join(lines),
+        "levels": {
+            "qqq_prev_high": prev_high,
+            "qqq_prev_low": prev_low,
+            "qqq_prior_close": prior_close,
+        },
     }
 
 

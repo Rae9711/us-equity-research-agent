@@ -16,6 +16,7 @@ from datetime import date
 from typing import Any
 
 from src.research.edges import compute_edges
+from src.research.level_sources import compute_anchors, derive_trade_levels
 from src.utils.paths import data_root
 from src.utils.quote_resolve import session_observation
 from src.utils.trading_calendar import prior_trading_day
@@ -104,7 +105,9 @@ def _observation(
     trading_day: date,
 ) -> dict[str, Any]:
     section = _SYMBOL_SECTION.get(symbol.upper(), "stocks")
-    return session_observation(symbol, raw, prior_raw, trading_day, section=section)
+    return session_observation(
+        symbol, raw, prior_raw, trading_day, section=section, prefer_raw=True
+    )
 
 
 def _bias_stars(bias: str) -> str:
@@ -170,28 +173,108 @@ def _instrument(symbol: str, direction: str, p9: dict[str, Any]) -> str:
     return "—"
 
 
-def _price_levels_from_obs(
-    obs: dict[str, Any],
-    direction: str,
-    expected_high: float,
-    expected_low: float,
-) -> tuple[str, str, list[str]]:
-    current = _safe_float(obs.get("last")) or _safe_float(obs.get("close"))
-    if current is None or current <= 0:
-        return "—", "—", []
+def _rr_weight_display(rr: float) -> float:
+    return round(_rr_weight(rr), 2)
 
-    if direction == "LONG":
-        entry = f"Above {current:.1f}"
-        stop = f"{expected_low:.1f}"
-        targets = [f"{expected_high:.1f}"]
-    elif direction == "SHORT":
-        entry = f"Below {current:.1f}"
-        stop = f"{expected_high:.1f}"
-        targets = [f"{expected_low:.1f}"]
-    else:
-        return "—", "—", []
 
-    return entry, stop, targets
+def _score_formula_display(win_prob: float, expected_return_pct: float, rr: float) -> str:
+    rr_w = _rr_weight_display(rr)
+    return (
+        f"final = win_prob({win_prob:.0f}%) × ER({expected_return_pct:.1f}%) "
+        f"× rr_weight({rr_w}) / 100"
+    )
+
+
+def _beta_proxy(sym_pct: float | None, qqq_pct: float | None) -> float | None:
+    if sym_pct is None or qqq_pct is None or abs(qqq_pct) < 0.05:
+        return None
+    return round(sym_pct / qqq_pct, 2)
+
+
+def _extended_gap_penalty(gap_pct: float | None, has_news_catalyst: bool) -> float:
+    if gap_pct is None or has_news_catalyst:
+        return 0.0
+    if gap_pct >= EXTENDED_GAP_PCT:
+        return 12.0
+    if gap_pct > 3.0:
+        return 6.0
+    return 0.0
+
+
+def _infer_edge_type(
+    symbol: str,
+    *,
+    rs_vs_qqq: float | None,
+    driver_type: str,
+    edges: dict[str, Any] | None,
+) -> str:
+    edges = edges or {}
+    if symbol in ("NVDA", "TSLA") and edges.get("stock_edge", {}).get("edge") == "YES":
+        return "Stock Edge"
+    if edges.get("sector_edge", {}).get("edge") == "YES" and symbol in ("SMH", "NVDA"):
+        return "Sector Edge"
+    if rs_vs_qqq is not None and rs_vs_qqq < -0.3:
+        return "Relative Weakness"
+    if rs_vs_qqq is not None and rs_vs_qqq > 0.5:
+        return "Relative Strength"
+    dt = (driver_type or "").lower()
+    if dt in ("momentum", "ai"):
+        return "Momentum"
+    if symbol in ("QQQ", "SPY", "TQQQ"):
+        return "Index Edge"
+    return "Range"
+
+
+def _why_vs_runner_up(top: dict[str, Any], runner_up: dict[str, Any] | None) -> str:
+    if not runner_up:
+        return "—"
+    parts: list[str] = []
+    top_rs = top.get("relative_strength")
+    run_rs = runner_up.get("relative_strength")
+    if top_rs is not None and run_rs is not None:
+        parts.append(
+            f"{top['symbol']} RS {top_rs:+.1f}% vs {runner_up['symbol']} {run_rs:+.1f}%"
+        )
+    top_er = top.get("expected_return_pct")
+    run_er = runner_up.get("expected_return_pct")
+    if top_er is not None and run_er is not None and top_er > run_er:
+        parts.append(f"ER {top_er:.1f}% vs {run_er:.1f}%")
+    top_wp = top.get("win_prob")
+    run_wp = runner_up.get("win_prob")
+    if top_wp is not None and run_wp is not None and top_wp > run_wp:
+        parts.append(f"Win% {top_wp:.0f} vs {run_wp:.0f}")
+    beta = top.get("factor_breakdown", {}).get("beta_proxy")
+    run_beta = runner_up.get("factor_breakdown", {}).get("beta_proxy")
+    if beta is not None and run_beta is not None and beta > run_beta:
+        parts.append(f"higher beta ({beta:.1f} vs {run_beta:.1f})")
+    if top_rs is not None and top_rs < -0.2:
+        parts.append("relative weakness play")
+    elif top_rs is not None and top_rs > 0.3:
+        parts.append("relative strength")
+    return "；".join(parts) if parts else f"Score {top.get('final_score')} vs {runner_up.get('final_score')}"
+
+
+def _build_factor_breakdown(
+    *,
+    rs_vs_qqq: float | None,
+    gap_pct: float | None,
+    beta: float | None,
+    volume_ok: bool,
+    news_count: int,
+    extended_gap_penalty: float,
+    vix_chg: float | None,
+    prior_day_chg: float | None,
+) -> dict[str, Any]:
+    return {
+        "relative_strength_vs_qqq": round(rs_vs_qqq, 2) if rs_vs_qqq is not None else None,
+        "gap_pct": round(gap_pct, 2) if gap_pct is not None else None,
+        "beta_proxy": beta,
+        "volume_signal": volume_ok,
+        "news_count": news_count,
+        "extended_gap_penalty": round(extended_gap_penalty, 1),
+        "vix_change_pct": round(vix_chg, 2) if vix_chg is not None else None,
+        "prior_day_change_pct": round(prior_day_chg, 2) if prior_day_chg is not None else None,
+    }
 
 
 def _rr_numeric(upside_pct: float, downside_pct: float) -> float:
@@ -217,6 +300,8 @@ def _score_candidate_v2(
     driver_type: str,
     has_news_catalyst: bool,
     q: dict[str, Any],
+    qqq_pct: float | None = None,
+    edges: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Score one symbol for today's tradeability at ~8:00 AM."""
     current = _safe_float(obs.get("last")) or _safe_float(obs.get("close"))
@@ -322,6 +407,27 @@ def _score_candidate_v2(
     rr_w = _rr_weight(risk_reward)
     final_score = round(win_prob * max(expected_return_pct, 0) * rr_w / 100.0, 2)
 
+    sym_pct = obs.get("change_pct")
+    beta = _beta_proxy(
+        _safe_float(sym_pct) if sym_pct is not None else None,
+        qqq_pct,
+    )
+    gap_penalty = _extended_gap_penalty(gap_pct, has_news_catalyst)
+    factor_breakdown = _build_factor_breakdown(
+        rs_vs_qqq=rs_vs_qqq,
+        gap_pct=gap_pct,
+        beta=beta,
+        volume_ok=volume_ok,
+        news_count=news_count,
+        extended_gap_penalty=gap_penalty,
+        vix_chg=vix_chg,
+        prior_day_chg=prior_day_chg,
+    )
+    edge_type = _infer_edge_type(
+        symbol, rs_vs_qqq=rs_vs_qqq, driver_type=driver_type, edges=edges
+    )
+    score_formula = _score_formula_display(win_prob, expected_return_pct, risk_reward)
+
     if expected_return_pct < MIN_UPSIDE_PCT:
         trade_action = "Pass"
         why_factors.append(f"上行空间 <{MIN_UPSIDE_PCT}%")
@@ -353,6 +459,11 @@ def _score_candidate_v2(
         "why": " · ".join(why_factors[:4]) if why_factors else "—",
         "score": round(final_score * 10),
         "news_count": news_count,
+        "factor_breakdown": factor_breakdown,
+        "edge_type": edge_type,
+        "score_formula_display": score_formula,
+        "rr_weight": _rr_weight_display(risk_reward),
+        "why_vs_runner_up": "—",
         "advisory": True,
     }
 
@@ -376,33 +487,57 @@ def _build_trade_slot(
     direction: str,
     p9: dict[str, Any],
     obs: dict[str, Any],
+    raw: dict[str, Any],
+    prior_raw: dict[str, Any],
+    trading_day: date,
+    section: str,
+    q: dict[str, Any],
 ) -> dict[str, Any]:
-    entry, stop, targets = _price_levels_from_obs(
-        obs,
+    current = _safe_float(obs.get("last")) or _safe_float(obs.get("close")) or row["current_price"]
+    anchors = compute_anchors(
+        row["symbol"], raw, prior_raw, trading_day, section=section, q=q, obs=obs
+    )
+    levels = derive_trade_levels(
         direction,
-        row["expected_high"],
-        row["expected_low"],
+        anchors,
+        current=current,
+        expected_high=row["expected_high"],
+        expected_low=row["expected_low"],
+        expected_close=row["expected_close"],
     )
     inst = _instrument(row["symbol"], direction, p9)
     conf = int(min(95, max(40, row["win_prob"])))
+    conf_stars = "★" * min(5, max(1, conf // 20)) + "☆" * (5 - min(5, max(1, conf // 20)))
     return {
         "rank": rank,
         "symbol": row["symbol"],
         "direction": direction,
         "instrument": inst,
         "confidence": conf,
+        "confidence_stars": conf_stars,
         "expected_move": f"{row['expected_return_pct']:+.2f}%",
         "expected_return_pct": row["expected_return_pct"],
         "win_prob": row["win_prob"],
         "risk_reward": row["risk_reward"],
         "final_score": row["final_score"],
         "trade_action": row["trade_action"],
-        "entry": entry,
-        "stop": stop,
-        "target": " / ".join(targets) if targets else "—",
-        "targets": targets,
+        "entry": levels["entry"],
+        "entry_source": levels.get("entry_source"),
+        "entry_price": levels.get("entry_price"),
+        "stop": levels["stop"],
+        "stop_source": levels.get("stop_source"),
+        "stop_price": levels.get("stop_price"),
+        "target": levels["target"],
+        "target_source": levels.get("target_source"),
+        "target_price": levels.get("target_price"),
+        "targets": levels.get("targets") or [],
+        "level_anchors": levels.get("level_anchors"),
         "why": row["why_factors"],
         "why_chain": row["why"],
+        "why_vs_runner_up": row.get("why_vs_runner_up", "—"),
+        "factor_breakdown": row.get("factor_breakdown") or {},
+        "edge_type": row.get("edge_type"),
+        "score_formula_display": row.get("score_formula_display"),
         "expected_high": row["expected_high"],
         "expected_low": row["expected_low"],
         "expected_close": row["expected_close"],
@@ -467,6 +602,10 @@ def _decision_tree(
     p9: dict[str, Any],
     obs_by_sym: dict[str, dict[str, Any]],
     p16_gate: str,
+    raw: dict[str, Any],
+    prior_raw: dict[str, Any],
+    trading_day: date | None,
+    quote_by_sym: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
@@ -494,12 +633,19 @@ def _decision_tree(
 
     slot_names = ("primary", "secondary", "watchlist")
     for i, row in enumerate(picks):
+        sym = row["symbol"]
+        section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
         slot = _build_trade_slot(
             row,
             rank=i + 1,
             direction=direction,
             p9=p9,
-            obs=obs_by_sym.get(row["symbol"], {}),
+            obs=obs_by_sym.get(sym, {}),
+            raw=raw,
+            prior_raw=prior_raw,
+            trading_day=trading_day or date.today(),
+            section=section,
+            q=quote_by_sym.get(sym, {}),
         )
         slots[slot_names[i]] = slot
         slots["stock_trades"].append({
@@ -532,20 +678,32 @@ def _to_best_opportunity(
             "symbol": primary["symbol"],
             "instrument": primary["instrument"],
             "confidence": primary["confidence"],
+            "confidence_stars": primary.get("confidence_stars"),
             "entry": primary["entry"],
+            "entry_source": primary.get("entry_source"),
+            "entry_price": primary.get("entry_price"),
             "stop": primary["stop"],
+            "stop_source": primary.get("stop_source"),
+            "stop_price": primary.get("stop_price"),
             "target": primary["target"],
+            "target_source": primary.get("target_source"),
+            "target_price": primary.get("target_price"),
             "targets": primary.get("targets") or [],
             "duration": duration,
             "why": primary.get("why") or [],
             "why_chain": primary.get("why_chain", "—"),
+            "why_vs_runner_up": primary.get("why_vs_runner_up", "—"),
+            "factor_breakdown": primary.get("factor_breakdown") or {},
+            "edge_type": primary.get("edge_type"),
+            "score_formula_display": primary.get("score_formula_display"),
+            "win_prob": primary.get("win_prob"),
+            "expected_return_pct": primary.get("expected_return_pct"),
+            "risk_reward": primary.get("risk_reward"),
+            "final_score": primary.get("final_score"),
+            "level_anchors": primary.get("level_anchors"),
             "avoid": [],
             "one_liner": one_liner,
             "p16_gate": p16_gate,
-            "expected_return_pct": primary.get("expected_return_pct"),
-            "win_prob": primary.get("win_prob"),
-            "risk_reward": primary.get("risk_reward"),
-            "final_score": primary.get("final_score"),
             "advisory": True,
         }
 
@@ -633,8 +791,10 @@ def compute_trade_decision(
     )
 
     ranked: list[dict[str, Any]] = []
+    quote_by_sym: dict[str, dict[str, Any]] = {}
     for sym in CANDIDATE_SYMBOLS:
         q = _quote(raw, sym)
+        quote_by_sym[sym] = q
         obs = obs_by_sym.get(sym, {})
         sym_pct = sym_pcts.get(sym)
         prior_chg = _prior_day_change(sym, prior_raw, prior_day) if prior_day else None
@@ -664,12 +824,16 @@ def compute_trade_decision(
             driver_type=driver_type,
             has_news_catalyst=has_catalyst,
             q=q,
+            qqq_pct=qqq_pct,
+            edges=edges,
         )
         ranked.append(row)
 
     ranked.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
     for i, row in enumerate(ranked, start=1):
         row["rank"] = i
+    if len(ranked) >= 2:
+        ranked[0]["why_vs_runner_up"] = _why_vs_runner_up(ranked[0], ranked[1])
 
     best_trades = _decision_tree(
         ranked,
@@ -678,6 +842,10 @@ def compute_trade_decision(
         p9=p9,
         obs_by_sym=obs_by_sym,
         p16_gate=p16_gate,
+        raw=raw,
+        prior_raw=prior_raw,
+        trading_day=trading_day,
+        quote_by_sym=quote_by_sym,
     )
     best_opportunity = _to_best_opportunity(
         best_trades.get("primary"),
@@ -749,6 +917,8 @@ def build_executive_summary(
 ) -> dict[str, Any]:
     primary = (best_trades or {}).get("primary")
     threshold_msg = (best_trades or {}).get("threshold_message")
+    why_factors: list[str] = []
+    entry_source = stop_source = target_source = edge_type = why_vs_runner_up = None
 
     if primary:
         best_trade = (
@@ -764,6 +934,12 @@ def build_executive_summary(
         stop = primary.get("stop", "—")
         target = primary.get("target", "—")
         why_chain = primary.get("why_chain", "—")
+        why_factors = primary.get("why_factors") or primary.get("why") or []
+        entry_source = primary.get("entry_source")
+        stop_source = primary.get("stop_source")
+        target_source = primary.get("target_source")
+        edge_type = primary.get("edge_type")
+        why_vs_runner_up = primary.get("why_vs_runner_up")
     elif threshold_msg:
         best_trade = threshold_msg
         one_liner = threshold_msg
@@ -792,9 +968,15 @@ def build_executive_summary(
         "primary_trade": primary,
         "confidence": confidence,
         "entry": entry,
+        "entry_source": entry_source if primary else None,
         "stop": stop,
+        "stop_source": stop_source if primary else None,
         "target": target,
+        "target_source": target_source if primary else None,
         "why_chain": why_chain,
+        "why_factors": why_factors if primary else [],
+        "why_vs_runner_up": why_vs_runner_up if primary else None,
+        "edge_type": edge_type if primary else None,
         "one_liner": one_liner,
         "threshold_message": threshold_msg,
         "index_trade": (best_trades or {}).get("index_trade"),

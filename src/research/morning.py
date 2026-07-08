@@ -22,7 +22,7 @@ from src.utils.trading_calendar import ET, require_trading_day, skipped_non_trad
 
 logger = logging.getLogger(__name__)
 
-RULE_PART_IDS = {"P1", "P2", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P13", "P14", "P15"}
+RULE_PART_IDS = {"P1", "P2", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P13", "P14", "P15", "P16"}
 
 
 def _is_missing(part: dict[str, Any]) -> bool:

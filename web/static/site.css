@@ -463,6 +463,58 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
   margin-bottom: 0.25rem;
 }
 
+.decision-card-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.decision-data-ts {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.level-source-tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  margin-left: 0.25rem;
+  border-radius: 4px;
+  background: #e0e7ff;
+  color: #3730a3;
+  text-transform: lowercase;
+  vertical-align: middle;
+}
+
+.edge-type-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.trade-detail-panel {
+  margin-bottom: 1.25rem;
+}
+
+.trade-level-field strong { display: block; }
+
+.score-formula {
+  font-family: ui-monospace, monospace;
+  margin: 0.35rem 0;
+}
+
+.why-factors-block { margin-top: 0.65rem; }
+.why-factors { margin: 0.35rem 0; padding-left: 1.2rem; }
+.factor-list { margin: 0.35rem 0; padding-left: 1.2rem; font-size: 0.88rem; }
+
+.decision-trade-detail { margin-top: 0.75rem; }
+.trade-detail-inline { margin-top: 0.5rem; padding: 0.65rem 0.75rem; background: #f8fafc; border-radius: 8px; }
+
 .decision-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

@@ -74,7 +74,12 @@
     <section class="panel decision-card">
       <div class="decision-card-head">
         <h2 class="section-title-inline">Executive Summary · 今日决策</h2>
-        <a class="muted" href="/today?date={{ day.trading_date }}">完整 Morning →</a>
+        <div class="decision-card-head-meta">
+          {% if decision_card.data_as_of_et %}
+          <span class="muted decision-data-ts">数据截至 {{ decision_card.data_as_of_et }}</span>
+          {% endif %}
+          <a class="muted" href="/today?date={{ day.trading_date }}">完整 Morning →</a>
+        </div>
       </div>
       <p class="advisory-banner">{{ decision_card.advisory }}</p>
       <div class="decision-grid decision-grid-exec">
@@ -96,19 +101,25 @@
         </div>
         <div class="decision-field">
           <span class="decision-label">5 · Entry</span>
-          <span class="decision-value">{{ decision_card.entry }}</span>
+          <span class="decision-value">{{ decision_card.entry }}{% if decision_card.entry_source %} <span class="level-source-tag">{{ decision_card.entry_source }}</span>{% endif %}</span>
         </div>
         <div class="decision-field">
           <span class="decision-label">6 · Stop</span>
-          <span class="decision-value">{{ decision_card.stop }}</span>
+          <span class="decision-value">{{ decision_card.stop }}{% if decision_card.stop_source %} <span class="level-source-tag">{{ decision_card.stop_source }}</span>{% endif %}</span>
         </div>
         <div class="decision-field">
           <span class="decision-label">7 · Target</span>
-          <span class="decision-value">{{ decision_card.target }}</span>
+          <span class="decision-value">{{ decision_card.target }}{% if decision_card.target_source %} <span class="level-source-tag">{{ decision_card.target_source }}</span>{% endif %}</span>
         </div>
         <div class="decision-field decision-field-wide">
           <span class="decision-label">8 · Why</span>
-          <span class="decision-value">{{ decision_card.why_chain }}</span>
+          <span class="decision-value">
+            {% if decision_card.why_factors %}
+            {{ decision_card.why_factors[:3] | join(' · ') }}
+            {% else %}
+            {{ decision_card.why_chain }}
+            {% endif %}
+          </span>
         </div>
       </div>
       {% if decision_card.one_liner and decision_card.one_liner != '—' %}
@@ -124,6 +135,22 @@
         <p class="decision-value">{{ decision_card.hypothesis }}</p>
         <p class="decision-value muted">{{ decision_card.invalidation }}</p>
       </details>
+      {% if decision_card.primary_trade or decision_card.best_opportunity %}
+      <details class="decision-trade-detail">
+        <summary class="decision-label">Trade Detail · 完整价位与因子</summary>
+        {% set pt = decision_card.primary_trade or {} %}
+        {% if pt %}
+        <div class="trade-detail-inline">
+          {% if pt.edge_type %}<p><strong>Edge：</strong>{{ pt.edge_type }}</p>{% endif %}
+          {% if pt.why_vs_runner_up and pt.why_vs_runner_up != '—' %}<p><strong>Why vs #2：</strong>{{ pt.why_vs_runner_up }}</p>{% endif %}
+          {% if pt.score_formula_display %}<p class="muted small">{{ pt.score_formula_display }}</p>{% endif %}
+          {% if pt.why_factors %}
+          <ul class="why-factors">{% for f in pt.why_factors %}<li>{{ f }}</li>{% endfor %}</ul>
+          {% endif %}
+        </div>
+        {% endif %}
+      </details>
+      {% endif %}
     </section>
 
     {% if relative_strength %}

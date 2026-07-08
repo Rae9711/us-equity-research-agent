@@ -52,6 +52,6 @@ Part ID 说明：
 - P10 driver_type + driver（规则已算，勿改）
 - P11/P13/P14 规则已算；P13 为四路 Edge（Macro/Index/Sector/Stock），P17/P18 由引擎生成
 - P15 Scenarios：可验证触发（QQQ > 昨高 → Call），禁止「Macro利好」等模糊条件
-- P16 Trading Plan：IF-THEN 三行，judgment：计划：Trade / Wait / No Trade
+- P16 Trading Plan：IF-THEN 三行，judgment：计划：Trade / Wait / No Trade；**每行价位必须标注来源**（昨日高点/昨日低点/昨收/VWAP/ORB 等），例：IF QQQ < 711 (昨日低点)
 - P17 由引擎生成；Hypothesis 应可验证
 """

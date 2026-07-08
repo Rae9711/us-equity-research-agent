@@ -146,6 +146,33 @@ def intraday_session_quote(
     }
 
 
+def _observation_from_raw(
+    ticker: str,
+    raw: dict[str, Any],
+    trading_date: date,
+    *,
+    section: str,
+    prior_close: float | None,
+) -> dict[str, Any] | None:
+    """Same-day raw quote observation, or None if missing/stale."""
+    sec = raw.get(section, {})
+    q = _quote(sec, ticker)
+    if "error" in q or q.get("close") is None:
+        return None
+
+    bar_day = quote_bar_date(q)
+    if bar_day is not None and bar_day < trading_date:
+        return None
+
+    pc = prior_close if prior_close is not None else _safe_float(q, "prev_close")
+    obs = observation_from_quote(q, prev_close=pc)
+    obs["source"] = "raw"
+    price_as_of = q.get("data_as_of") or raw.get("collected_at")
+    if price_as_of:
+        obs["price_as_of"] = price_as_of
+    return obs
+
+
 def session_observation(
     ticker: str,
     raw: dict[str, Any],
@@ -154,8 +181,14 @@ def session_observation(
     *,
     section: str = "market",
     prior_section: str | None = None,
+    prefer_raw: bool = False,
 ) -> dict[str, Any]:
-    """Best-effort quote for trading_date: intraday first, then same-day raw."""
+    """Best-effort quote for trading_date.
+
+    When *prefer_raw* is True (Step 1 morning snapshot), use the Step 0 raw
+    quote so afternoon reruns do not rewrite entry levels with live intraday.
+    Otherwise prefer live intraday, then fall back to raw.
+    """
     prior_day = prior_trading_day(trading_date)
     prior_close = prior_close_from_raw(
         prior_raw,
@@ -166,28 +199,40 @@ def session_observation(
     if prior_close is None:
         prior_close = prior_close_from_yfinance(ticker, prior_day)
 
-    intraday = intraday_session_quote(ticker, trading_date, prior_close)
-    if "error" not in intraday:
-        return intraday
-
-    sec = raw.get(section, {})
-    q = _quote(sec, ticker)
-    if "error" in q or q.get("close") is None:
-        return intraday
-
-    bar_day = quote_bar_date(q)
-    if bar_day is not None and bar_day < trading_date:
+    if prefer_raw:
+        raw_obs = _observation_from_raw(
+            ticker, raw, trading_date, section=section, prior_close=prior_close
+        )
+        if raw_obs is not None:
+            return raw_obs
+        intraday = intraday_session_quote(ticker, trading_date, prior_close)
+        if "error" not in intraday:
+            intraday["source"] = "intraday"
+            return intraday
         return {
             "ticker": ticker,
-            "error": "stale raw quote",
+            "error": "no raw or intraday quote",
             "prev_close": round(prior_close, 4) if prior_close is not None else None,
-            "quote_date": bar_day.isoformat(),
         }
 
-    pc = prior_close if prior_close is not None else _safe_float(q, "prev_close")
-    obs = observation_from_quote(q, prev_close=pc)
-    obs["source"] = "raw"
-    return obs
+    intraday = intraday_session_quote(ticker, trading_date, prior_close)
+    if "error" not in intraday:
+        intraday["source"] = "intraday"
+        return intraday
+
+    raw_obs = _observation_from_raw(
+        ticker, raw, trading_date, section=section, prior_close=prior_close
+    )
+    if raw_obs is not None:
+        return raw_obs
+
+    bar_day = quote_bar_date(_quote(raw.get(section, {}), ticker))
+    return {
+        "ticker": ticker,
+        "error": "stale raw quote",
+        "prev_close": round(prior_close, 4) if prior_close is not None else None,
+        "quote_date": bar_day.isoformat() if bar_day else None,
+    }
 
 
 def session_change_pct(

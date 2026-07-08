@@ -40,27 +40,12 @@
 
     {% set best_trades = meta.get('best_trades') or {} %}
     {% set primary = best_trades.get('primary') %}
+    {% from "_trade_detail_panel.html" import trade_detail_card %}
     {% if primary %}
-    <section class="best-opportunity-panel" id="best-opportunity">
-      <h2 class="section-title">🥇 Primary Trade</h2>
-      <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
-      <div class="best-opp-grid">
-        <div><span class="decision-label">Direction</span><strong>{{ primary.direction }}</strong></div>
-        <div><span class="decision-label">Symbol</span><strong>{{ primary.symbol }}</strong></div>
-        <div><span class="decision-label">Instrument</span><strong>{{ primary.instrument }}</strong></div>
-        <div><span class="decision-label">Win Prob</span><strong>{{ primary.win_prob }}%</strong></div>
-        <div><span class="decision-label">Expected Return</span><strong>{{ primary.expected_move }}</strong></div>
-        <div><span class="decision-label">R:R</span><strong>{{ primary.risk_reward }}</strong></div>
-        <div><span class="decision-label">Confidence</span><strong>{{ primary.confidence }}%</strong></div>
-        <div><span class="decision-label">Entry</span><strong>{{ primary.entry }}</strong></div>
-        <div><span class="decision-label">Stop</span><strong>{{ primary.stop }}</strong></div>
-        <div><span class="decision-label">Target</span><strong>{{ primary.target }}</strong></div>
-      </div>
-      <p><strong>Why：</strong>{{ primary.why_chain or (primary.why | join(' · ')) }}</p>
-      {% if meta.get('best_opportunity') and meta.best_opportunity.one_liner %}
-      <p class="best-opp-oneliner">「{{ meta.best_opportunity.one_liner }}」</p>
-      {% endif %}
-    </section>
+    {{ trade_detail_card(primary, '🥇 Primary Trade · #' ~ primary.rank|string) }}
+    {% if meta.get('best_opportunity') and meta.best_opportunity.one_liner %}
+    <p class="best-opp-oneliner">「{{ meta.best_opportunity.one_liner }}」</p>
+    {% endif %}
     {% elif best_trades.get('threshold_message') %}
     <section class="best-opportunity-panel threshold-panel" id="best-opportunity">
       <h2 class="section-title">今日交易</h2>
@@ -118,14 +103,28 @@
                 <details class="candidate-detail">
                   <summary>详情</summary>
                   <div class="candidate-detail-card">
-                    <p><strong>{{ row.symbol }}</strong> · {{ row.trade_action }} · ${{ row.current_price }}</p>
-                    <p>Expected High {{ row.expected_high }} · Low {{ row.expected_low }} · Close {{ row.expected_close }}</p>
-                    <p>Gap {{ row.gap_pct or '—' }}% · RS vs QQQ {{ row.relative_strength or '—' }}%</p>
-                    <p>Upside {{ row.upside_pct }}% · Downside {{ row.downside_risk_pct }}%</p>
+                    <p><strong>#{{ row.rank }} {{ row.symbol }}</strong> · {{ row.trade_action }} · {{ row.edge_type or '—' }} · ${{ row.current_price }}</p>
+                    <p class="score-formula muted small">{{ row.score_formula_display or '' }}</p>
+                    <p>Win {{ row.win_prob }}% · ER {{ row.expected_return_pct }}% · R:R {{ row.risk_reward }} · Score {{ row.final_score }}</p>
+                    {% if row.rank == 1 and row.why_vs_runner_up and row.why_vs_runner_up != '—' %}
+                    <p><strong>Why vs #2：</strong>{{ row.why_vs_runner_up }}</p>
+                    {% endif %}
                     <ul class="why-factors">
                       {% for f in row.why_factors or [] %}<li>{{ f }}</li>{% endfor %}
-                      <li class="muted">Gamma — placeholder</li>
                     </ul>
+                    {% if row.factor_breakdown %}
+                    <details class="factor-breakdown">
+                      <summary>Factor inputs</summary>
+                      <ul class="factor-list">
+                        {% set fb = row.factor_breakdown %}
+                        {% if fb.relative_strength_vs_qqq is not none %}<li>RS vs QQQ：{{ fb.relative_strength_vs_qqq }}%</li>{% endif %}
+                        {% if fb.gap_pct is not none %}<li>Gap：{{ fb.gap_pct }}%</li>{% endif %}
+                        {% if fb.beta_proxy is not none %}<li>Beta：{{ fb.beta_proxy }}</li>{% endif %}
+                        <li>Volume：{{ 'Yes' if fb.volume_signal else 'No' }} · News：{{ fb.news_count or 0 }}</li>
+                        {% if fb.extended_gap_penalty %}<li>Gap penalty：-{{ fb.extended_gap_penalty }}</li>{% endif %}
+                      </ul>
+                    </details>
+                    {% endif %}
                   </div>
                 </details>
               </td>
