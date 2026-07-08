@@ -17,6 +17,16 @@
     {% include "_day_header.html" %}
     {% include "_step_nav.html" %}
 
+    {% set best_trades = meta.get('best_trades') or {} if meta else {} %}
+    {% set primary = best_trades.get('primary') if meta else none %}
+    {% set transparency = (meta.get('transparency') or {}) if meta else {} %}
+    {% from "_trade_detail_panel.html" import trade_detail_card %}
+    {% from "_transparency_panel.html" import todays_opportunities_block, index_rejection_block, day_risks_block %}
+    {% from "_macro_calendar_panel.html" import macro_calendar_block %}
+    {% from "_driver_tree_panel.html" import driver_tree_block %}
+    {% from "_trade_plan_panel.html" import trade_plan_block %}
+    {% from "_top5_board.html" import top5_board_block %}
+
     {% if meta and meta.get('edges') %}
     {% set edges = meta.edges %}
     <section class="edges-panel" id="edges">
@@ -40,16 +50,6 @@
       {% endif %}
     </section>
     {% endif %}
-
-    {% set best_trades = meta.get('best_trades') or {} %}
-    {% set primary = best_trades.get('primary') %}
-    {% set transparency = meta.get('transparency') or {} %}
-    {% from "_trade_detail_panel.html" import trade_detail_card %}
-    {% from "_transparency_panel.html" import todays_opportunities_block, index_rejection_block, day_risks_block %}
-    {% from "_macro_calendar_panel.html" import macro_calendar_block %}
-    {% from "_driver_tree_panel.html" import driver_tree_block %}
-    {% from "_trade_plan_panel.html" import trade_plan_block %}
-    {% from "_top5_board.html" import top5_board_block %}
 
     {% if meta.get('macro_calendar') or transparency.macro_calendar %}
     <section class="panel architecture-panel">
