@@ -450,6 +450,8 @@ def test_apply_price_based_return_overrides_heuristic():
     assert out["trade_summary_cn"] == "做空 TSLA：在 412.0 附近入场，目标 402.7，预期 +2.26%"
     rr = _risk_reward_from_levels(412.0, 419.6, 2.26)
     assert out["risk_reward"] == rr
+    assert out.get("rr_display")
+    assert out["rr_display"]["reward_risk_ratio"] == rr
 
 
 @patch("src.research.trade_candidates._observation", side_effect=_mock_obs)

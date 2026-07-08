@@ -29,6 +29,109 @@ _DIMENSION_LABELS: dict[str, str] = {
     "catalyst": "Best Catalyst Alignment",
 }
 
+_RANK_DIM_SHORT: dict[str, str] = {
+    "relative_strength": "weakest RS",
+    "expected_range": "largest expected range",
+    "liquidity": "acceptable liquidity",
+    "win_prob": "highest probability",
+    "risk_reward": "best reward/risk",
+    "catalyst": "best catalyst alignment",
+}
+
+
+def build_rr_display(
+    *,
+    reward_per_share: float | None = None,
+    risk_per_share: float | None = None,
+    reward_pct: float | None = None,
+    risk_pct: float | None = None,
+    reward_risk_ratio: float | None = None,
+) -> dict[str, Any]:
+    """Clarify Reward/Risk vs Risk:Reward (legacy field name risk_reward = reward/risk)."""
+    rr = reward_risk_ratio
+    if rr is None:
+        if (
+            reward_per_share is not None
+            and risk_per_share is not None
+            and risk_per_share > 0
+        ):
+            rr = round(reward_per_share / risk_per_share, 2)
+        elif reward_pct is not None and risk_pct is not None and risk_pct > 0:
+            rr = round(reward_pct / risk_pct, 2)
+
+    if rr is None or rr <= 0:
+        return {}
+
+    risk_over_reward = round(1.0 / rr, 2)
+    return {
+        "reward_risk_ratio": rr,
+        "risk_reward_ratio": risk_over_reward,
+        "reward_per_share": reward_per_share,
+        "risk_per_share": risk_per_share,
+        "label_reward_risk": f"Reward/Risk {rr:.2f}",
+        "label_risk_reward": f"Risk:Reward 1:{risk_over_reward:.2f}",
+        "display": f"Reward/Risk {rr:.2f} · Risk:Reward 1:{risk_over_reward:.2f}",
+        "convention": "reward_risk_ratio = reward ÷ risk; Risk:Reward shows risk per unit reward",
+    }
+
+
+def build_rank_summary(
+    primary: dict[str, Any],
+    why_wins: list[dict[str, Any]] | None = None,
+) -> str:
+    """One-liner for why the primary trade ranks #1 today."""
+    sym = primary.get("symbol", "—")
+    wins = why_wins or primary.get("why_wins_today") or []
+    if not wins:
+        return f"{sym} ranked #1 as top trade candidate today"
+    parts = [
+        _RANK_DIM_SHORT.get(w.get("dimension", ""), w.get("label", "").lower())
+        for w in wins[:3]
+    ]
+    return f"{sym} ranked #1 because {' + '.join(parts)}"
+
+
+def compute_ev_distribution(
+    *,
+    win_prob: float | None,
+    trade_economics: dict[str, Any] | None,
+    similar_days: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Expected value and win/loss scenarios from trade economics."""
+    if not trade_economics:
+        return {}
+
+    win_usd = float(trade_economics.get("win_usd") or 0)
+    loss_usd = float(trade_economics.get("loss_usd") or 0)
+    wp = (win_prob or 50.0) / 100.0
+    ev_usd = round(wp * win_usd - (1.0 - wp) * loss_usd, 2)
+
+    out: dict[str, Any] = {
+        "expected_value_usd": ev_usd,
+        "win_scenario_usd": win_usd,
+        "loss_scenario_usd": loss_usd,
+        "win_prob_pct": win_prob,
+        "display": (
+            f"EV ${ev_usd:+.0f} "
+            f"(win +${win_usd:.0f} @ {win_prob or '—'}% · loss -${loss_usd:.0f})"
+        ),
+    }
+
+    if similar_days:
+        from src.research.win_rate_calibration import return_distribution_bins
+
+        returns = [
+            float(d["return_pct"])
+            for d in similar_days
+            if d.get("return_pct") is not None
+        ]
+        bins = return_distribution_bins(returns)
+        if bins:
+            out["return_distribution"] = bins
+            out["similar_days_count"] = len(returns)
+
+    return out
+
 
 def init_win_prob_breakdown() -> dict[str, float]:
     return {"base": 50.0}
@@ -108,6 +211,13 @@ def compute_trade_economics(
 
     contracts = 1 if trade_action in ("BUY", "Small") else 0
 
+    rr_display = build_rr_display(
+        reward_per_share=round(reward_per_share, 2),
+        risk_per_share=round(risk_per_share, 2),
+    )
+    wp_frac = (win_prob or 50.0) / 100.0
+    expected_value_usd = round(wp_frac * win_usd - (1.0 - wp_frac) * loss_usd, 2)
+
     return {
         "account_size": account_size,
         "risk_pct": risk_pct,
@@ -117,8 +227,10 @@ def compute_trade_economics(
         "max_loss_usd": round(loss_usd, 2),
         "win_usd": win_usd,
         "loss_usd": loss_usd,
+        "expected_value_usd": expected_value_usd,
         "risk_per_share": round(risk_per_share, 2),
         "reward_per_share": round(reward_per_share, 2),
+        "rr_display": rr_display,
         "size_label": size_label,
         "display": f"${account_size:,.0f} → Win +${win_usd:.0f} / Loss -${loss_usd:.0f}",
     }
@@ -523,6 +635,9 @@ def enrich_trade_slot(
     *,
     ranked: list[dict[str, Any]],
     trade_action: str | None = None,
+    exclude_date: str | None = None,
+    vix_chg: float | None = None,
+    macro_calendar: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attach transparency fields to a trade slot (primary/secondary)."""
     ta = trade_action or slot.get("trade_action", "Small")
@@ -537,9 +652,52 @@ def enrich_trade_slot(
     if economics:
         slot["trade_economics"] = economics
         slot["position_sizing"] = compute_position_sizing(economics, trade_action=ta)
+        if economics.get("rr_display"):
+            slot["rr_display"] = economics["rr_display"]
 
     slot["why_wins_today"] = why_wins_today(slot, ranked)
     slot["why_not_alternatives"] = why_not_alternatives(slot, ranked)
+
+    if slot.get("rank") == 1:
+        slot["rank_summary"] = build_rank_summary(slot, slot["why_wins_today"])
+
+    from src.research.win_rate_calibration import (
+        build_feature_signature,
+        calibrate_win_prob,
+        find_similar_days,
+    )
+
+    sig = build_feature_signature(
+        direction=slot.get("direction", ""),
+        rs_vs_qqq=slot.get("relative_strength"),
+        gap_pct=slot.get("gap_pct"),
+        vix_chg=vix_chg,
+        macro_calendar=macro_calendar,
+        symbol=slot.get("symbol"),
+    )
+    rules_wp = float(slot.get("win_prob") or 50.0)
+    calibration = calibrate_win_prob(
+        sig,
+        rules_win_prob=rules_wp,
+        exclude_date=exclude_date,
+    )
+    slot["win_prob_source"] = calibration.get("win_prob_source", "rules")
+    slot["calibration"] = calibration
+    if calibration.get("source") == "historical":
+        slot["win_prob"] = calibration["calibrated_win_prob"]
+        slot["calibrated_win_prob"] = calibration["calibrated_win_prob"]
+
+    similar = find_similar_days(sig, exclude_date=exclude_date, limit=5)
+    if similar:
+        slot["similar_days"] = similar
+
+    if economics:
+        slot["ev_distribution"] = compute_ev_distribution(
+            win_prob=slot.get("win_prob"),
+            trade_economics=economics,
+            similar_days=similar or None,
+        )
+
     return slot
 
 
@@ -562,11 +720,14 @@ def build_top5_board(top_trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "win_prob": slot.get("win_prob"),
                 "expected_return_pct": slot.get("expected_return_pct"),
                 "risk_reward": slot.get("risk_reward"),
+                "rr_display": slot.get("rr_display"),
                 "entry_price": slot.get("entry_price"),
+                "entry_zone": slot.get("entry_zone"),
                 "stop_price": slot.get("stop_price"),
                 "target_price": slot.get("target_price"),
                 "why_today": slot.get("why_today") or slot.get("why_chain"),
                 "key_reason": key_reason,
+                "rank_summary": slot.get("rank_summary"),
                 "catalyst": slot.get("catalyst"),
                 "invalidation": slot.get("invalidation"),
                 "trade_action": slot.get("trade_action"),
@@ -595,18 +756,25 @@ def build_decision_transparency(
     primary = best_trades.get("primary")
     top_trades = best_trades.get("top_trades") or []
     slot_directions = {s["symbol"]: s["direction"] for s in top_trades if s.get("direction")}
+    todays_opps = build_todays_opportunities(
+        ranked,
+        direction=direction,
+        index_trade=index_trade,
+        primary_symbol=primary.get("symbol") if primary else None,
+        slot_directions=slot_directions,
+    )
+    if primary and primary.get("rank_summary"):
+        for opp in todays_opps:
+            if opp.get("is_primary"):
+                opp["rank_summary"] = primary["rank_summary"]
+                break
+
     transparency: dict[str, Any] = {
         "top_trades": build_top5_board(top_trades),
         "watchlist": best_trades.get("watchlist_items") or [],
         "macro_calendar": macro_calendar,
         "trade_plan": trade_plan,
-        "todays_opportunities": build_todays_opportunities(
-            ranked,
-            direction=direction,
-            index_trade=index_trade,
-            primary_symbol=primary.get("symbol") if primary else None,
-            slot_directions=slot_directions,
-        ),
+        "todays_opportunities": todays_opps,
         "index_rejection_reasons": index_rejection_reasons(
             index_trade=index_trade or "NO TRADE",
             edges=edges,
@@ -638,5 +806,11 @@ def build_decision_transparency(
         transparency["level_reasons"] = primary.get("level_reasons")
         transparency["trade_economics"] = primary.get("trade_economics")
         transparency["position_sizing"] = primary.get("position_sizing")
+        transparency["rr_display"] = primary.get("rr_display")
+        transparency["rank_summary"] = primary.get("rank_summary")
+        transparency["similar_days"] = primary.get("similar_days")
+        transparency["ev_distribution"] = primary.get("ev_distribution")
+        transparency["win_prob_source"] = primary.get("win_prob_source")
+        transparency["calibration"] = primary.get("calibration")
 
     return transparency

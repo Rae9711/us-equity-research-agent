@@ -612,6 +612,29 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 }
 
 .decision-grid-exec { margin-top: 0.25rem; }
+.decision-grid-compact {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem 1rem;
+}
+.rank-summary-line {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.92rem;
+  color: #1e3a5f;
+}
+.rr-display {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.decision-more-transparency {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #cbd5e1;
+}
+.decision-more-transparency summary { cursor: pointer; }
+.opp-rank-summary { display: block; margin-top: 0.15rem; }
+.similar-days-list, .ev-bins { margin: 0.35rem 0; padding-left: 1.25rem; }
+.opp-win { color: #16a34a; }
+.opp-loss { color: #dc2626; }
 .decision-best-trade { color: #1d4ed8; font-weight: 600; }
 .decision-oneliner {
   margin: 0.75rem 0 0.5rem;

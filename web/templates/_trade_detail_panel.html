@@ -2,7 +2,7 @@
 {% if source %}<span class="level-source-tag">{{ source }}</span>{% endif %}
 {%- endmacro %}
 
-{% from "_transparency_panel.html" import transparency_panel %}
+{% from "_transparency_panel.html" import transparency_panel, rr_display_block %}
 
 {% macro trade_detail_card(trade, title='Trade Detail', transparency=None) %}
 {% if trade %}
@@ -12,10 +12,13 @@
     {% if trade.edge_type %}<span class="edge-type-badge">{{ trade.edge_type }}</span>{% endif %}
   </div>
   <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
+  {% if trade.rank_summary %}
+  <p class="rank-summary-line"><strong>#1：</strong>{{ trade.rank_summary }}</p>
+  {% endif %}
   <div class="best-opp-grid trade-detail-grid">
     <div><span class="decision-label">方向 Direction</span><strong>{{ trade.direction }}</strong></div>
     <div><span class="decision-label">标的 Symbol</span><strong>{{ trade.symbol }}</strong></div>
-    <div><span class="decision-label">胜率 Win Prob</span><strong>{{ trade.win_prob }}%</strong></div>
+    <div><span class="decision-label">胜率 Win Prob</span><strong>{{ trade.win_prob }}%</strong>{% if trade.win_prob_source %} <span class="muted small">({{ trade.win_prob_source }})</span>{% endif %}</div>
     <div>
       <span class="decision-label">预期收益 Expected Return</span>
       <strong>
@@ -30,12 +33,17 @@
       <span class="muted small">（从入场到目标，已验算：{{ trade.return_calculation }}）</span>
       {% endif %}
     </div>
-    <div><span class="decision-label">盈亏比 R:R</span><strong>{{ trade.risk_reward }}</strong></div>
+    <div>
+      <span class="decision-label">盈亏比</span>
+      <strong>
+        {% if trade.rr_display %}{{ rr_display_block(trade.rr_display) }}{% else %}{{ trade.risk_reward }}{% endif %}
+      </strong>
+    </div>
     <div><span class="decision-label">置信度 Confidence</span><strong>{{ trade.confidence }}% {{ trade.confidence_stars or '' }}</strong></div>
     <div class="trade-level-field">
-      <span class="decision-label">入场价 Entry</span>
+      <span class="decision-label">入场 Entry</span>
       <strong>
-        {% if trade.entry_price is not none %}${{ trade.entry_price }}{% endif %}
+        {% if trade.entry_zone %}{{ trade.entry_zone.display }}{% elif trade.entry_price is not none %}${{ trade.entry_price }}{% endif %}
         {% if trade.entry %} ({{ trade.entry }}{% if trade.entry_source %} / {{ trade.entry_source }}{% endif %}){% endif %}
       </strong>
     </div>

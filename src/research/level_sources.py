@@ -14,6 +14,7 @@ import yfinance as yf
 from src.utils.trading_calendar import ET, market_open_et, prior_trading_day
 
 ORB_MINUTES = 30
+ENTRY_ZONE_TOLERANCE_PCT = 0.3
 
 SOURCE_LABELS: dict[str, str] = {
     "vwap": "VWAP",
@@ -284,6 +285,61 @@ def compute_anchors(
     )
 
 
+def compute_entry_zone(
+    direction: str,
+    anchors: LevelAnchors,
+    entry_px: float,
+    entry_src: str,
+    *,
+    tolerance_pct: float = ENTRY_ZONE_TOLERANCE_PCT,
+) -> dict[str, Any]:
+    """Entry zone from ORB/VWAP confluence near chosen entry (±tolerance)."""
+    anchor_map: list[tuple[str, float | None]] = [
+        ("vwap", anchors.vwap),
+        ("orb_high", anchors.orb_high),
+        ("orb_low", anchors.orb_low),
+        ("prev_high", anchors.prev_high),
+        ("prev_low", anchors.prev_low),
+        ("prior_close", anchors.prior_close),
+    ]
+    matched: list[dict[str, Any]] = []
+    for src, px in anchor_map:
+        if px is not None and _near(px, entry_px, tolerance_pct):
+            matched.append(
+                {
+                    "source": src,
+                    "label": source_label(src),
+                    "price": round(px, 2),
+                }
+            )
+
+    prices = [entry_px] + [a["price"] for a in matched]
+    low = min(prices)
+    high = max(prices)
+
+    if low == high:
+        band = entry_px * tolerance_pct / 100.0
+        low = round(entry_px - band, 2)
+        high = round(entry_px + band, 2)
+
+    mid = round((low + high) / 2, 2)
+    spread = high - low
+    if spread >= 1.0:
+        display = f"Entry Zone {low:.0f}–{high:.0f}"
+    else:
+        display = f"Entry Zone {low:.2f}–{high:.2f}"
+
+    return {
+        "low": round(low, 2),
+        "high": round(high, 2),
+        "mid": mid,
+        "anchors": matched,
+        "display": display,
+        "entry_source": entry_src,
+        "tolerance_pct": tolerance_pct,
+    }
+
+
 def derive_trade_levels(
     direction: str,
     anchors: LevelAnchors,
@@ -368,11 +424,13 @@ def derive_trade_levels(
     entry = format_tagged(entry_px, entry_src, prefix=entry_prefix)
     stop = format_tagged(stop_px, stop_src)
     target = format_tagged(target_px, target_src)
+    entry_zone = compute_entry_zone(direction, anchors, entry_px, entry_src)
 
     return {
         "entry": entry,
         "entry_source": entry_src,
-        "entry_price": round(entry_px, 2),
+        "entry_price": entry_zone["mid"],
+        "entry_zone": entry_zone,
         "stop": stop,
         "stop_source": stop_src,
         "stop_price": round(stop_px, 2),

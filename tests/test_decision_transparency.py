@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from src.research.decision_transparency import (
+    build_rank_summary,
+    build_rr_display,
     build_todays_opportunities,
+    compute_ev_distribution,
     compute_trade_economics,
     day_risks,
     finalize_win_prob_breakdown,
@@ -12,7 +15,7 @@ from src.research.decision_transparency import (
     why_not_alternatives,
     why_wins_today,
 )
-from src.research.level_sources import LevelAnchors, build_level_reasons
+from src.research.level_sources import LevelAnchors, build_level_reasons, compute_entry_zone
 
 
 def test_win_prob_breakdown_sums():
@@ -37,6 +40,52 @@ def test_trade_economics_dollar_pnl():
     assert econ["loss_usd"] > 0
     assert econ["shares"] >= 1
     assert "Win" in econ["display"]
+    assert econ.get("rr_display")
+    assert "Reward/Risk" in econ["rr_display"]["display"]
+    assert econ.get("expected_value_usd") is not None
+
+
+def test_rr_display_clarifies_reward_vs_risk():
+    rr = build_rr_display(reward_per_share=6.86, risk_per_share=12.64)
+    assert rr["reward_risk_ratio"] == 0.54
+    assert rr["risk_reward_ratio"] == 1.85
+    assert "Reward/Risk 0.54" in rr["display"]
+    assert "Risk:Reward 1:1.85" in rr["display"]
+
+
+def test_rank_summary_from_why_wins():
+    primary = {"symbol": "ARM"}
+    wins = [
+        {"dimension": "win_prob", "label": "Highest Probability"},
+        {"dimension": "relative_strength", "label": "Highest Relative Strength"},
+        {"dimension": "liquidity", "label": "Highest Liquidity"},
+    ]
+    summary = build_rank_summary(primary, wins)
+    assert "ARM ranked #1" in summary
+    assert "highest probability" in summary
+    assert "weakest RS" in summary
+
+
+def test_entry_zone_confluence():
+    anchors = LevelAnchors(vwap=290.0, orb_low=289.5, orb_high=291.0, orb_from_minute=True)
+    zone = compute_entry_zone("LONG", anchors, 290.01, "vwap", tolerance_pct=0.3)
+    assert zone["low"] <= zone["mid"] <= zone["high"]
+    assert "Entry Zone" in zone["display"]
+    assert len(zone["anchors"]) >= 1
+
+
+def test_ev_distribution_from_economics():
+    econ = compute_trade_economics(
+        entry_price=100.0,
+        stop_price=98.0,
+        target_price=104.0,
+        direction="LONG",
+        win_prob=60.0,
+    )
+    ev = compute_ev_distribution(win_prob=60.0, trade_economics=econ)
+    assert ev["expected_value_usd"] is not None
+    assert ev["win_scenario_usd"] == econ["win_usd"]
+    assert ev["loss_scenario_usd"] == econ["loss_usd"]
 
 
 def test_level_reasons_short_entry():

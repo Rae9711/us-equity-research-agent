@@ -18,6 +18,7 @@ from typing import Any, Literal
 from src.research.decision_transparency import (
     add_win_prob_delta,
     build_decision_transparency,
+    build_rr_display,
     build_top5_board,
     enrich_trade_slot,
     finalize_win_prob_breakdown,
@@ -465,6 +466,12 @@ def _apply_price_based_return(
     rr_from_stop = _risk_reward_from_levels(entry_px, stop_px, price_er)
     if rr_from_stop is not None:
         slot["risk_reward"] = rr_from_stop
+        risk_pct = abs(entry_px - stop_px) / entry_px * 100.0 if entry_px else None
+        slot["rr_display"] = build_rr_display(
+            reward_pct=price_er,
+            risk_pct=risk_pct,
+            reward_risk_ratio=rr_from_stop,
+        )
 
     sym = slot.get("symbol", "")
     if direction == "LONG":
@@ -731,6 +738,11 @@ def _score_candidate_v2(
 
     risk_reward = _rr_numeric(upside_pct, downside_risk_pct)
     rr_w = _rr_weight(risk_reward)
+    rr_display = build_rr_display(
+        reward_pct=upside_pct,
+        risk_pct=downside_risk_pct,
+        reward_risk_ratio=risk_reward,
+    )
     final_score = round(win_prob * max(expected_return_pct, 0) * rr_w / 100.0, 2)
 
     weakness = _relative_weakness_score(rs_vs_qqq, rs_vs_smh)
@@ -779,6 +791,7 @@ def _score_candidate_v2(
         "upside_pct": round(upside_pct, 2),
         "downside_risk_pct": round(downside_risk_pct, 2),
         "risk_reward": risk_reward,
+        "rr_display": rr_display,
         "final_score": final_score,
         "trade_action": trade_action,
         "trade": trade_action,
@@ -867,6 +880,7 @@ def _build_trade_slot(
         "entry": levels["entry"],
         "entry_source": levels.get("entry_source"),
         "entry_price": levels.get("entry_price"),
+        "entry_zone": levels.get("entry_zone"),
         "stop": levels["stop"],
         "stop_source": levels.get("stop_source"),
         "stop_price": levels.get("stop_price"),
@@ -889,6 +903,8 @@ def _build_trade_slot(
         "downside_risk_pct": row.get("downside_risk_pct"),
         "why_factors": row["why_factors"],
         "why_today": row.get("why_chain") or " · ".join(row.get("why_factors") or []),
+        "gap_pct": row.get("gap_pct"),
+        "rr_display": row.get("rr_display"),
         "catalyst": _catalyst_for_symbol(row["symbol"], macro_calendar),
         "invalidation": "—",
         "advisory": True,
@@ -972,6 +988,8 @@ def _decision_tree(
     quote_by_sym: dict[str, dict[str, Any]],
     as_of_et: time | Literal["now"] | None = None,
     macro_calendar: dict[str, Any] | None = None,
+    vix_chg: float | None = None,
+    exclude_date: str | None = None,
 ) -> dict[str, Any]:
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
@@ -998,7 +1016,14 @@ def _decision_tree(
             as_of_et=as_of_et,
             macro_calendar=macro_calendar,
         )
-        slot = enrich_trade_slot(slot, ranked=ranked, trade_action=row["trade_action"])
+        slot = enrich_trade_slot(
+            slot,
+            ranked=ranked,
+            trade_action=row["trade_action"],
+            exclude_date=exclude_date,
+            vix_chg=vix_chg,
+            macro_calendar=macro_calendar,
+        )
         top_trades.append(slot)
 
     watchlist: list[dict[str, Any]] = []
@@ -1065,6 +1090,9 @@ def _decision_tree(
             slot,
             ranked=ranked,
             trade_action=row["trade_action"],
+            exclude_date=exclude_date,
+            vix_chg=vix_chg,
+            macro_calendar=macro_calendar,
         )
         slots[slot_names[i]] = slot
         slots["stock_trades"].append({
@@ -1139,6 +1167,13 @@ def _to_best_opportunity(
             "return_calculation": primary.get("return_calculation"),
             "trade_summary_cn": trade_summary_cn,
             "risk_reward": primary.get("risk_reward"),
+            "rr_display": primary.get("rr_display"),
+            "entry_zone": primary.get("entry_zone"),
+            "rank_summary": primary.get("rank_summary"),
+            "win_prob_source": primary.get("win_prob_source"),
+            "calibration": primary.get("calibration"),
+            "similar_days": primary.get("similar_days"),
+            "ev_distribution": primary.get("ev_distribution"),
             "final_score": primary.get("final_score"),
             "level_anchors": primary.get("level_anchors"),
             "level_reasons": primary.get("level_reasons"),
@@ -1318,6 +1353,8 @@ def compute_trade_decision(
         quote_by_sym=quote_by_sym,
         as_of_et=as_of_et,
         macro_calendar=macro_calendar,
+        vix_chg=vix_chg,
+        exclude_date=trading_date or None,
     )
     best_opportunity = _to_best_opportunity(
         best_trades.get("primary"),
@@ -1506,6 +1543,12 @@ def build_executive_summary(
         "level_reasons": (primary or {}).get("level_reasons"),
         "trade_economics": (primary or {}).get("trade_economics"),
         "position_sizing": (primary or {}).get("position_sizing"),
+        "rr_display": (primary or {}).get("rr_display"),
+        "entry_zone": (primary or {}).get("entry_zone"),
+        "rank_summary": (primary or {}).get("rank_summary"),
+        "win_prob_source": (primary or {}).get("win_prob_source"),
+        "similar_days": (primary or {}).get("similar_days"),
+        "ev_distribution": (primary or {}).get("ev_distribution"),
         "why_wins_today": (primary or {}).get("why_wins_today") or [],
         "why_not_alternatives": (primary or {}).get("why_not_alternatives") or [],
         "one_liner": one_liner,

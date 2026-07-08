@@ -1,3 +1,45 @@
+{% macro rr_display_block(rr) %}
+{% if rr and rr.display %}
+<span class="rr-display" title="{{ rr.convention }}">{{ rr.display }}</span>
+{% elif rr and rr.reward_risk_ratio is not none %}
+<span class="rr-display">Reward/Risk {{ rr.reward_risk_ratio }}</span>
+{% endif %}
+{% endmacro %}
+
+{% macro similar_days_block(similar_days) %}
+{% if similar_days %}
+<div class="transparency-block similar-days">
+  <h3 class="transparency-title">Similar Days (Historical)</h3>
+  <ul class="similar-days-list">
+    {% for d in similar_days %}
+    <li>
+      <strong>{{ d.date }}</strong>
+      <span class="opp-{{ d.outcome }}">{{ d.outcome }}</span>
+      {% if d.return_pct is not none %}<span class="muted small">{{ d.return_pct }}%</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro ev_distribution_block(ev) %}
+{% if ev %}
+<div class="transparency-block ev-distribution">
+  <h3 class="transparency-title">Expected Value</h3>
+  <p><strong>{{ ev.display }}</strong></p>
+  {% if ev.return_distribution %}
+  <h4 class="muted small">Similar-days return distribution</h4>
+  <ul class="ev-bins">
+    {% for b in ev.return_distribution %}
+    <li><span>{{ b.bin }}</span> <span class="muted">{{ b.count }} ({{ b.pct }}%)</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {% macro win_prob_breakdown_block(breakdown) %}
 {% if breakdown and breakdown.components %}
 <div class="transparency-block win-prob-breakdown">
@@ -72,6 +114,7 @@
     <div>
       <span class="decision-label">每股价差</span>
       <span class="muted small">Reward ${{ economics.reward_per_share }} / Risk ${{ economics.risk_per_share }}</span>
+      {% if economics.rr_display %}{{ rr_display_block(economics.rr_display) }}{% endif %}
     </div>
   </div>
 </div>
@@ -169,6 +212,7 @@
     <li class="opp-row {% if opp.is_primary %}opp-primary{% endif %}">
       <span class="opp-stars">{{ opp.stars }}</span>
       <span class="opp-label">{{ opp.label }}</span>
+      {% if opp.is_primary and opp.rank_summary %}<span class="opp-rank-summary muted small">{{ opp.rank_summary }}</span>{% endif %}
       {% if opp.win_prob is not none %}<span class="opp-wp">{{ opp.win_prob }}%</span>{% endif %}
       <span class="opp-action opp-{{ opp.action | lower }}">{{ opp.action }}</span>
     </li>
@@ -178,16 +222,21 @@
 {% endif %}
 {% endmacro %}
 
-{% macro transparency_panel(card, show_opportunities=true, show_index=true) %}
+{% macro transparency_panel(card, show_opportunities=true, show_index=true, compact=false) %}
 <div class="transparency-panel">
   {% if show_opportunities %}{{ todays_opportunities_block(card.todays_opportunities) }}{% endif %}
+  {% if card.rank_summary %}<p class="rank-summary-line"><strong>#1：</strong>{{ card.rank_summary }}</p>{% endif %}
   {{ why_wins_today_block(card.why_wins_today) }}
   {{ win_prob_breakdown_block(card.win_prob_breakdown) }}
   {{ trade_economics_block(card.trade_economics) }}
   {{ position_sizing_block(card.position_sizing) }}
   {{ level_reasons_block(card.level_reasons) }}
+  {% if not compact %}
   {{ why_not_alternatives_block(card.why_not_alternatives) }}
   {% if show_index %}{{ index_rejection_block(card.index_rejection_reasons) }}{% endif %}
   {{ day_risks_block(card.day_risks) }}
+  {{ similar_days_block(card.similar_days) }}
+  {{ ev_distribution_block(card.ev_distribution) }}
+  {% endif %}
 </div>
 {% endmacro %}

@@ -1,3 +1,5 @@
+{% from "_transparency_panel.html" import rr_display_block %}
+
 {% macro top5_board_block(trades, watchlist=none) %}
 {% if trades %}
 <div class="transparency-block top5-board">
@@ -25,12 +27,12 @@
         {% for t in trades %}
         <tr>
           <td>{{ t.rank }}</td>
-          <td><strong>{{ t.symbol }}</strong></td>
+          <td><strong>{{ t.symbol }}</strong>{% if t.rank == 1 and t.rank_summary %}<br><span class="muted small">{{ t.rank_summary }}</span>{% endif %}</td>
           <td>{{ t.direction }}</td>
           <td>{% if t.win_prob is not none %}{{ t.win_prob }}%{% else %}—{% endif %}</td>
           <td>{% if t.expected_return_pct is not none %}{{ t.expected_return_pct }}%{% else %}—{% endif %}</td>
-          <td>{{ t.risk_reward or '—' }}</td>
-          <td>{% if t.entry_price is not none %}${{ t.entry_price }}{% else %}—{% endif %}</td>
+          <td>{% if t.rr_display %}{{ t.rr_display.label_reward_risk }}{% else %}{{ t.risk_reward or '—' }}{% endif %}</td>
+          <td>{% if t.entry_zone %}{{ t.entry_zone.display }}{% elif t.entry_price is not none %}${{ t.entry_price }}{% else %}—{% endif %}</td>
           <td>{% if t.stop_price is not none %}${{ t.stop_price }}{% else %}—{% endif %}</td>
           <td>{% if t.target_price is not none %}${{ t.target_price }}{% else %}—{% endif %}</td>
           <td class="muted small">{{ t.why_today or '—' }}</td>
