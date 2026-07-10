@@ -303,6 +303,38 @@ def run_step2_open(
         "one_liner": one_liner[:256],
     }
 
+    primary_entry_status = None
+    try:
+        from src.research.entry_status import enrich_primary_from_morning
+        from src.utils.paths import morning_json_path as _morning_path
+
+        morning_full: dict[str, Any] = {}
+        mp = _morning_path(trading_date.isoformat())
+        if mp.exists():
+            morning_full = json.loads(mp.read_text(encoding="utf-8"))
+        primary = (morning_full.get("best_trades") or {}).get("primary") or {}
+        sym = str(primary.get("symbol") or "")
+        live_px = None
+        if sym:
+            section = "stocks"
+            if sym in ("QQQ", "SPY", "TQQQ"):
+                section = "market"
+            elif sym in ("SMH", "XLK", "XLF", "XLE"):
+                section = "sector"
+            obs = session_observation(
+                sym, raw, prior_raw, trading_date, section=section, as_of_et=pit_as_of
+            )
+            if "error" not in obs:
+                live_px = obs.get("last") or obs.get("close")
+        primary_entry_status = enrich_primary_from_morning(
+            morning_full,
+            trading_date.isoformat(),
+            session_phase="open",
+            current_price=float(live_px) if live_px is not None else None,
+        )
+    except Exception:
+        logger.exception("Step 2 entry_status enrichment failed (non-fatal)")
+
     payload = save_step_result(
         2,
         trading_date,
@@ -321,6 +353,7 @@ def run_step2_open(
                 "morning": morning,
             },
             "market": market,
+            "primary_entry_status": primary_entry_status,
         },
     )
     if pit_as_of != "now":

@@ -15,7 +15,8 @@
           <th>Win%</th>
           <th>ER%</th>
           <th>R:R</th>
-          <th>Entry</th>
+          <th>Ideal Entry</th>
+          <th>Status</th>
           <th>Stop</th>
           <th>Target</th>
           <th>Why Today</th>
@@ -25,7 +26,7 @@
       </thead>
       <tbody>
         {% for t in trades %}
-        <tr>
+        <tr class="{% if t.entry_status and t.entry_status.status in ('MISSED', 'INVALIDATED', 'EXPIRED') %}entry-row-stale{% endif %}">
           <td>{{ t.rank }}</td>
           <td><strong>{{ t.symbol }}</strong>{% if t.rank == 1 and t.rank_summary %}<br><span class="muted small">{{ t.rank_summary }}</span>{% endif %}</td>
           <td>{{ t.direction }}</td>
@@ -33,6 +34,13 @@
           <td>{% if t.expected_return_pct is not none %}{{ t.expected_return_pct }}%{% else %}—{% endif %}</td>
           <td>{% if t.rr_display %}{{ t.rr_display.label_reward_risk }}{% else %}{{ t.risk_reward or '—' }}{% endif %}</td>
           <td>{% if t.entry_zone %}{{ t.entry_zone.display }}{% elif t.entry_price is not none %}${{ t.entry_price }}{% else %}—{% endif %}</td>
+          <td>
+            {% if t.entry_status %}
+            <span class="entry-status-badge entry-status-{{ t.entry_status.status | lower }}">{{ t.entry_status.status }}</span>
+            {% if t.entry_status.distance_pct is not none %}<br><span class="muted small">{{ '%+.2f'|format(t.entry_status.distance_pct) }}%</span>{% endif %}
+            {% if t.entry_status.action_hint %}<br><span class="entry-status-hint-inline">{{ t.entry_status.action_hint }}</span>{% endif %}
+            {% else %}—{% endif %}
+          </td>
           <td>{% if t.stop_price is not none %}${{ t.stop_price }}{% else %}—{% endif %}</td>
           <td>{% if t.target_price is not none %}${{ t.target_price }}{% else %}—{% endif %}</td>
           <td class="muted small">{{ t.why_today or '—' }}</td>

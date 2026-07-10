@@ -41,12 +41,26 @@
     </div>
     <div><span class="decision-label">置信度 Confidence</span><strong>{{ trade.confidence }}% {{ trade.confidence_stars or '' }}</strong></div>
     <div class="trade-level-field">
-      <span class="decision-label">入场 Entry</span>
+      <span class="decision-label">Ideal Entry</span>
       <strong>
         {% if trade.entry_zone %}{{ trade.entry_zone.display }}{% elif trade.entry_price is not none %}${{ trade.entry_price }}{% endif %}
         {% if trade.entry %} ({{ trade.entry }}{% if trade.entry_source %} / {{ trade.entry_source }}{% endif %}){% endif %}
       </strong>
     </div>
+    {% if trade.entry_status %}
+    {% set es = trade.entry_status %}
+    <div class="trade-level-field entry-status-field entry-status-{{ es.status | lower }}">
+      <span class="decision-label">Entry Status</span>
+      <strong>
+        <span class="entry-status-badge entry-status-{{ es.status | lower }}">{{ es.status }}</span>
+        {% if es.current_price is not none %} · Current ${{ '%.2f'|format(es.current_price) }}{% endif %}
+        {% if es.distance_pct is not none %} · Dist {{ '%+.2f'|format(es.distance_pct) }}%{% endif %}
+      </strong>
+      {% if es.status_reason %}<span class="entry-status-reason">{{ es.status_reason }}</span>{% endif %}
+      {% if es.action_hint %}<span class="entry-status-hint">{{ es.action_hint }}</span>{% endif %}
+      {% if es.new_plan and es.new_plan.note %}<span class="entry-status-plan muted small">{{ es.new_plan.note }}</span>{% endif %}
+    </div>
+    {% endif %}
     <div class="trade-level-field">
       <span class="decision-label">止损价 Stop</span>
       <strong>

@@ -1545,6 +1545,7 @@ def build_executive_summary(
         "position_sizing": (primary or {}).get("position_sizing"),
         "rr_display": (primary or {}).get("rr_display"),
         "entry_zone": (primary or {}).get("entry_zone"),
+        "entry_status": (primary or {}).get("entry_status"),
         "rank_summary": (primary or {}).get("rank_summary"),
         "win_prob_source": (primary or {}).get("win_prob_source"),
         "similar_days": (primary or {}).get("similar_days"),

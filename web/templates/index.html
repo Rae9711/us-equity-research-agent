@@ -115,12 +115,29 @@
           <span class="decision-value">{% if decision_card.win_prob is not none %}{{ decision_card.win_prob }}%{% if decision_card.win_prob_source %} <span class="muted small">({{ decision_card.win_prob_source }})</span>{% endif %}{% else %}—{% endif %}</span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">Entry</span>
+          <span class="decision-label">Ideal Entry</span>
           <span class="decision-value">
             {% if decision_card.entry_zone %}{{ decision_card.entry_zone.display }}{% elif decision_card.entry_price is not none %}${{ decision_card.entry_price }}{% endif %}
             {{ decision_card.entry }}{% if decision_card.entry_source %} <span class="level-source-tag">{{ decision_card.entry_source }}</span>{% endif %}
           </span>
         </div>
+        {% if decision_card.entry_status %}
+        {% set es = decision_card.entry_status %}
+        <div class="decision-field entry-status-field entry-status-{{ es.status | lower }}">
+          <span class="decision-label">Entry Status</span>
+          <span class="decision-value">
+            <span class="entry-status-badge entry-status-{{ es.status | lower }}">{{ es.status }}</span>
+            {% if es.current_price is not none %}
+            <span class="entry-status-meta">Current ${{ '%.2f'|format(es.current_price) }}</span>
+            {% endif %}
+            {% if es.distance_pct is not none %}
+            <span class="entry-status-meta">Dist {{ '%+.2f'|format(es.distance_pct) }}%</span>
+            {% endif %}
+            {% if es.status_reason %}<span class="entry-status-reason">{{ es.status_reason }}</span>{% endif %}
+            {% if es.action_hint %}<span class="entry-status-hint">{{ es.action_hint }}</span>{% endif %}
+          </span>
+        </div>
+        {% endif %}
         <div class="decision-field">
           <span class="decision-label">Stop / Target</span>
           <span class="decision-value">

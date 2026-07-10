@@ -182,6 +182,16 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             + (f"\n- 突发信号：{breaking_summary.get('high', 0)} high" if breaking_summary.get("has_high") else "")
         )
 
+    primary_entry_status = None
+    try:
+        from src.research.entry_status import enrich_primary_from_morning
+
+        primary_entry_status = enrich_primary_from_morning(
+            morning, date_str, session_phase="open"
+        )
+    except Exception:
+        logger.exception("Step 3 entry_status enrichment failed (non-fatal)")
+
     payload = save_step_result(
         3,
         trading_date,
@@ -197,6 +207,7 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             "surprise_attention": surprise_attention,
             "breaking_news_signals": breaking_news_signals,
             "breaking_summary": breaking_summary,
+            "primary_entry_status": primary_entry_status,
         },
     )
     save_snapshot(trading_date, step_label(3), {"step3": payload, "context": context})

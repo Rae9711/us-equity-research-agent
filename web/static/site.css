@@ -488,6 +488,64 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
   vertical-align: middle;
 }
 
+.entry-status-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+.entry-status-premarket,
+.entry-status-planned { background: #f1f5f9; color: #475569; }
+.entry-status-active { background: #dbeafe; color: #1e40af; }
+.entry-status-ready { background: #dcfce7; color: #166534; }
+.entry-status-triggered { background: #e0e7ff; color: #3730a3; }
+.entry-status-missed { background: #ffedd5; color: #9a3412; }
+.entry-status-invalidated { background: #fee2e2; color: #991b1b; }
+.entry-status-expired { background: #e2e8f0; color: #64748b; }
+
+.entry-status-field.entry-status-missed,
+.entry-status-field.entry-status-invalidated {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+}
+.entry-status-field.entry-status-invalidated {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.entry-status-meta {
+  display: inline-block;
+  margin-left: 0.45rem;
+  font-size: 0.85rem;
+  color: #475569;
+}
+.entry-status-reason,
+.entry-status-hint,
+.entry-status-plan {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 0.2rem;
+  font-weight: 500;
+}
+.entry-status-hint,
+.entry-status-hint-inline {
+  color: #9a3412;
+  font-weight: 700;
+}
+.entry-status-ready .entry-status-hint,
+.entry-status-active .entry-status-hint,
+.entry-status-triggered .entry-status-hint,
+.entry-status-planned .entry-status-hint,
+.entry-status-premarket .entry-status-hint {
+  color: #166534;
+}
+.entry-row-stale td { opacity: 0.72; }
+.entry-row-stale .entry-status-badge { opacity: 1; }
+
 .edge-type-badge {
   font-size: 0.78rem;
   font-weight: 600;

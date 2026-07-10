@@ -338,6 +338,60 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     transparency = morning.get("transparency") or {}
     index_trade = morning.get("index_trade") or best_trades.get("index_trade")
 
+    entry_zone = exec_sum.get("entry_zone") or (primary or {}).get("entry_zone")
+    entry_price = (
+        exec_sum.get("entry_price")
+        or (primary or {}).get("entry_price")
+        or best.get("entry_price")
+    )
+    direction = (
+        exec_sum.get("direction")
+        or (primary or {}).get("direction")
+        or best.get("direction")
+    )
+    stop_price = (
+        exec_sum.get("stop_price")
+        or (primary or {}).get("stop_price")
+        or best.get("stop_price")
+    )
+
+    # Live Entry Status vs frozen Ideal Entry (raw/session quote when available)
+    from src.research.entry_status import (
+        attach_entry_status,
+        classify_entry_status,
+        infer_session_phase,
+        resolve_symbol_last,
+    )
+
+    phase = infer_session_phase(trading_date)
+    primary_sym = (primary or {}).get("symbol") or best.get("symbol")
+    live_price = resolve_symbol_last(str(primary_sym or ""), trading_date) if primary_sym else None
+    anchors = (primary or {}).get("level_anchors") or {}
+    entry_status = classify_entry_status(
+        direction=str(direction or ""),
+        current_price=live_price if live_price is not None else (primary or {}).get("current_price"),
+        entry_zone=entry_zone,
+        entry_price=entry_price,
+        stop_price=stop_price,
+        session_phase=phase,
+        vwap=anchors.get("vwap"),
+    )
+
+    top_trades = list(transparency.get("top_trades") or morning.get("top_trades") or [])
+    refreshed_top: list[dict[str, Any]] = []
+    for t in top_trades:
+        row = dict(t)
+        sym = row.get("symbol")
+        px = resolve_symbol_last(str(sym or ""), trading_date) if sym else None
+        attach_entry_status(row, current_price=px, session_phase=phase)
+        refreshed_top.append(row)
+
+    primary_out = dict(primary) if primary else None
+    if primary_out is not None:
+        primary_out["entry_status"] = entry_status
+        if live_price is not None:
+            primary_out["current_price"] = live_price
+
     return {
         "driver": driver_info["display"],
         "driver_type": exec_sum.get("driver_type") or driver_info["driver_type"],
@@ -351,15 +405,15 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "confidence": exec_sum.get("confidence") or best.get("confidence"),
         "entry": exec_sum.get("entry") or best.get("entry", "—"),
         "entry_source": exec_sum.get("entry_source") or (primary or {}).get("entry_source"),
-        "entry_price": exec_sum.get("entry_price") or (primary or {}).get("entry_price") or best.get("entry_price"),
+        "entry_price": entry_price,
         "stop": exec_sum.get("stop") or best.get("stop", "—"),
         "stop_source": exec_sum.get("stop_source") or (primary or {}).get("stop_source"),
-        "stop_price": exec_sum.get("stop_price") or (primary or {}).get("stop_price") or best.get("stop_price"),
+        "stop_price": stop_price,
         "target": exec_sum.get("target") or best.get("target", "—"),
         "target_source": exec_sum.get("target_source") or (primary or {}).get("target_source"),
         "target_price": exec_sum.get("target_price") or (primary or {}).get("target_price") or best.get("target_price"),
         "target_action": exec_sum.get("target_action") or (primary or {}).get("target_action") or best.get("target_action"),
-        "direction": exec_sum.get("direction") or (primary or {}).get("direction") or best.get("direction"),
+        "direction": direction,
         "why_chain": exec_sum.get("why_chain") or best.get("why_chain", "—"),
         "why_factors": exec_sum.get("why_factors") or (primary or {}).get("why_factors") or [],
         "why_vs_runner_up": exec_sum.get("why_vs_runner_up") or (primary or {}).get("why_vs_runner_up"),
@@ -370,7 +424,8 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "trade_economics": exec_sum.get("trade_economics") or (primary or {}).get("trade_economics"),
         "position_sizing": exec_sum.get("position_sizing") or (primary or {}).get("position_sizing"),
         "rr_display": exec_sum.get("rr_display") or (primary or {}).get("rr_display"),
-        "entry_zone": exec_sum.get("entry_zone") or (primary or {}).get("entry_zone"),
+        "entry_zone": entry_zone,
+        "entry_status": entry_status,
         "rank_summary": exec_sum.get("rank_summary") or (primary or {}).get("rank_summary"),
         "win_prob_source": (primary or {}).get("win_prob_source"),
         "similar_days": (primary or {}).get("similar_days") or transparency.get("similar_days"),
@@ -403,11 +458,11 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "advisory": "ADVISORY — 不构成投资建议",
         "trade_candidates": morning.get("trade_candidates") or [],
         "best_opportunity": best,
-        "primary_trade": primary,
+        "primary_trade": primary_out,
         "macro_calendar": morning.get("macro_calendar") or transparency.get("macro_calendar"),
         "driver_tree": morning.get("driver_tree") or (morning.get("parts") or {}).get("P10", {}).get("driver_tree"),
         "trade_plan": morning.get("trade_plan") or transparency.get("trade_plan"),
-        "top_trades": transparency.get("top_trades") or morning.get("top_trades") or [],
+        "top_trades": refreshed_top,
         "watchlist": transparency.get("watchlist") or morning.get("watchlist") or [],
     }
 

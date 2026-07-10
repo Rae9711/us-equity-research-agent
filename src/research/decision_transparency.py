@@ -638,6 +638,7 @@ def enrich_trade_slot(
     exclude_date: str | None = None,
     vix_chg: float | None = None,
     macro_calendar: dict[str, Any] | None = None,
+    session_phase: str | None = "premarket",
 ) -> dict[str, Any]:
     """Attach transparency fields to a trade slot (primary/secondary)."""
     ta = trade_action or slot.get("trade_action", "Small")
@@ -698,6 +699,11 @@ def enrich_trade_slot(
             similar_days=similar or None,
         )
 
+    from src.research.entry_status import attach_entry_status
+
+    # Morning Ideal Entry stays frozen; status is PREMARKET/PLANNED until live recompute
+    attach_entry_status(slot, session_phase=session_phase or "premarket")
+
     return slot
 
 
@@ -723,6 +729,7 @@ def build_top5_board(top_trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "rr_display": slot.get("rr_display"),
                 "entry_price": slot.get("entry_price"),
                 "entry_zone": slot.get("entry_zone"),
+                "entry_status": slot.get("entry_status"),
                 "stop_price": slot.get("stop_price"),
                 "target_price": slot.get("target_price"),
                 "why_today": slot.get("why_today") or slot.get("why_chain"),
