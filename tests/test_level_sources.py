@@ -12,6 +12,7 @@ from src.research.level_sources import (
     format_if_level,
     format_tagged,
     source_label,
+    trade_levels_valid,
 )
 from src.research.trade_candidates import _why_vs_runner_up, compute_trade_decision
 
@@ -52,6 +53,123 @@ def test_derive_trade_levels_long():
     assert levels["stop_source"] == "orb_low"
     assert levels["target_source"] in ("expected_close", "expected_high")
     assert "(" in levels["entry"]
+    assert levels["levels_valid"] is True
+    assert levels["stop_price"] < levels["entry_price"] <= levels["target_price"]
+
+
+def test_long_never_has_target_below_entry():
+    """LONG geometry: stop < entry ≤ target when levels_valid."""
+    anchors = LevelAnchors(
+        vwap=254.0,
+        orb_high=256.0,
+        orb_low=248.0,
+        prev_high=258.0,
+        prev_low=238.0,
+        prior_close=240.0,
+        orb_from_minute=True,
+    )
+    levels = derive_trade_levels(
+        "LONG",
+        anchors,
+        current=255.0,
+        expected_high=262.0,
+        expected_low=246.0,
+        expected_close=260.0,
+    )
+    assert levels["target_price"] >= levels["entry_price"]
+    assert trade_levels_valid(
+        "LONG",
+        entry_price=levels["entry_price"],
+        stop_price=levels["stop_price"],
+        target_price=levels["target_price"],
+        entry_zone=levels["entry_zone"],
+    )
+
+
+def test_short_never_has_target_above_entry():
+    """SHORT geometry: target ≤ entry < stop when levels_valid."""
+    anchors = LevelAnchors(
+        vwap=410.0,
+        orb_high=418.0,
+        orb_low=405.0,
+        prev_high=420.0,
+        prev_low=400.0,
+        prior_close=415.0,
+        orb_from_minute=True,
+    )
+    levels = derive_trade_levels(
+        "SHORT",
+        anchors,
+        current=408.0,
+        expected_high=419.0,
+        expected_low=398.0,
+        expected_close=402.0,
+    )
+    assert levels["levels_valid"] is True
+    assert levels["target_price"] <= levels["entry_price"] < levels["stop_price"]
+    assert trade_levels_valid(
+        "SHORT",
+        entry_price=levels["entry_price"],
+        stop_price=levels["stop_price"],
+        target_price=levels["target_price"],
+        entry_zone=levels["entry_zone"],
+    )
+
+
+def test_arm_like_high_entry_low_expected_close_invalid_long():
+    """ARM-like: VWAP/ORB entry ~341 above expected_close 333 → not a valid LONG."""
+    anchors = LevelAnchors(
+        vwap=341.0,
+        orb_high=342.0,
+        orb_low=322.0,
+        prev_high=345.0,
+        prev_low=320.0,
+        prior_close=330.0,
+        orb_from_minute=True,
+    )
+    levels = derive_trade_levels(
+        "LONG",
+        anchors,
+        current=340.5,
+        expected_high=334.0,
+        expected_low=322.0,
+        expected_close=333.69,
+    )
+    # No entry candidate sits below target → levels_valid False
+    assert levels["levels_valid"] is False
+    assert levels["target_price"] < 341.0
+    assert not trade_levels_valid(
+        "LONG",
+        entry_price=levels["entry_price"],
+        stop_price=levels["stop_price"],
+        target_price=levels["target_price"],
+        entry_zone=levels.get("entry_zone"),
+    )
+
+
+def test_long_falls_back_to_current_when_vwap_above_target():
+    """When VWAP/ORB sit above target, use current if it still has upside."""
+    anchors = LevelAnchors(
+        vwap=341.0,
+        orb_high=342.0,
+        orb_low=322.0,
+        prev_high=345.0,
+        prev_low=320.0,
+        prior_close=330.0,
+        orb_from_minute=True,
+    )
+    levels = derive_trade_levels(
+        "LONG",
+        anchors,
+        current=328.0,
+        expected_high=336.0,
+        expected_low=322.0,
+        expected_close=334.0,
+    )
+    assert levels["levels_valid"] is True
+    assert levels["entry_source"] == "current"
+    assert levels["entry_price"] <= levels["target_price"]
+    assert levels["stop_price"] < levels["entry_price"]
 
 
 @patch("src.research.level_sources._ohlcv_bars_yfinance", return_value=[])
@@ -135,11 +253,16 @@ def test_ranked_candidate_has_auditable_fields(_prior, _obs, _levels, _anchors):
     _levels.return_value = {
         "entry": "Above 255.0 (VWAP)",
         "entry_source": "vwap",
+        "entry_price": 255.0,
+        "entry_zone": {"low": 254.0, "high": 256.0, "mid": 255.0},
         "stop": "248.0 (ORB低点)",
         "stop_source": "orb_low",
+        "stop_price": 248.0,
         "target": "260.0 (预期收盘)",
         "target_source": "expected_close",
+        "target_price": 260.0,
         "targets": ["260.0 (预期收盘)"],
+        "levels_valid": True,
         "level_anchors": {},
     }
 

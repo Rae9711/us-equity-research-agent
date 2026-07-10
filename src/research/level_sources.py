@@ -292,8 +292,14 @@ def compute_entry_zone(
     entry_src: str,
     *,
     tolerance_pct: float = ENTRY_ZONE_TOLERANCE_PCT,
+    target_price: float | None = None,
 ) -> dict[str, Any]:
-    """Entry zone from ORB/VWAP confluence near chosen entry (±tolerance)."""
+    """Entry zone from ORB/VWAP confluence near chosen entry (±tolerance).
+
+    Anchors on the wrong side of target are excluded so the zone cannot
+    cross the target, but the structural entry_px itself is never moved.
+    """
+    del direction  # reserved for callers / future direction-specific banding
     anchor_map: list[tuple[str, float | None]] = [
         ("vwap", anchors.vwap),
         ("orb_high", anchors.orb_high),
@@ -304,14 +310,21 @@ def compute_entry_zone(
     ]
     matched: list[dict[str, Any]] = []
     for src, px in anchor_map:
-        if px is not None and _near(px, entry_px, tolerance_pct):
-            matched.append(
-                {
-                    "source": src,
-                    "label": source_label(src),
-                    "price": round(px, 2),
-                }
-            )
+        if px is None or not _near(px, entry_px, tolerance_pct):
+            continue
+        # Do not expand Ideal Entry past the target (would invent upside/downside).
+        if target_price is not None and target_price > 0:
+            if entry_px <= target_price and px > target_price:
+                continue
+            if entry_px >= target_price and px < target_price:
+                continue
+        matched.append(
+            {
+                "source": src,
+                "label": source_label(src),
+                "price": round(px, 2),
+            }
+        )
 
     prices = [entry_px] + [a["price"] for a in matched]
     low = min(prices)
@@ -321,6 +334,14 @@ def compute_entry_zone(
         band = entry_px * tolerance_pct / 100.0
         low = round(entry_px - band, 2)
         high = round(entry_px + band, 2)
+        # Keep single-point band from crossing target
+        if target_price is not None and target_price > 0:
+            if entry_px < target_price:
+                high = min(high, round(target_price * 0.999, 2))
+                low = min(low, high)
+            elif entry_px > target_price:
+                low = max(low, round(target_price * 1.001, 2))
+                high = max(high, low)
 
     mid = round((low + high) / 2, 2)
     spread = high - low
@@ -340,6 +361,160 @@ def compute_entry_zone(
     }
 
 
+def trade_levels_valid(
+    direction: str,
+    *,
+    entry_price: float | None,
+    stop_price: float | None,
+    target_price: float | None,
+    entry_zone: dict[str, Any] | None = None,
+) -> bool:
+    """Hard geometry invariants for directional trade levels.
+
+    LONG:  stop < entry ≤ target (and entry_zone.high < target when zone present)
+    SHORT: target ≤ entry < stop (and entry_zone.low > target when zone present)
+    """
+    if entry_price is None or stop_price is None or target_price is None:
+        return False
+    if entry_price <= 0 or stop_price <= 0 or target_price <= 0:
+        return False
+
+    if direction == "LONG":
+        if not (stop_price < entry_price <= target_price):
+            return False
+        if entry_zone:
+            zone_high = entry_zone.get("high")
+            if zone_high is not None and float(zone_high) >= target_price:
+                return False
+        return True
+
+    if direction == "SHORT":
+        if not (target_price <= entry_price < stop_price):
+            return False
+        if entry_zone:
+            zone_low = entry_zone.get("low")
+            if zone_low is not None and float(zone_low) <= target_price:
+                return False
+        return True
+
+    return False
+
+
+def _anchor_near_market(px: float | None, current: float, *, max_dev_pct: float = 15.0) -> bool:
+    """Ignore anchors that are wildly inconsistent with the session price."""
+    if px is None or current <= 0:
+        return False
+    return abs(px - current) / current * 100.0 <= max_dev_pct
+
+
+def _long_entry_candidates(
+    anchors: LevelAnchors,
+    current: float,
+) -> list[tuple[float, str, str]]:
+    """Preferred LONG entries (highest structural first), then current fallback."""
+    out: list[tuple[float, str, str]] = []
+    if (
+        anchors.vwap is not None
+        and _anchor_near_market(anchors.vwap, current)
+        and current >= anchors.vwap * 0.998
+    ):
+        out.append((anchors.vwap, "vwap", "Above"))
+    if anchors.orb_high is not None and _anchor_near_market(anchors.orb_high, current):
+        src = "orb_high" if anchors.orb_from_minute else "prev_high"
+        out.append((anchors.orb_high, src, "Above"))
+    out.append((current, "current", "Above"))
+    seen: set[float] = set()
+    uniq: list[tuple[float, str, str]] = []
+    for px, src, prefix in out:
+        key = round(px, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((px, src, prefix))
+    return uniq
+
+
+def _short_entry_candidates(
+    anchors: LevelAnchors,
+    current: float,
+) -> list[tuple[float, str, str]]:
+    out: list[tuple[float, str, str]] = []
+    if (
+        anchors.vwap is not None
+        and _anchor_near_market(anchors.vwap, current)
+        and current <= anchors.vwap * 1.002
+    ):
+        out.append((anchors.vwap, "vwap", "Below"))
+    if anchors.orb_low is not None and _anchor_near_market(anchors.orb_low, current):
+        src = "orb_low" if anchors.orb_from_minute else "prev_low"
+        out.append((anchors.orb_low, src, "Below"))
+    out.append((current, "current", "Below"))
+    seen: set[float] = set()
+    uniq: list[tuple[float, str, str]] = []
+    for px, src, prefix in out:
+        key = round(px, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((px, src, prefix))
+    return uniq
+
+
+def _long_stop_candidates(
+    anchors: LevelAnchors,
+    current: float,
+    expected_low: float,
+) -> list[tuple[float, str]]:
+    out: list[tuple[float, str]] = []
+    if (
+        anchors.orb_low is not None
+        and anchors.orb_from_minute
+        and _anchor_near_market(anchors.orb_low, current)
+    ):
+        out.append((anchors.orb_low, "orb_low"))
+    if anchors.prev_low is not None and _anchor_near_market(anchors.prev_low, current):
+        out.append((anchors.prev_low, "prev_low"))
+    out.append((expected_low, "expected_low"))
+    # Soft structural stop below current if expected_low is unusable
+    out.append((current * 0.992, "current"))
+    seen: set[float] = set()
+    uniq: list[tuple[float, str]] = []
+    for px, src in out:
+        key = round(px, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((px, src))
+    return uniq
+
+
+def _short_stop_candidates(
+    anchors: LevelAnchors,
+    current: float,
+    expected_high: float,
+) -> list[tuple[float, str]]:
+    out: list[tuple[float, str]] = []
+    if (
+        anchors.orb_high is not None
+        and anchors.orb_from_minute
+        and _anchor_near_market(anchors.orb_high, current)
+    ):
+        out.append((anchors.orb_high, "orb_high"))
+    if anchors.prev_high is not None and _anchor_near_market(anchors.prev_high, current):
+        out.append((anchors.prev_high, "prev_high"))
+    out.append((expected_high, "expected_high"))
+    out.append((current * 1.008, "current"))
+    seen: set[float] = set()
+    uniq: list[tuple[float, str]] = []
+    for px, src in out:
+        key = round(px, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((px, src))
+    return uniq
+
+
 def derive_trade_levels(
     direction: str,
     anchors: LevelAnchors,
@@ -349,87 +524,118 @@ def derive_trade_levels(
     expected_low: float,
     expected_close: float,
 ) -> dict[str, Any]:
-    """Entry / stop / target with level_source tags."""
+    """Entry / stop / target with level_source tags.
+
+    Chooses an entry/stop pair that respects target geometry when possible. If no
+    stop < entry ≤ target (LONG) or target ≤ entry < stop (SHORT) setup
+    exists, returns levels_valid=False so callers can Pass the trade.
+    """
+    empty = {
+        "entry": "—",
+        "entry_source": None,
+        "entry_price": None,
+        "entry_zone": None,
+        "stop": "—",
+        "stop_source": None,
+        "stop_price": None,
+        "target": "—",
+        "target_source": None,
+        "target_price": None,
+        "targets": [],
+        "levels_valid": False,
+        "level_anchors": anchors,
+    }
+
     if direction == "LONG":
-        if anchors.vwap is not None and current >= anchors.vwap * 0.998:
-            entry_px = anchors.vwap
-            entry_src = "vwap"
-            entry_prefix = "Above"
-        elif anchors.orb_high is not None:
-            entry_px = anchors.orb_high
-            entry_src = "orb_high" if anchors.orb_from_minute else "prev_high"
-            entry_prefix = "Above"
-        else:
-            entry_px = current
-            entry_src = "current"
-            entry_prefix = "Above"
-
-        if anchors.orb_low is not None and anchors.orb_from_minute:
-            stop_px = anchors.orb_low
-            stop_src = "orb_low"
-        elif anchors.prev_low is not None:
-            stop_px = anchors.prev_low
-            stop_src = "prev_low"
-        else:
-            stop_px = expected_low
-            stop_src = "expected_low"
-
         target_px = expected_close
         target_src = "expected_close"
         if expected_high > target_px * 1.002:
             target_px = expected_high
             target_src = "expected_high"
 
+        entry_cands = _long_entry_candidates(anchors, current)
+        stop_cands = _long_stop_candidates(anchors, current, expected_low)
+        entry_px, entry_src, entry_prefix = entry_cands[0]
+        stop_px, stop_src = stop_cands[0]
+        chosen = False
+        for cand_stop, cand_stop_src in stop_cands:
+            for cand_px, cand_src, cand_prefix in entry_cands:
+                if cand_stop < cand_px <= target_px:
+                    entry_px, entry_src, entry_prefix = cand_px, cand_src, cand_prefix
+                    stop_px, stop_src = cand_stop, cand_stop_src
+                    chosen = True
+                    break
+            if chosen:
+                break
+
     elif direction == "SHORT":
-        if anchors.vwap is not None and current <= anchors.vwap * 1.002:
-            entry_px = anchors.vwap
-            entry_src = "vwap"
-            entry_prefix = "Below"
-        elif anchors.orb_low is not None:
-            entry_px = anchors.orb_low
-            entry_src = "orb_low" if anchors.orb_from_minute else "prev_low"
-            entry_prefix = "Below"
-        else:
-            entry_px = current
-            entry_src = "current"
-            entry_prefix = "Below"
-
-        if anchors.orb_high is not None and anchors.orb_from_minute:
-            stop_px = anchors.orb_high
-            stop_src = "orb_high"
-        elif anchors.prev_high is not None:
-            stop_px = anchors.prev_high
-            stop_src = "prev_high"
-        else:
-            stop_px = expected_high
-            stop_src = "expected_high"
-
         target_px = expected_close
         target_src = "expected_close"
         if expected_low < target_px * 0.998:
             target_px = expected_low
             target_src = "expected_low"
+
+        entry_cands = _short_entry_candidates(anchors, current)
+        stop_cands = _short_stop_candidates(anchors, current, expected_high)
+        entry_px, entry_src, entry_prefix = entry_cands[0]
+        stop_px, stop_src = stop_cands[0]
+        chosen = False
+        for cand_stop, cand_stop_src in stop_cands:
+            for cand_px, cand_src, cand_prefix in entry_cands:
+                if target_px <= cand_px < cand_stop:
+                    entry_px, entry_src, entry_prefix = cand_px, cand_src, cand_prefix
+                    stop_px, stop_src = cand_stop, cand_stop_src
+                    chosen = True
+                    break
+            if chosen:
+                break
     else:
-        return {
-            "entry": "—",
-            "entry_source": None,
-            "stop": "—",
-            "stop_source": None,
-            "target": "—",
-            "target_source": None,
-            "targets": [],
-            "level_anchors": anchors,
-        }
+        return empty
 
     entry = format_tagged(entry_px, entry_src, prefix=entry_prefix)
     stop = format_tagged(stop_px, stop_src)
     target = format_tagged(target_px, target_src)
-    entry_zone = compute_entry_zone(direction, anchors, entry_px, entry_src)
+    entry_zone = compute_entry_zone(
+        direction, anchors, entry_px, entry_src, target_price=target_px
+    )
+    # Prefer structural entry for ER math; zone mid only when it stays consistent.
+    entry_mid = entry_zone["mid"]
+    if abs(entry_mid - entry_px) / max(entry_px, 1e-9) > 0.01:
+        entry_for_price = round(entry_px, 2)
+    else:
+        entry_for_price = entry_mid
+
+    valid = trade_levels_valid(
+        direction,
+        entry_price=entry_for_price,
+        stop_price=round(stop_px, 2),
+        target_price=round(target_px, 2),
+        entry_zone=entry_zone,
+    )
+    # If zone expansion broke validity but structural entry is fine, drop zone check
+    if not valid and trade_levels_valid(
+        direction,
+        entry_price=round(entry_px, 2),
+        stop_price=round(stop_px, 2),
+        target_price=round(target_px, 2),
+        entry_zone=None,
+    ):
+        entry_for_price = round(entry_px, 2)
+        entry_zone = {
+            "low": round(entry_px, 2),
+            "high": round(entry_px, 2),
+            "mid": round(entry_px, 2),
+            "anchors": [],
+            "display": f"Entry Zone {entry_px:.2f}–{entry_px:.2f}",
+            "entry_source": entry_src,
+            "tolerance_pct": ENTRY_ZONE_TOLERANCE_PCT,
+        }
+        valid = True
 
     return {
         "entry": entry,
         "entry_source": entry_src,
-        "entry_price": entry_zone["mid"],
+        "entry_price": entry_for_price,
         "entry_zone": entry_zone,
         "stop": stop,
         "stop_source": stop_src,
@@ -438,6 +644,7 @@ def derive_trade_levels(
         "target_source": target_src,
         "target_price": round(target_px, 2),
         "targets": [target],
+        "levels_valid": valid,
         "level_anchors": {
             "vwap": anchors.vwap,
             "orb_high": anchors.orb_high,

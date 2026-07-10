@@ -9,6 +9,7 @@ from src.research.trade_candidates import (
     CANDIDATE_SYMBOLS,
     FINAL_SCORE_THRESHOLD,
     _apply_price_based_return,
+    _enforce_level_invariants,
     _expected_return_from_prices,
     _geo_context_penalty,
     _instrument,
@@ -16,6 +17,7 @@ from src.research.trade_candidates import (
     _return_calculation_string,
     _risk_reward_from_levels,
     _score_candidate_v2,
+    _slot_is_actionable,
     compute_trade_decision,
 )
 
@@ -579,4 +581,104 @@ def test_trade_candidates_direction_from_bias():
         bear = compute_trade_decision(raw, rule_bundle=bear_bundle, parts=parts)
     for row in bear["trade_candidates"]:
         assert row.get("direction") == "SHORT"
+
+
+def test_enforce_rejects_long_with_target_below_entry():
+    """ARM-like LONG slot with entry > target must become Pass."""
+    slot = {
+        "symbol": "ARM",
+        "direction": "LONG",
+        "trade_action": "BUY",
+        "trade": "BUY",
+        "entry_price": 341.0,
+        "stop_price": 322.22,
+        "target_price": 333.69,
+        "entry_zone": {"low": 340.0, "high": 342.0, "mid": 341.0},
+        "expected_return_pct": -2.01,
+        "why_factors": ["RS weak vs QQQ -2.42%"],
+        "levels_valid": False,
+    }
+    out = _enforce_level_invariants(slot)
+    assert out["trade_action"] == "Pass"
+    assert out["levels_valid"] is False
+    assert not _slot_is_actionable(out)
+
+
+def test_enforce_rejects_short_with_target_above_entry():
+    slot = {
+        "symbol": "TSLA",
+        "direction": "SHORT",
+        "trade_action": "Small",
+        "trade": "Small",
+        "entry_price": 400.0,
+        "stop_price": 410.0,
+        "target_price": 420.0,  # above entry — invalid short
+        "entry_zone": {"low": 398.0, "high": 402.0, "mid": 400.0},
+        "expected_return_pct": -5.0,
+        "why_factors": [],
+        "levels_valid": False,
+    }
+    out = _enforce_level_invariants(slot)
+    assert out["trade_action"] == "Pass"
+    assert not _slot_is_actionable(out)
+
+
+def test_enforce_keeps_valid_long():
+    slot = {
+        "symbol": "NVDA",
+        "direction": "LONG",
+        "trade_action": "BUY",
+        "trade": "BUY",
+        "entry_price": 100.0,
+        "stop_price": 95.0,
+        "target_price": 105.0,
+        "entry_zone": {"low": 99.0, "high": 101.0, "mid": 100.0},
+        "expected_return_pct": 5.0,
+        "why_factors": [],
+        "levels_valid": True,
+    }
+    out = _enforce_level_invariants(slot)
+    assert out["trade_action"] == "BUY"
+    assert _slot_is_actionable(out)
+
+
+def test_actionable_top_trades_never_violate_geometry():
+    """Integration: every actionable top_trade satisfies direction geometry + ER≥0."""
+    raw = _bullish_raw()
+    rule_bundle = {
+        "bias": "Bullish Bias",
+        "total": 3,
+        "driver_type": "Momentum",
+        "daily_driver": "AI Momentum",
+        "catalysts_today": [],
+        "macro_calendar": {"catalysts": [], "has_material_catalyst": False},
+        "driver_tree": {"primary": {"type": "Momentum", "label": "AI Momentum"}},
+    }
+    parts = {
+        "P9": {"buy_options": "Yes", "zero_dte": "No", "buy_call": "Yes", "buy_put": "No"},
+        "P16": {"judgment": "计划 Trade", "one_liner": "做多"},
+    }
+    with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
+        result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
+
+    for slot in result["top_trades"]:
+        if not _slot_is_actionable(slot):
+            continue
+        entry = slot["entry_price"]
+        stop = slot["stop_price"]
+        target = slot["target_price"]
+        assert entry is not None and stop is not None and target is not None
+        if slot["direction"] == "LONG":
+            assert stop < entry <= target
+            assert slot["expected_return_pct"] >= 0
+        elif slot["direction"] == "SHORT":
+            assert target <= entry < stop
+            assert slot["expected_return_pct"] >= 0
+
+    primary = result["best_trades"].get("primary")
+    if primary and _slot_is_actionable(primary):
+        assert primary["entry_price"] <= primary["target_price"] or primary["direction"] == "SHORT"
+        if primary["direction"] == "LONG":
+            assert primary["target_price"] >= primary["entry_price"]
+            assert primary["expected_return_pct"] >= 0
 

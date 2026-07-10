@@ -25,7 +25,12 @@ from src.research.decision_transparency import (
     init_win_prob_breakdown,
 )
 from src.research.edges import compute_edges
-from src.research.level_sources import build_level_reasons, compute_anchors, derive_trade_levels
+from src.research.level_sources import (
+    build_level_reasons,
+    compute_anchors,
+    derive_trade_levels,
+    trade_levels_valid,
+)
 from src.research.macro_calendar import has_geopolitical_risk
 from src.utils.paths import data_root
 from src.utils.quote_resolve import session_observation
@@ -487,6 +492,62 @@ def _apply_price_based_return(
     return slot
 
 
+def _enforce_level_invariants(slot: dict[str, Any]) -> dict[str, Any]:
+    """Reject slots whose entry/stop/target geometry or price ER is inconsistent.
+
+    LONG: stop < entry ≤ target; SHORT: target ≤ entry < stop.
+    Actionable BUY/Small requires ER ≥ MIN_UPSIDE_PCT after price reconciliation.
+    """
+    direction = str(slot.get("direction") or "")
+    entry_px = _safe_float(slot.get("entry_price"))
+    stop_px = _safe_float(slot.get("stop_price"))
+    target_px = _safe_float(slot.get("target_price"))
+    entry_zone = slot.get("entry_zone")
+    if not isinstance(entry_zone, dict):
+        entry_zone = None
+
+    levels_ok = slot.get("levels_valid")
+    if levels_ok is None:
+        levels_ok = trade_levels_valid(
+            direction,
+            entry_price=entry_px,
+            stop_price=stop_px,
+            target_price=target_px,
+            entry_zone=entry_zone,
+        )
+    slot["levels_valid"] = bool(levels_ok)
+
+    er = _safe_float(slot.get("expected_return_pct"))
+    reasons: list[str] = []
+    if not levels_ok:
+        reasons.append("Levels invalid: entry/stop/target geometry")
+    if er is not None and er < 0:
+        reasons.append(f"Price ER {er:+.2f}% < 0")
+    if er is not None and er < MIN_UPSIDE_PCT:
+        reasons.append(f"Price ER {er:.2f}% < {MIN_UPSIDE_PCT}%")
+
+    actionable = slot.get("trade_action") in ("BUY", "Small")
+    if actionable and reasons:
+        slot["trade_action"] = "Pass"
+        slot["trade"] = "Pass"
+        why = list(slot.get("why_factors") or [])
+        for r in reasons:
+            if r not in why:
+                why.append(r)
+        slot["why_factors"] = why[:8]
+        slot["why"] = " · ".join(why[:4]) if why else slot.get("why", "—")
+        slot["invalid_levels_reason"] = reasons[0]
+    return slot
+
+
+def _slot_is_actionable(slot: dict[str, Any]) -> bool:
+    return (
+        slot.get("trade_action") in ("BUY", "Small")
+        and slot.get("levels_valid", True)
+        and (_safe_float(slot.get("expected_return_pct")) or 0) >= MIN_UPSIDE_PCT
+    )
+
+
 def _rr_weight(rr: float) -> float:
     return max(0.5, min(1.5, rr / 2.0))
 
@@ -889,6 +950,7 @@ def _build_trade_slot(
         "target_price": levels.get("target_price"),
         "targets": levels.get("targets") or [],
         "level_anchors": levels.get("level_anchors"),
+        "levels_valid": levels.get("levels_valid", True),
         "why": row["why_factors"],
         "why_chain": row["why"],
         "why_vs_runner_up": row.get("why_vs_runner_up", "—"),
@@ -926,6 +988,8 @@ def _build_trade_slot(
         direction=direction,
         heuristic_er=row["expected_return_pct"],
     )
+    slot["levels_valid"] = bool(levels.get("levels_valid", True))
+    slot = _enforce_level_invariants(slot)
     slot["invalidation"] = _invalidation_for_slot(slot, macro_calendar)
     return slot
 
@@ -995,17 +1059,16 @@ def _decision_tree(
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
 
     picks = _select_stock_picks(ranked, edges, tradeable)
-    # Top 5 board: best tradeable rows regardless of P16 index gate
-    top5_rows = tradeable[:5] if tradeable else ranked[:5]
     top_trades: list[dict[str, Any]] = []
-    for i, row in enumerate(top5_rows):
+    seen_syms: set[str] = set()
+
+    def _make_slot(row: dict[str, Any], rank: int) -> dict[str, Any]:
         sym = row["symbol"]
-        row_dir = direction
         section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
         slot = _build_trade_slot(
             row,
-            rank=i + 1,
-            direction=row_dir,
+            rank=rank,
+            direction=direction,
             p9=p9,
             obs=obs_by_sym.get(sym, {}),
             raw=raw,
@@ -1016,15 +1079,44 @@ def _decision_tree(
             as_of_et=as_of_et,
             macro_calendar=macro_calendar,
         )
-        slot = enrich_trade_slot(
+        return enrich_trade_slot(
             slot,
             ranked=ranked,
-            trade_action=row["trade_action"],
+            trade_action=slot.get("trade_action") or row["trade_action"],
             exclude_date=exclude_date,
             vix_chg=vix_chg,
             macro_calendar=macro_calendar,
         )
+
+    # Prefer tradeable rows; backfill from ranked if levels invalidate a slot.
+    candidate_rows = list(tradeable) if tradeable else list(ranked)
+    for row in candidate_rows:
+        if len(top_trades) >= 5:
+            break
+        sym = row["symbol"]
+        if sym in seen_syms:
+            continue
+        slot = _make_slot(row, rank=len(top_trades) + 1)
+        seen_syms.add(sym)
+        # Sync ranked row so Pass after level check is visible elsewhere
+        if slot.get("trade_action") == "Pass" and row.get("trade_action") != "Pass":
+            row["trade_action"] = "Pass"
+            row["trade"] = "Pass"
+            if slot.get("invalid_levels_reason"):
+                why = list(row.get("why_factors") or [])
+                reason = slot["invalid_levels_reason"]
+                if reason not in why:
+                    why.append(reason)
+                row["why_factors"] = why[:8]
+        if not _slot_is_actionable(slot):
+            continue
         top_trades.append(slot)
+
+    # If nothing actionable, still show top ranked slots (as Pass) for transparency
+    if not top_trades:
+        for i, row in enumerate((tradeable or ranked)[:5]):
+            slot = _make_slot(row, rank=i + 1)
+            top_trades.append(slot)
 
     watchlist: list[dict[str, Any]] = []
     top5_syms = {t["symbol"] for t in top_trades}
@@ -1069,31 +1161,43 @@ def _decision_tree(
     }
 
     slot_names = ("primary", "secondary", "watchlist")
-    for i, row in enumerate(picks):
+    valid_picks: list[dict[str, Any]] = []
+    for row in picks:
         sym = row["symbol"]
         section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
-        slot = _build_trade_slot(
-            row,
-            rank=i + 1,
-            direction=direction,
-            p9=p9,
-            obs=obs_by_sym.get(sym, {}),
-            raw=raw,
-            prior_raw=prior_raw,
-            trading_day=trading_day or date.today(),
-            section=section,
-            q=quote_by_sym.get(sym, {}),
-            as_of_et=as_of_et,
-            macro_calendar=macro_calendar,
-        )
-        slot = enrich_trade_slot(
-            slot,
-            ranked=ranked,
-            trade_action=row["trade_action"],
-            exclude_date=exclude_date,
-            vix_chg=vix_chg,
-            macro_calendar=macro_calendar,
-        )
+        # Reuse top_trades slot when available (already invariant-checked)
+        existing = next((t for t in top_trades if t.get("symbol") == sym), None)
+        if existing is not None:
+            slot = {**existing, "rank": len(valid_picks) + 1}
+        else:
+            slot = _make_slot(row, rank=len(valid_picks) + 1)
+        if not _slot_is_actionable(slot):
+            if slot.get("trade_action") == "Pass":
+                row["trade_action"] = "Pass"
+                row["trade"] = "Pass"
+            continue
+        valid_picks.append(slot)
+        if len(valid_picks) >= 3:
+            break
+
+    # Backfill primary/secondary from actionable top_trades if picks were invalidated
+    if len(valid_picks) < 3:
+        for t in top_trades:
+            if len(valid_picks) >= 3:
+                break
+            if any(p.get("symbol") == t.get("symbol") for p in valid_picks):
+                continue
+            if not _slot_is_actionable(t):
+                continue
+            if t.get("symbol") not in _STOCK_SYMBOLS:
+                continue
+            valid_picks.append({**t, "rank": len(valid_picks) + 1})
+
+    if not valid_picks and not threshold_msg:
+        threshold_msg = "今日无任何标的达到交易阈值"
+        slots["threshold_message"] = threshold_msg
+
+    for i, slot in enumerate(valid_picks[:3]):
         slots[slot_names[i]] = slot
         slots["stock_trades"].append({
             "rank": slot["rank"],
