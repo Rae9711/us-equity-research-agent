@@ -66,40 +66,56 @@ def _collect_polygon(
     *,
     published_gte: str | None = None,
     storage_limit: int | None = None,
+    broad_first: bool = False,
+    pause_s: float = 0.0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    import time
+
     polygon = PolygonClient()
     polygon_articles: list[dict[str, Any]] = []
     poly_errors: list[str] = []
     seen_titles: set[str] = set()
     storage_cap = storage_limit or int(cfg.get("polygon_storage_limit", 60))
 
-    per_ticker_limit = int(cfg.get("polygon_per_ticker_limit", 8))
-    for ticker in cfg.get("polygon_tickers", []):
-        try:
-            data = polygon.news(ticker, limit=per_ticker_limit, published_gte=published_gte)
-            for article in data.get("results") or []:
-                title = str(article.get("title") or "")
-                if not title or title in seen_titles:
-                    continue
-                seen_titles.add(title)
-                polygon_articles.append(_normalize_polygon_article(article, ticker))
-        except Exception as exc:  # noqa: BLE001
-            poly_errors.append(f"{ticker}:{exc}")
+    def _ingest(article: dict[str, Any], ticker: str | None = None) -> None:
+        title = str(article.get("title") or "")
+        if not title or title in seen_titles:
+            return
+        seen_titles.add(title)
+        polygon_articles.append(_normalize_polygon_article(article, ticker))
 
-    try:
-        broad_limit = int(cfg.get("polygon_broad_limit", 40))
-        broad_params: dict[str, Any] = {"limit": broad_limit, "order": "desc"}
-        if published_gte:
-            broad_params["published_utc.gte"] = published_gte
-        broad = polygon.get("/v2/reference/news", broad_params)
-        for article in broad.get("results") or []:
-            title = str(article.get("title") or "")
-            if not title or title in seen_titles:
-                continue
-            seen_titles.add(title)
-            polygon_articles.append(_normalize_polygon_article(article))
-    except Exception as exc:  # noqa: BLE001
-        poly_errors.append(f"broad:{exc}")
+    def _fetch_broad() -> None:
+        try:
+            broad_limit = int(cfg.get("polygon_broad_limit", 40))
+            broad_params: dict[str, Any] = {"limit": broad_limit, "order": "desc"}
+            if published_gte:
+                broad_params["published_utc.gte"] = published_gte
+            broad = polygon.get("/v2/reference/news", broad_params)
+            for article in broad.get("results") or []:
+                _ingest(article)
+        except Exception as exc:  # noqa: BLE001
+            poly_errors.append(f"broad:{exc}")
+
+    def _fetch_tickers() -> None:
+        per_ticker_limit = int(cfg.get("polygon_per_ticker_limit", 8))
+        for i, ticker in enumerate(cfg.get("polygon_tickers", [])):
+            if pause_s and i:
+                time.sleep(pause_s)
+            try:
+                data = polygon.news(ticker, limit=per_ticker_limit, published_gte=published_gte)
+                for article in data.get("results") or []:
+                    _ingest(article, ticker)
+            except Exception as exc:  # noqa: BLE001
+                poly_errors.append(f"{ticker}:{exc}")
+
+    if broad_first:
+        _fetch_broad()
+        if pause_s:
+            time.sleep(pause_s)
+        _fetch_tickers()
+    else:
+        _fetch_tickers()
+        _fetch_broad()
 
     return polygon_articles[:storage_cap], poly_errors
 
@@ -143,11 +159,15 @@ def collect_intraday_news(since: datetime | None = None) -> dict[str, Any]:
 
     published_gte = since_dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # Broad first: post-open window is sparse; avoid burning rate limit on tickers
+    # before the market-wide query (free-tier Polygon often 429s after ~5 calls).
     intraday_cap = min(int(cfg.get("polygon_storage_limit", 60)), 40)
     polygon_articles, poly_errors = _collect_polygon(
         cfg,
         published_gte=published_gte,
         storage_limit=intraday_cap,
+        broad_first=True,
+        pause_s=0.15,
     )
 
     return {

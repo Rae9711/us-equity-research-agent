@@ -1153,6 +1153,7 @@ def _decision_tree(
         "secondary": None,
         "watchlist": None,
         "index_trade": index_trade,
+        "p16_gate": p16_gate,
         "threshold_message": threshold_msg,
         "stock_trades": [],
         "top_trades": top_trades,

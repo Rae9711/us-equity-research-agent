@@ -33,10 +33,20 @@ body_md 用 markdown 列表，含昨日→更新后 Score 表（若 Driver 未�
 """
 
 
-def _headlines_since_open(trading_date: date) -> list[dict[str, Any]]:
+def _headlines_since_open(
+    trading_date: date,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return (headlines, collection_errors). Errors are non-fatal but surfaced."""
     try:
         bundle = collect_intraday_news(since=market_open_et(trading_date))
-        return [
+        errors = [str(e) for e in (bundle.get("errors") or [])][:8]
+        if errors:
+            logger.warning(
+                "Intraday news partial failures (%d): %s",
+                len(errors),
+                "; ".join(errors[:3])[:400],
+            )
+        headlines = [
             {
                 "title": h.get("title"),
                 "ticker": h.get("ticker"),
@@ -46,9 +56,10 @@ def _headlines_since_open(trading_date: date) -> list[dict[str, Any]]:
             }
             for h in (bundle.get("polygon") or [])[:20]
         ]
+        return headlines, errors
     except Exception:
         logger.exception("Intraday news collection failed")
-        return []
+        return [], ["collect_intraday_news raised"]
 
 
 def _macro_releases_for_step3(trading_date: date) -> list[dict[str, Any]]:
@@ -109,7 +120,7 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
     if s2_path.exists():
         s2 = json.loads(s2_path.read_text(encoding="utf-8"))
 
-    headlines_since_open = _headlines_since_open(trading_date)
+    headlines_since_open, intraday_news_errors = _headlines_since_open(trading_date)
     breaking_news_signals = detect_high_signal_news(headlines_since_open)
     breaking_summary = summarize_signals(breaking_news_signals)
 
@@ -123,6 +134,7 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
         "s2_market": s2.get("market"),
         "s2_conclusion": s2.get("conclusion"),
         "headlines_since_open": headlines_since_open,
+        "intraday_news_errors": intraday_news_errors,
         "macro_releases": macro_releases,
         "surprise_attention": surprise_attention,
         "breaking_news_signals": breaking_news_signals,
@@ -203,6 +215,7 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             "context": context,
             "headlines_since_open": headlines_since_open,
             "intraday_news_count": len(headlines_since_open),
+            "intraday_news_errors": intraday_news_errors,
             "macro_releases": macro_releases,
             "surprise_attention": surprise_attention,
             "breaking_news_signals": breaking_news_signals,

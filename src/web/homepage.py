@@ -171,22 +171,63 @@ def _extract_bias(morning: dict[str, Any]) -> str:
     return str(bias)
 
 
+def _resolve_p16_gate(morning: dict[str, Any]) -> str:
+    """P16 index gate: Trade | Wait | No Trade (from morning artifacts or recompute)."""
+    best = morning.get("best_opportunity") or {}
+    if best.get("p16_gate") in ("Trade", "Wait", "No Trade"):
+        return str(best["p16_gate"])
+    bt = morning.get("best_trades") or {}
+    if bt.get("p16_gate") in ("Trade", "Wait", "No Trade"):
+        return str(bt["p16_gate"])
+    from src.research.trade_candidates import _p16_gate
+
+    total = morning.get("total_score")
+    try:
+        total_i = int(total) if total is not None else 0
+    except (TypeError, ValueError):
+        total_i = 0
+    return _p16_gate(morning.get("parts") or {}, total_i)
+
+
+def _has_stock_setup(morning: dict[str, Any], step4: dict[str, Any] | None = None) -> bool:
+    primary = (morning.get("best_trades") or {}).get("primary")
+    if primary and primary.get("direction") in ("LONG", "SHORT"):
+        return True
+    if step4 and step4.get("stock_trade"):
+        return True
+    return False
+
+
 def _trade_action(morning: dict[str, Any], step4: dict[str, Any] | None) -> str:
+    """Homepage badge: Trade | Wait | Watch | No Trade.
+
+    P16 No Trade / Wait gates *index* exposure only — stock setups may still exist.
+    When the index gate is closed but a stock setup is present, badge is Watch
+    (setup found, gate closed) — not Trade.
+    """
+    p16_gate = _resolve_p16_gate(morning)
+    stock_setup = _has_stock_setup(morning, step4)
+
     if step4 is not None:
-        if step4.get("should_trade") or step4.get("stock_trade"):
-            return "Trade"
-        if step4.get("index_trade") and step4.get("index_trade") != "NO TRADE":
+        index_open = bool(
+            step4.get("index_trade") and step4.get("index_trade") != "NO TRADE"
+        )
+        if step4.get("should_trade") or step4.get("stock_trade") or index_open:
+            if p16_gate in ("No Trade", "Wait") and stock_setup and not index_open:
+                return "Watch"
             return "Trade"
         return "No Trade"
 
     primary = (morning.get("best_trades") or {}).get("primary")
     if primary and primary.get("direction") in ("LONG", "SHORT"):
+        if p16_gate in ("No Trade", "Wait"):
+            return "Watch"
         return "Trade"
 
     parts = morning.get("parts") or {}
     p16_text = _part_text(parts.get("P16")).lower()
     if any(w in p16_text for w in ("不交易", "放弃", "不追", "no trade", "hold off")):
-        return "No Trade"
+        return "No Trade" if not stock_setup else "Watch"
     if any(w in p16_text for w in ("买", "call", "做多", "trade", "入场")):
         return "Trade"
 
@@ -324,16 +365,17 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
             best_trades=best_trades,
         )
 
-    # Trade action: prefer primary trade, not blanket NO TRADE on macro edge alone
+    # Trade action: stock setup may exist under a closed P16 index gate → Watch
     trade_action = _trade_action(morning, step4)
+    p16_gate = _resolve_p16_gate(morning)
     if primary and primary.get("direction") in ("LONG", "SHORT"):
-        trade_action = "Trade"
+        trade_action = "Watch" if p16_gate in ("No Trade", "Wait") else "Trade"
     elif best_trades.get("threshold_message"):
         trade_action = "Wait"
     elif best.get("direction") == "NO TRADE" and not primary:
         trade_action = "No Trade"
     elif best.get("direction") in ("LONG", "SHORT") and trade_action == "Wait":
-        trade_action = "Trade"
+        trade_action = "Watch" if p16_gate in ("No Trade", "Wait") else "Trade"
 
     transparency = morning.get("transparency") or {}
     index_trade = morning.get("index_trade") or best_trades.get("index_trade")
