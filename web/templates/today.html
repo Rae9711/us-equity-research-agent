@@ -91,6 +91,13 @@
         <div><span class="decision-label">方向 Direction</span><strong>{{ best.direction }}</strong></div>
         <div><span class="decision-label">标的 Symbol</span><strong>{{ best.symbol }}</strong></div>
         <div><span class="decision-label">工具 Instrument</span><strong>{{ best.instrument }}</strong></div>
+        <div>
+          <span class="decision-label">持仓周期 Horizon</span>
+          <strong>
+            {% set hz = best.horizon or best.duration %}
+            {% if hz and hz != '—' %}<span class="horizon-badge horizon-{{ hz | lower }}">{{ hz }}</span>{% else %}—{% endif %}
+          </strong>
+        </div>
         <div><span class="decision-label">置信度 Confidence</span><strong>{{ best.confidence }}%</strong></div>
         <div>
           <span class="decision-label">入场价 Entry</span>

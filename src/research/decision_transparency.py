@@ -723,6 +723,7 @@ def build_top5_board(top_trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "symbol": slot.get("symbol"),
                 "direction": slot.get("direction"),
                 "instrument": slot.get("instrument"),
+                "horizon": slot.get("horizon"),
                 "win_prob": slot.get("win_prob"),
                 "expected_return_pct": slot.get("expected_return_pct"),
                 "risk_reward": slot.get("risk_reward"),

@@ -486,6 +486,7 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "target_price": exec_sum.get("target_price") or (primary or {}).get("target_price") or best.get("target_price"),
         "target_action": exec_sum.get("target_action") or (primary or {}).get("target_action") or best.get("target_action"),
         "direction": direction,
+        "horizon": (primary or {}).get("horizon") or best.get("horizon") or best.get("duration"),
         "why_chain": exec_sum.get("why_chain") or best.get("why_chain", "—"),
         "why_factors": exec_sum.get("why_factors") or (primary or {}).get("why_factors") or [],
         "why_vs_runner_up": exec_sum.get("why_vs_runner_up") or (primary or {}).get("why_vs_runner_up"),

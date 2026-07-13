@@ -215,8 +215,42 @@ def _instrument(symbol: str, direction: str, p9: dict[str, Any]) -> str:
             return f"{symbol} 0DTE Put"
         if buy_options and buy_put:
             return f"{symbol} Put"
-        return "ETF"
+        # Stock shorts are not 0DTE options — label underlying correctly
+        return "Stock" if symbol in _STOCK_SYMBOLS else "ETF"
     return "—"
+
+
+def _trade_horizon(
+    *,
+    direction: str,
+    p9: dict[str, Any],
+    total: int,
+    instrument: str | None = None,
+) -> str:
+    """Explicit holding horizon: 0DTE | Intraday | Swing.
+
+    0DTE only when P9 actually authorizes zero_dte options for this direction.
+    Never imply stock/ETF shorts are 0DTE Puts.
+    """
+    if direction == "NO TRADE":
+        return "—"
+    buy_options = p9.get("buy_options") == "Yes"
+    zero_dte = p9.get("zero_dte") == "Yes"
+    inst = instrument or ""
+    if zero_dte and buy_options and "0DTE" in inst:
+        return "0DTE"
+    if (
+        zero_dte
+        and buy_options
+        and (
+            (direction == "LONG" and p9.get("buy_call") == "Yes")
+            or (direction == "SHORT" and p9.get("buy_put") == "Yes")
+        )
+    ):
+        return "0DTE"
+    if abs(int(total or 0)) >= 4:
+        return "Swing"
+    return "Intraday"
 
 
 def _rr_weight_display(rr: float) -> float:
@@ -900,6 +934,7 @@ def _build_trade_slot(
     q: dict[str, Any],
     as_of_et: time | Literal["now"] | None = None,
     macro_calendar: dict[str, Any] | None = None,
+    total_score: int = 0,
 ) -> dict[str, Any]:
     current = _safe_float(obs.get("last")) or _safe_float(obs.get("close")) or row["current_price"]
     anchors = compute_anchors(
@@ -923,11 +958,16 @@ def _build_trade_slot(
     inst = _instrument(row["symbol"], direction, p9)
     conf = int(min(95, max(40, row["win_prob"])))
     conf_stars = "★" * min(5, max(1, conf // 20)) + "☆" * (5 - min(5, max(1, conf // 20)))
+    score = int(row.get("_total_score") if row.get("_total_score") is not None else total_score)
+    horizon = row.get("horizon") or _trade_horizon(
+        direction=direction, p9=p9, total=score, instrument=inst
+    )
     slot = {
         "rank": rank,
         "symbol": row["symbol"],
         "direction": direction,
         "instrument": inst,
+        "horizon": horizon,
         "confidence": conf,
         "confidence_stars": conf_stars,
         "expected_move": f"{row['expected_return_pct']:+.2f}%",
@@ -1054,6 +1094,7 @@ def _decision_tree(
     macro_calendar: dict[str, Any] | None = None,
     vix_chg: float | None = None,
     exclude_date: str | None = None,
+    total_score: int = 0,
 ) -> dict[str, Any]:
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
     tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
@@ -1065,6 +1106,14 @@ def _decision_tree(
     def _make_slot(row: dict[str, Any], rank: int) -> dict[str, Any]:
         sym = row["symbol"]
         section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
+        row = dict(row)
+        row["_total_score"] = total_score
+        row["horizon"] = _trade_horizon(
+            direction=direction,
+            p9=p9,
+            total=total_score,
+            instrument=_instrument(sym, direction, p9),
+        )
         slot = _build_trade_slot(
             row,
             rank=rank,
@@ -1078,6 +1127,7 @@ def _decision_tree(
             q=quote_by_sym.get(sym, {}),
             as_of_et=as_of_et,
             macro_calendar=macro_calendar,
+            total_score=total_score,
         )
         return enrich_trade_slot(
             slot,
@@ -1218,6 +1268,7 @@ def _to_best_opportunity(
     threshold_message: str | None,
     p16_gate: str,
     duration: str = "Intraday",
+    horizon: str | None = None,
 ) -> dict[str, Any]:
     if primary:
         entry_px = primary.get("entry_price")
@@ -1241,10 +1292,12 @@ def _to_best_opportunity(
             f"{primary['symbol']} near ${entry_px}, target ${target_px}, "
             f"expected {primary['expected_move']}"
         )
+        hz = horizon or primary.get("horizon") or duration
         return {
             "direction": direction,
             "symbol": primary["symbol"],
             "instrument": primary["instrument"],
+            "horizon": hz,
             "confidence": primary["confidence"],
             "confidence_stars": primary.get("confidence_stars"),
             "entry": primary["entry"],
@@ -1258,7 +1311,7 @@ def _to_best_opportunity(
             "target_price": primary.get("target_price"),
             "target_action": primary.get("target_action"),
             "targets": primary.get("targets") or [],
-            "duration": duration,
+            "duration": hz,
             "why": primary.get("why") or [],
             "why_chain": primary.get("why_chain", "—"),
             "why_vs_runner_up": primary.get("why_vs_runner_up", "—"),
@@ -1297,6 +1350,7 @@ def _to_best_opportunity(
         "direction": "NO TRADE",
         "symbol": "—",
         "instrument": "—",
+        "horizon": "—",
         "confidence": 45,
         "entry": "—",
         "stop": "—",
@@ -1375,9 +1429,8 @@ def compute_trade_decision(
 
     p16_gate = _p16_gate(parts, total)
     direction = _pick_direction(bias, total)
-    duration = "Intraday" if p9.get("zero_dte") == "Yes" else (
-        "Swing" if abs(total) >= 4 else "Intraday"
-    )
+    # Per-trade horizon is set on slots; best_opportunity uses primary's horizon
+    default_horizon = _trade_horizon(direction=direction, p9=p9, total=total)
 
     ranked: list[dict[str, Any]] = []
     quote_by_sym: dict[str, dict[str, Any]] = {}
@@ -1460,12 +1513,14 @@ def compute_trade_decision(
         macro_calendar=macro_calendar,
         vix_chg=vix_chg,
         exclude_date=trading_date or None,
+        total_score=total,
     )
     best_opportunity = _to_best_opportunity(
         best_trades.get("primary"),
         threshold_message=best_trades.get("threshold_message"),
         p16_gate=p16_gate,
-        duration=duration,
+        duration=default_horizon,
+        horizon=(best_trades.get("primary") or {}).get("horizon") or default_horizon,
     )
 
     gap_pct_market = None

@@ -12,6 +12,7 @@
           <th>#</th>
           <th>Ticker</th>
           <th>Dir</th>
+          <th>Hz</th>
           <th>Win%</th>
           <th>ER%</th>
           <th>R:R</th>
@@ -31,6 +32,7 @@
           <td>{{ t.rank }}</td>
           <td><strong>{{ t.symbol }}</strong>{% if t.rank == 1 and t.rank_summary %}<br><span class="muted small">{{ t.rank_summary }}</span>{% endif %}</td>
           <td>{{ t.direction }}</td>
+          <td>{% if t.horizon and t.horizon != '—' %}<span class="horizon-badge horizon-{{ t.horizon | lower }}">{{ t.horizon }}</span>{% else %}—{% endif %}</td>
           <td>{% if t.win_prob is not none %}{{ t.win_prob }}%{% else %}—{% endif %}</td>
           <td>{% if t.expected_return_pct is not none %}{{ t.expected_return_pct }}%{% else %}—{% endif %}
             {% set live_er = (t.entry_status.live_expected_return_pct if t.entry_status else none) or (t.entry_status.remaining_er_pct if t.entry_status else none) or t.live_expected_return_pct %}

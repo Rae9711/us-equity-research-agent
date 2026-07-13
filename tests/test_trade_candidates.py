@@ -18,6 +18,7 @@ from src.research.trade_candidates import (
     _risk_reward_from_levels,
     _score_candidate_v2,
     _slot_is_actionable,
+    _trade_horizon,
     compute_trade_decision,
 )
 
@@ -214,6 +215,28 @@ def test_split_edges_four_fields():
 def test_zero_dte_instrument():
     p9 = {"buy_options": "Yes", "zero_dte": "Yes", "buy_call": "Yes", "buy_put": "No"}
     assert _instrument("QQQ", "LONG", p9) == "QQQ 0DTE Call"
+
+
+def test_stock_short_not_labeled_0dte_put():
+    """P9 buy_options=No → stock SHORT is Stock, horizon Intraday (not 0DTE Put)."""
+    p9 = {"buy_options": "No", "zero_dte": "No", "buy_call": "No", "buy_put": "No"}
+    assert _instrument("MU", "SHORT", p9) == "Stock"
+    assert _trade_horizon(direction="SHORT", p9=p9, total=-1, instrument="Stock") == "Intraday"
+
+
+def test_horizon_0dte_only_when_p9_authorizes():
+    p9_yes = {"buy_options": "Yes", "zero_dte": "Yes", "buy_call": "Yes", "buy_put": "No"}
+    assert _trade_horizon(
+        direction="LONG", p9=p9_yes, total=2, instrument="QQQ 0DTE Call"
+    ) == "0DTE"
+    p9_swing = {"buy_options": "No", "zero_dte": "No", "buy_call": "No", "buy_put": "No"}
+    assert _trade_horizon(direction="LONG", p9=p9_swing, total=5, instrument="Stock") == "Swing"
+    # zero_dte Yes but instrument is Stock (options not used) → not 0DTE
+    p9_mismatch = {"buy_options": "No", "zero_dte": "Yes", "buy_call": "No", "buy_put": "No"}
+    assert (
+        _trade_horizon(direction="SHORT", p9=p9_mismatch, total=-2, instrument="Stock")
+        == "Intraday"
+    )
 
 
 def test_p16_no_trade_gate():

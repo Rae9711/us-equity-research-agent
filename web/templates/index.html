@@ -162,7 +162,12 @@
         </div>
         <div class="decision-field">
           <span class="decision-label">Direction</span>
-          <span class="decision-value">{{ decision_card.direction or '—' }}</span>
+          <span class="decision-value">
+            {{ decision_card.direction or '—' }}
+            {% if decision_card.horizon %}
+            <span class="horizon-badge horizon-{{ decision_card.horizon | lower }}">{{ decision_card.horizon }}</span>
+            {% endif %}
+          </span>
         </div>
         <div class="decision-field">
           <span class="decision-label">Win Prob</span>
@@ -181,7 +186,9 @@
           <span class="decision-label">Alt Entry <span class="muted small">(MISSED stub)</span></span>
           <span class="decision-value">
             {% if alt.alt_entry_zone %}{{ alt.alt_entry_zone.display }}{% elif alt.alt_entry is not none %}${{ '%.2f'|format(alt.alt_entry) }}{% endif %}
-            {% if alt.suggested_action %}<span class="entry-status-hint">{{ alt.suggested_action }}</span>{% endif %}
+            {% if alt.alt_action %}<span class="alt-action-badge">{{ alt.alt_action }}</span>{% endif %}
+            {% if alt.alt_reason %}<span class="entry-status-hint">{{ alt.alt_reason }}</span>
+            {% elif alt.suggested_action %}<span class="entry-status-hint">{{ alt.suggested_action }}</span>{% endif %}
             {% if alt.alt_stop is not none and alt.alt_target is not none %}
             <span class="entry-status-meta">Stop ${{ '%.2f'|format(alt.alt_stop) }} → Tgt ${{ '%.2f'|format(alt.alt_target) }}</span>
             {% endif %}
