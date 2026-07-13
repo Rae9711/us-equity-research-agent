@@ -269,8 +269,23 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             "breaking_summary": breaking_summary,
             "primary_entry_status": primary_entry_status,
             "session_trade_update": session_trade_update,
-            # alias for older readers
+            # aliases for older / alternate readers
             "trade_reeval": session_trade_update,
+            "session_update": (
+                {
+                    "top_trades": (session_trade_update or {}).get("top_trades"),
+                    "best_opportunity_asof": (session_trade_update or {}).get(
+                        "best_opportunity_asof"
+                    )
+                    or (session_trade_update or {}).get("best_opportunity"),
+                    "as_of": (session_trade_update or {}).get("as_of"),
+                    "changed": (session_trade_update or {}).get("changed"),
+                    "why_changed": (session_trade_update or {}).get("why_changed"),
+                    "advisory": True,
+                }
+                if session_trade_update
+                else None
+            ),
         },
     )
     save_snapshot(trading_date, step_label(3), {"step3": payload, "context": context})

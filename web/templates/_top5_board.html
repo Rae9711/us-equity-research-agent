@@ -32,17 +32,25 @@
           <td><strong>{{ t.symbol }}</strong>{% if t.rank == 1 and t.rank_summary %}<br><span class="muted small">{{ t.rank_summary }}</span>{% endif %}</td>
           <td>{{ t.direction }}</td>
           <td>{% if t.win_prob is not none %}{{ t.win_prob }}%{% else %}—{% endif %}</td>
-          <td>{% if t.expected_return_pct is not none %}{{ t.expected_return_pct }}%{% else %}—{% endif %}</td>
+          <td>{% if t.expected_return_pct is not none %}{{ t.expected_return_pct }}%{% else %}—{% endif %}
+            {% set live_er = (t.entry_status.live_expected_return_pct if t.entry_status else none) or (t.entry_status.remaining_er_pct if t.entry_status else none) or t.live_expected_return_pct %}
+            {% if live_er is not none and t.entry_status and t.entry_status.status in ('MISSED', 'ACTIVE', 'READY') %}
+            <br><span class="muted small">live {{ '%+.2f'|format(live_er) }}%</span>
+            {% endif %}
+          </td>
           <td>{% if t.rr_display %}{{ t.rr_display.label_reward_risk }}{% else %}{{ t.risk_reward or '—' }}{% endif %}</td>
           <td>{% if t.entry_zone %}{{ t.entry_zone.display }}{% elif t.entry_price is not none %}${{ t.entry_price }}{% else %}—{% endif %}</td>
+          <td>
+            {% set alt = (t.entry_status.alternate_entry if t.entry_status else none) or (t.entry_status.new_plan if t.entry_status else none) %}
+            {% if alt and (alt.alt_entry is not none or alt.alt_entry_zone) %}
+            {% if alt.alt_entry_zone %}{{ alt.alt_entry_zone.display }}{% else %}${{ '%.2f'|format(alt.alt_entry) }}{% endif %}
+            {% else %}—{% endif %}
+          </td>
           <td>
             {% if t.entry_status %}
             <span class="entry-status-badge entry-status-{{ t.entry_status.status | lower }}">{{ t.entry_status.status }}</span>
             {% if t.entry_status.distance_pct is not none %}<br><span class="muted small">{{ '%+.2f'|format(t.entry_status.distance_pct) }}%</span>{% endif %}
-            {% if t.entry_status.remaining_er_pct is not none %}<br><span class="muted small">Rem ER {{ '%+.2f'|format(t.entry_status.remaining_er_pct) }}%</span>{% endif %}
             {% if t.entry_status.action_hint %}<br><span class="entry-status-hint-inline">{{ t.entry_status.action_hint }}</span>{% endif %}
-            {% set alt = t.entry_status.alternate_entry or t.entry_status.new_plan %}
-            {% if alt and alt.alt_entry_zone %}<br><span class="muted small">Alt {{ alt.alt_entry_zone.display }}</span>{% endif %}
             {% else %}—{% endif %}
           </td>
           <td>{% if t.stop_price is not none %}${{ t.stop_price }}{% else %}—{% endif %}</td>

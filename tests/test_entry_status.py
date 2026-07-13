@@ -8,6 +8,7 @@ from __future__ import annotations
 from src.research.entry_status import (
     ACTION_NEW_SETUP,
     ACTION_WAIT_VWAP,
+    ACTION_WATCH_ALT,
     STATUS_ACTIVE,
     STATUS_INVALIDATED,
     STATUS_MISSED,
@@ -16,6 +17,7 @@ from src.research.entry_status import (
     STATUS_READY,
     STATUS_TRIGGERED,
     attach_entry_status,
+    build_session_trade_update,
     build_trade_reeval,
     classify_entry_status,
     planned_entry_status,
@@ -227,19 +229,25 @@ def test_mu_short_extended_above_missed_alt_stub():
     assert out["status"] == STATUS_MISSED
     assert "Extended above" in out["status_reason"]
     assert out["remaining_er_pct"] is not None
+    assert out["live_expected_return_pct"] == out["remaining_er_pct"]
     assert 3.5 <= out["remaining_er_pct"] <= 3.8
     plan = out["alternate_entry"] or out["new_plan"]
     assert plan is not None
     assert plan["suggested_action"] in (
+        ACTION_WATCH_ALT,
         ACTION_NEW_SETUP,
         "Wait VWAP Pullback",
         "Do Not Chase",
     )
     assert plan["alt_entry_zone"] is not None
     assert plan["alt_entry"] is not None
-    if plan["alt_target"] is not None and plan["alt_stop"] is not None:
-        assert plan["alt_target"] <= plan["alt_entry"] < plan["alt_stop"]
+    assert plan["alt_stop"] is not None and plan["alt_stop"] > plan["alt_entry"]
+    assert plan["alt_target"] is not None and plan["alt_target"] < plan["alt_entry"]
+    assert plan["alt_er_pct"] is not None
     assert plan["remaining_er_pct"] is not None
+    assert plan["live_expected_return_pct"] == plan["remaining_er_pct"]
+    # R:R ~1.1 from current→target vs stop → Watch alt entry
+    assert out["action_hint"] == ACTION_WATCH_ALT
 
 
 def test_build_trade_reeval_with_morning_mock(monkeypatch):
@@ -324,18 +332,23 @@ def test_build_trade_reeval_with_morning_mock(monkeypatch):
         _fake_compute,
     )
 
-    out = build_trade_reeval(
+    out = build_session_trade_update(
         morning,
         "2026-07-13",
         raw={"trading_date": "2026-07-13", "stocks": {"quotes": {}}},
         session_phase="open",
     )
     assert out is not None
-    assert out["primary_changed"] is True or out.get("changed") is True
+    assert out["changed"] is True
     assert out["primary"]["symbol"] == "NVDA"
-    note = (out.get("note") or out.get("why_changed") or "").lower()
-    assert "nvda" in note or "changed" in note or "→" in (out.get("note") or "")
+    assert "why_changed" in out
+    assert "compared_to_morning_primary" in out
+    assert out["compared_to_morning_primary"]["symbol"] == "MU"
+    note = (out.get("why_changed") or out.get("note") or "").lower()
+    assert "nvda" in note or "missed" in note or "changed" in note
     assert out["morning_primary_live"] is not None
     assert out["morning_primary_live"]["entry_status"]["status"] == STATUS_MISSED
     assert out["top_trades"]
     assert out["p16_gate"] == "No Trade"
+    # alias still works
+    assert build_trade_reeval is build_session_trade_update

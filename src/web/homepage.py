@@ -111,19 +111,6 @@ def _load_session_trade_update(trading_date: str) -> dict[str, Any] | None:
 _load_trade_reeval = _load_session_trade_update
 
 
-def _load_trade_reeval(trading_date: str) -> dict[str, Any] | None:
-    """10:00 Step 3 trade re-eval block for homepage, if present."""
-    path = step_json_path(3, trading_date)
-    if not path.exists():
-        return None
-    try:
-        s3 = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    reeval = s3.get("trade_reeval") or s3.get("session_trade_update")
-    return reeval if isinstance(reeval, dict) else None
-
-
 def _part_text(part: dict[str, Any] | None) -> str:
     if not part:
         return ""

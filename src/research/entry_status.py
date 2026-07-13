@@ -38,7 +38,7 @@ ALT_ACTION_WATCH = "Watch only"
 ALT_ACTION_SECONDARY = "Secondary setup"
 
 # Min R:R (reward/risk) for promoting MISSED alt stub past "Do Not Chase"
-MIN_ALT_RR = 1.5
+MIN_ALT_RR = 1.0
 
 _ALT_REASON_LABELS = {
     "wait_pullback": "VWAP retest",
@@ -217,6 +217,8 @@ def _build_alternate_entry(
             "alt_stop": None,
             "alt_target": None,
             "alt_er_pct": None,
+            "alt_reason": "Ideal Entry invalidated",
+            "alt_action": ALT_ACTION_WATCH,
             "remaining_er_pct": rem_er,
             "live_expected_return_pct": rem_er,
             "alt_rr": None,
@@ -341,7 +343,7 @@ def _build_alternate_entry(
         alt_action = ALT_ACTION_SECONDARY
         levels_note = (
             f"Provisional alt {direction} near {anchor_name} "
-            f"(Ideal Entry missed) — Secondary setup (not auto Primary)"
+            f"(Ideal Entry missed) — Watch alt entry"
         )
 
     alt_reason = _ALT_REASON_LABELS.get(
@@ -1004,6 +1006,7 @@ def build_session_trade_update(
         "as_of": "10:00",
         "session_phase": session_phase,
         "top_trades": re_ranked or refreshed_top,
+        "best_opportunity_asof": best_opportunity,
         "primary": primary_out,
         "changed": changed,
         "why_changed": why,
