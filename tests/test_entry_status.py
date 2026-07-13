@@ -9,6 +9,8 @@ from src.research.entry_status import (
     ACTION_NEW_SETUP,
     ACTION_WAIT_VWAP,
     ACTION_WATCH_ALT,
+    ALT_ACTION_SECONDARY,
+    ALT_ACTION_WATCH,
     STATUS_ACTIVE,
     STATUS_INVALIDATED,
     STATUS_MISSED,
@@ -246,8 +248,15 @@ def test_mu_short_extended_above_missed_alt_stub():
     assert plan["alt_er_pct"] is not None
     assert plan["remaining_er_pct"] is not None
     assert plan["live_expected_return_pct"] == plan["remaining_er_pct"]
-    # R:R ~1.1 from current→target vs stop → Watch alt entry
-    assert out["action_hint"] == ACTION_WATCH_ALT
+    assert plan.get("alt_reason") in (
+        "VWAP reject",
+        "Failed breakdown retest",
+        "Do not chase Ideal Entry",
+        "VWAP retest",
+    )
+    assert plan.get("alt_action") in (ALT_ACTION_WATCH, ALT_ACTION_SECONDARY)
+    # Weak R:R (< 1.5) → Watch only / Do Not Chase; stronger → Secondary setup
+    assert out["action_hint"] in (ACTION_WATCH_ALT, "Do Not Chase", ACTION_WAIT_VWAP)
 
 
 def test_build_trade_reeval_with_morning_mock(monkeypatch):

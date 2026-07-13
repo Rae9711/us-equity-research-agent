@@ -99,13 +99,17 @@ def _surprise_attention(releases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
+def run_step3_market_update(
+    trading_date: date | None = None,
+    *,
+    skip_llm: bool = False,
+) -> dict[str, Any]:
     d = require_trading_day(trading_date, job="run_step3_market_update")
     if d is None:
         return skipped_non_trading_day(trading_date)
     trading_date = d
     date_str = trading_date.isoformat()
-    logger.info("Step 3 market update for %s", date_str)
+    logger.info("Step 3 market update for %s (skip_llm=%s)", date_str, skip_llm)
 
     _, stale = guard_fresh_raw(trading_date, step="run_step3_market_update")
     if stale:
@@ -156,6 +160,8 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
     conclusion: dict[str, Any]
     body_md: str
     try:
+        if skip_llm:
+            raise RuntimeError("skip_llm requested")
         client = AnthropicClient()
         result = client.complete_json(
             SYSTEM,
@@ -170,7 +176,10 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
         }
         body_md = normalize_body_md(result.get("body_md") or "")
     except Exception:
-        logger.exception("Step 3 LLM failed, using rules fallback")
+        if skip_llm:
+            logger.info("Step 3 skip_llm — using rules fallback")
+        else:
+            logger.exception("Step 3 LLM failed, using rules fallback")
         total = morning.get("total_score") or 0
         s2_market = s2.get("market", "Mixed")
         adj = 1 if s2_market == "Healthy" else -1 if s2_market == "Weak" else 0

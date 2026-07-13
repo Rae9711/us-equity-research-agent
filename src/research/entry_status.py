@@ -37,8 +37,8 @@ ACTION_VALID = "Entry still valid"
 ALT_ACTION_WATCH = "Watch only"
 ALT_ACTION_SECONDARY = "Secondary setup"
 
-# Min R:R (reward/risk) for promoting MISSED alt stub past "Do Not Chase"
-MIN_ALT_RR = 1.0
+# Min R:R (reward/risk) for Secondary setup (else Watch only)
+MIN_ALT_RR = 1.5
 
 _ALT_REASON_LABELS = {
     "wait_pullback": "VWAP retest",
