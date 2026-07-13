@@ -89,6 +89,41 @@ def load_step4(trading_date: str) -> dict[str, Any] | None:
         return None
 
 
+def load_step3(trading_date: str) -> dict[str, Any] | None:
+    path = step_json_path(3, trading_date)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _load_session_trade_update(trading_date: str) -> dict[str, Any] | None:
+    """Step 3 mid-session re-rank payload (session_trade_update / trade_reeval)."""
+    step3 = load_step3(trading_date)
+    if not step3:
+        return None
+    return step3.get("session_trade_update") or step3.get("trade_reeval")
+
+
+# Backward-compatible name used by earlier WIP
+_load_trade_reeval = _load_session_trade_update
+
+
+def _load_trade_reeval(trading_date: str) -> dict[str, Any] | None:
+    """10:00 Step 3 trade re-eval block for homepage, if present."""
+    path = step_json_path(3, trading_date)
+    if not path.exists():
+        return None
+    try:
+        s3 = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    reeval = s3.get("trade_reeval") or s3.get("session_trade_update")
+    return reeval if isinstance(reeval, dict) else None
+
+
 def _part_text(part: dict[str, Any] | None) -> str:
     if not part:
         return ""
@@ -409,14 +444,22 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     primary_sym = (primary or {}).get("symbol") or best.get("symbol")
     live_price = resolve_symbol_last(str(primary_sym or ""), trading_date) if primary_sym else None
     anchors = (primary or {}).get("level_anchors") or {}
+    target_price = (
+        exec_sum.get("target_price")
+        or (primary or {}).get("target_price")
+        or best.get("target_price")
+    )
     entry_status = classify_entry_status(
         direction=str(direction or ""),
         current_price=live_price if live_price is not None else (primary or {}).get("current_price"),
         entry_zone=entry_zone,
         entry_price=entry_price,
         stop_price=stop_price,
+        target_price=target_price,
         session_phase=phase,
         vwap=anchors.get("vwap"),
+        orb_high=anchors.get("orb_high"),
+        orb_low=anchors.get("orb_low"),
     )
 
     top_trades = list(transparency.get("top_trades") or morning.get("top_trades") or [])
@@ -468,6 +511,13 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "rr_display": exec_sum.get("rr_display") or (primary or {}).get("rr_display"),
         "entry_zone": entry_zone,
         "entry_status": entry_status,
+        "remaining_er_pct": (entry_status or {}).get("remaining_er_pct"),
+        "live_expected_return_pct": (entry_status or {}).get("live_expected_return_pct")
+        or (entry_status or {}).get("remaining_er_pct"),
+        "alternate_entry": (entry_status or {}).get("alternate_entry")
+        or (entry_status or {}).get("new_plan"),
+        "session_trade_update": _load_session_trade_update(trading_date),
+        "trade_reeval": _load_session_trade_update(trading_date),
         "rank_summary": exec_sum.get("rank_summary") or (primary or {}).get("rank_summary"),
         "win_prob_source": (primary or {}).get("win_prob_source"),
         "similar_days": (primary or {}).get("similar_days") or transparency.get("similar_days"),

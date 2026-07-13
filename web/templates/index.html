@@ -90,6 +90,60 @@
       </div>
       <p class="advisory-banner">{{ decision_card.advisory }}</p>
       {{ todays_opportunities_block(decision_card.todays_opportunities) }}
+      {% set re = decision_card.session_trade_update or decision_card.trade_reeval %}
+      {% if re %}
+      <div class="panel trade-reeval-panel session-trade-update-panel">
+        <h3 class="transparency-title">10:00 Session Update · Best Trade</h3>
+        <p class="muted small">{{ re.why_changed or re.note or 'Session trade refresh' }} · ADVISORY</p>
+        {% if re.changed or re.primary_changed %}
+        <p class="entry-status-hint">Primary changed vs Morning Ideal</p>
+        {% endif %}
+        {% if re.compared_to_morning_primary and re.compared_to_morning_primary.symbol %}
+        <p class="muted small">
+          Morning: {{ re.compared_to_morning_primary.symbol }}
+          {{ re.compared_to_morning_primary.direction or '' }}
+          {% if re.compared_to_morning_primary.entry_status %}
+          · <span class="entry-status-badge entry-status-{{ re.compared_to_morning_primary.entry_status | lower }}">{{ re.compared_to_morning_primary.entry_status }}</span>
+          {% endif %}
+        </p>
+        {% endif %}
+        {% if re.primary %}
+        <p>
+          <strong>
+            {% if re.changed or re.primary_changed %}↻ {% endif %}
+            {{ re.primary.symbol or '—' }}
+            {{ re.primary.direction or '' }}
+          </strong>
+          {% if re.primary.entry_zone %} · Ideal {{ re.primary.entry_zone.display }}
+          {% elif re.primary.entry_price is not none %} · Entry ${{ re.primary.entry_price }}{% endif %}
+          {% set live_er = re.primary.live_expected_return_pct if re.primary.live_expected_return_pct is not none else re.primary.remaining_er_pct %}
+          {% if live_er is not none %}
+          · Live ER {{ '%+.2f'|format(live_er) }}%
+          {% elif re.primary.expected_return_pct is not none %}
+          · Ideal ER {{ re.primary.expected_return_pct }}%
+          {% endif %}
+          {% if re.p16_gate %} · Gate {{ re.p16_gate }}{% endif %}
+        </p>
+        {% endif %}
+        {% if re.todays_opportunities %}
+        {{ todays_opportunities_block(re.todays_opportunities) }}
+        {% elif re.top_trades %}
+        <ul class="checklist trade-reeval-top">
+          {% for t in re.top_trades[:5] %}
+          <li>
+            #{{ t.rank or loop.index }} {{ t.symbol }} {{ t.direction or '' }}
+            {% if t.final_score is not none %} · score {{ t.final_score }}{% endif %}
+            {% set t_live = t.live_expected_return_pct if t.live_expected_return_pct is not none else t.remaining_er_pct %}
+            {% if t_live is not none %} · live ER {{ '%+.2f'|format(t_live) }}%{% endif %}
+            {% if t.entry_status and t.entry_status.status %}
+            · <span class="entry-status-badge entry-status-{{ t.entry_status.status | lower }}">{{ t.entry_status.status }}</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
       {% if decision_card.rank_summary %}
       <p class="rank-summary-line"><strong>#1：</strong>{{ decision_card.rank_summary }}</p>
       {% endif %}
@@ -115,12 +169,28 @@
           <span class="decision-value">{% if decision_card.win_prob is not none %}{{ decision_card.win_prob }}%{% if decision_card.win_prob_source %} <span class="muted small">({{ decision_card.win_prob_source }})</span>{% endif %}{% else %}—{% endif %}</span>
         </div>
         <div class="decision-field">
-          <span class="decision-label">Ideal Entry</span>
+          <span class="decision-label">Ideal Entry <span class="muted small">(frozen)</span></span>
           <span class="decision-value">
             {% if decision_card.entry_zone %}{{ decision_card.entry_zone.display }}{% elif decision_card.entry_price is not none %}${{ decision_card.entry_price }}{% endif %}
             {{ decision_card.entry }}{% if decision_card.entry_source %} <span class="level-source-tag">{{ decision_card.entry_source }}</span>{% endif %}
           </span>
         </div>
+        {% set alt = decision_card.alternate_entry or (decision_card.entry_status.alternate_entry if decision_card.entry_status else none) or (decision_card.entry_status.new_plan if decision_card.entry_status else none) %}
+        {% if alt and (alt.alt_entry is not none or alt.alt_entry_zone) %}
+        <div class="decision-field alt-entry-field">
+          <span class="decision-label">Alt Entry <span class="muted small">(MISSED stub)</span></span>
+          <span class="decision-value">
+            {% if alt.alt_entry_zone %}{{ alt.alt_entry_zone.display }}{% elif alt.alt_entry is not none %}${{ '%.2f'|format(alt.alt_entry) }}{% endif %}
+            {% if alt.suggested_action %}<span class="entry-status-hint">{{ alt.suggested_action }}</span>{% endif %}
+            {% if alt.alt_stop is not none and alt.alt_target is not none %}
+            <span class="entry-status-meta">Stop ${{ '%.2f'|format(alt.alt_stop) }} → Tgt ${{ '%.2f'|format(alt.alt_target) }}</span>
+            {% endif %}
+            {% if alt.alt_er_pct is not none %}
+            <span class="entry-status-meta">Alt ER {{ '%+.2f'|format(alt.alt_er_pct) }}%</span>
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
         {% if decision_card.entry_status %}
         {% set es = decision_card.entry_status %}
         <div class="decision-field entry-status-field entry-status-{{ es.status | lower }}">
@@ -135,6 +205,16 @@
             {% endif %}
             {% if es.status_reason %}<span class="entry-status-reason">{{ es.status_reason }}</span>{% endif %}
             {% if es.action_hint %}<span class="entry-status-hint">{{ es.action_hint }}</span>{% endif %}
+            {% set live_er = es.live_expected_return_pct if es.live_expected_return_pct is not none else es.remaining_er_pct %}
+            {% if live_er is not none and es.status in ('MISSED', 'ACTIVE', 'READY', 'TRIGGERED', 'INVALIDATED') %}
+            <span class="entry-status-meta">Live ER {{ '%+.2f'|format(live_er) }}% <span class="muted">(current→target)</span></span>
+            {% endif %}
+            {% if decision_card.expected_return_pct is not none %}
+            <span class="entry-status-meta muted">Ideal ER {{ '%+.2f'|format(decision_card.expected_return_pct) }}%</span>
+            {% endif %}
+            {% if alt and alt.note %}
+            <span class="entry-status-plan">{{ alt.note }}</span>
+            {% endif %}
           </span>
         </div>
         {% endif %}

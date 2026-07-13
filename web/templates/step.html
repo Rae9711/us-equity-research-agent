@@ -27,6 +27,36 @@
     </div>
     {% endif %}
 
+    {% if meta and (meta.trade_reeval or meta.session_trade_update) %}
+    {% set re = meta.trade_reeval or meta.session_trade_update %}
+    <section class="panel trade-reeval-panel">
+      <h2 class="section-title-inline">10:00 Re-eval · Trades</h2>
+      <p class="muted">{{ re.note or 'Session trade refresh' }}</p>
+      {% if re.primary %}
+      <p>
+        <strong>{{ re.primary.symbol or '—' }} {{ re.primary.direction or '' }}</strong>
+        {% if re.primary.remaining_er_pct is not none %}
+        · Remaining ER {{ '%.2f'|format(re.primary.remaining_er_pct) }}%
+        {% endif %}
+        {% if re.p16_gate %} · Gate {{ re.p16_gate }}{% endif %}
+      </p>
+      {% endif %}
+      {% if re.top_trades %}
+      <ol class="trade-reeval-top">
+        {% for t in re.top_trades[:5] %}
+        <li>
+          {{ t.symbol }} {{ t.direction or '' }}
+          {% if t.final_score is not none %} · {{ t.final_score }}{% endif %}
+          {% if t.entry_status %} · {{ t.entry_status.status }}{% endif %}
+          {% if t.remaining_er_pct is not none %} · rem ER {{ '%.2f'|format(t.remaining_er_pct) }}%{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+      <p class="advisory-banner small">ADVISORY — 不构成投资建议</p>
+    </section>
+    {% endif %}
+
     <article class="report-body">{{ report_html | safe }}</article>
   </div>
 </body>

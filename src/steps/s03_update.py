@@ -195,14 +195,61 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
         )
 
     primary_entry_status = None
+    session_trade_update = None
     try:
-        from src.research.entry_status import enrich_primary_from_morning
+        from src.research.entry_status import (
+            build_session_trade_update,
+            enrich_primary_from_morning,
+        )
+        from src.utils.paths import raw_data_path
+
+        raw: dict[str, Any] = {}
+        raw_path = raw_data_path(date_str)
+        if raw_path.exists():
+            try:
+                raw = json.loads(raw_path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.exception("Step 3 raw load failed (non-fatal)")
 
         primary_entry_status = enrich_primary_from_morning(
             morning, date_str, session_phase="open"
         )
+        if morning:
+            session_trade_update = build_session_trade_update(
+                morning, date_str, raw=raw or None, session_phase="open"
+            )
+            if session_trade_update and session_trade_update.get("why_changed"):
+                live_er = (
+                    (session_trade_update.get("morning_primary_live") or {}).get(
+                        "live_expected_return_pct"
+                    )
+                    or (session_trade_update.get("morning_primary_live") or {}).get(
+                        "remaining_er_pct"
+                    )
+                )
+                body_md = normalize_body_md(
+                    body_md
+                    + "\n\n### 10:00 Session Update · Best Trade\n"
+                    + f"- {session_trade_update['why_changed']}"
+                    + (
+                        f"\n- Live ER (Morning primary, current→target): {live_er}%"
+                        if live_er is not None
+                        else ""
+                    )
+                    + (
+                        "\n- Morning Ideal Entry was MISSED — prefer session #1 if changed"
+                        if (
+                            (session_trade_update.get("compared_to_morning_primary") or {}).get(
+                                "entry_status"
+                            )
+                            == "MISSED"
+                            and session_trade_update.get("changed")
+                        )
+                        else ""
+                    )
+                )
     except Exception:
-        logger.exception("Step 3 entry_status enrichment failed (non-fatal)")
+        logger.exception("Step 3 entry_status / session_trade_update failed (non-fatal)")
 
     payload = save_step_result(
         3,
@@ -221,6 +268,9 @@ def run_step3_market_update(trading_date: date | None = None) -> dict[str, Any]:
             "breaking_news_signals": breaking_news_signals,
             "breaking_summary": breaking_summary,
             "primary_entry_status": primary_entry_status,
+            "session_trade_update": session_trade_update,
+            # alias for older readers
+            "trade_reeval": session_trade_update,
         },
     )
     save_snapshot(trading_date, step_label(3), {"step3": payload, "context": context})

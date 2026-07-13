@@ -16,6 +16,7 @@
           <th>ER%</th>
           <th>R:R</th>
           <th>Ideal Entry</th>
+          <th>Alt Entry</th>
           <th>Status</th>
           <th>Stop</th>
           <th>Target</th>
@@ -38,7 +39,10 @@
             {% if t.entry_status %}
             <span class="entry-status-badge entry-status-{{ t.entry_status.status | lower }}">{{ t.entry_status.status }}</span>
             {% if t.entry_status.distance_pct is not none %}<br><span class="muted small">{{ '%+.2f'|format(t.entry_status.distance_pct) }}%</span>{% endif %}
+            {% if t.entry_status.remaining_er_pct is not none %}<br><span class="muted small">Rem ER {{ '%+.2f'|format(t.entry_status.remaining_er_pct) }}%</span>{% endif %}
             {% if t.entry_status.action_hint %}<br><span class="entry-status-hint-inline">{{ t.entry_status.action_hint }}</span>{% endif %}
+            {% set alt = t.entry_status.alternate_entry or t.entry_status.new_plan %}
+            {% if alt and alt.alt_entry_zone %}<br><span class="muted small">Alt {{ alt.alt_entry_zone.display }}</span>{% endif %}
             {% else %}—{% endif %}
           </td>
           <td>{% if t.stop_price is not none %}${{ t.stop_price }}{% else %}—{% endif %}</td>

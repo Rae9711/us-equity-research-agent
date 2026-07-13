@@ -58,7 +58,23 @@
       </strong>
       {% if es.status_reason %}<span class="entry-status-reason">{{ es.status_reason }}</span>{% endif %}
       {% if es.action_hint %}<span class="entry-status-hint">{{ es.action_hint }}</span>{% endif %}
-      {% if es.new_plan and es.new_plan.note %}<span class="entry-status-plan muted small">{{ es.new_plan.note }}</span>{% endif %}
+      {% if es.remaining_er_pct is not none %}
+      <span class="entry-status-meta">Remaining ER {{ '%+.2f'|format(es.remaining_er_pct) }}% (current→target)</span>
+      {% endif %}
+      {% set alt = es.alternate_entry or es.new_plan %}
+      {% if alt %}
+      <span class="entry-status-plan muted small">
+        Alt{% if alt.suggested_action %}: {{ alt.suggested_action }}{% endif %}
+        {% if alt.alt_entry_zone %} · {{ alt.alt_entry_zone.display }}
+        {% elif alt.alt_entry is not none %} · ${{ '%.2f'|format(alt.alt_entry) }}{% endif %}
+        {% if alt.alt_stop is not none %} · Stop ${{ '%.2f'|format(alt.alt_stop) }}{% endif %}
+        {% if alt.alt_target is not none %} · Tgt ${{ '%.2f'|format(alt.alt_target) }}{% endif %}
+        {% if alt.remaining_er_pct is not none %} · Rem ER {{ '%+.2f'|format(alt.remaining_er_pct) }}%{% endif %}
+        {% if alt.note %} — {{ alt.note }}{% endif %}
+      </span>
+      {% elif es.new_plan and es.new_plan.note %}
+      <span class="entry-status-plan muted small">{{ es.new_plan.note }}</span>
+      {% endif %}
     </div>
     {% endif %}
     <div class="trade-level-field">

@@ -546,6 +546,23 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .entry-row-stale td { opacity: 0.72; }
 .entry-row-stale .entry-status-badge { opacity: 1; }
 
+.trade-reeval-panel {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.trade-reeval-panel .transparency-title,
+.trade-reeval-panel .section-title-inline {
+  margin-top: 0;
+}
+.trade-reeval-top {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+}
+
 .edge-type-badge {
   font-size: 0.78rem;
   font-weight: 600;
