@@ -24,7 +24,10 @@ _MONTHLY_MACRO = frozenset(
 _WEEKLY_MACRO = frozenset({"ICSA"})
 _DAILY_RATE_MACRO = frozenset({"DGS10", "DGS2"})
 _BOND_PROXY_TICKERS = frozenset({"^TNX", "TNX"})
-_ICSA_STALE_CALENDAR_DAYS = 10
+# Weekly claims: week-ending Saturday, typically released the following Thursday.
+# Mid-week before the next release the prior Saturday can be ~11–12 calendar days old;
+# holiday weeks (e.g. Jul 4) need a little more slack before flagging.
+_ICSA_STALE_CALENDAR_DAYS = 14
 
 
 @dataclass

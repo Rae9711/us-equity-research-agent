@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 # Checklist keys where False is a valid state (not absent data).
 _SKIP_MISSING_KEYS: dict[str, frozenset[str]] = {
     "macro": frozenset({"nfp_release_day"}),
+    # RSS supplements Polygon; Bloomberg/WSJ feeds 404 or empty often — warn only.
+    "news": frozenset({"bloomberg", "wsj"}),
+}
+
+# Soft checklist keys: False → ⚠ attention, never blocks data_ready.
+_SOFT_CHECKLIST_KEYS: dict[str, frozenset[str]] = {
+    "news": frozenset({"bloomberg", "wsj"}),
 }
 
 
@@ -38,6 +45,16 @@ def _flatten_missing(checklist: dict[str, Any], prefix: str) -> list[str]:
         if not ok:
             missing.append(f"{prefix}.{key}")
     return missing
+
+
+def _soft_checklist_warnings(checklist: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for section, soft_keys in _SOFT_CHECKLIST_KEYS.items():
+        items = checklist.get(section) or {}
+        for key in soft_keys:
+            if items.get(key) is False:
+                warnings.append(f"⚠ {section}.{key}: RSS 不可用（可选源，不阻断就绪）")
+    return warnings
 
 
 def collect_step0(trading_date: date | None = None, *, force: bool = False) -> dict[str, Any]:
@@ -66,6 +83,7 @@ def collect_step0(trading_date: date | None = None, *, force: bool = False) -> d
     missing: list[str] = []
     for section, items in checklist.items():
         missing.extend(_flatten_missing(items, section))
+    missing.extend(_soft_checklist_warnings(checklist))
 
     quote_session_dates: dict[str, str | None] = {}
 
@@ -96,8 +114,30 @@ def collect_step0(trading_date: date | None = None, *, force: bool = False) -> d
     for item in freshness.get("attention") or []:
         missing.append(f"⚠ {item}")
 
-    # Warnings (e.g. lagging FRED macro) must not block data_ready.
-    data_ready = len([m for m in missing if not str(m).startswith("⚠")]) == 0
+    # Warnings (e.g. lagging FRED macro, optional RSS) must not block data_ready.
+    hard_missing = [m for m in missing if not str(m).startswith("⚠")]
+    soft_missing = [m for m in missing if str(m).startswith("⚠")]
+    data_ready = len(hard_missing) == 0
+
+    if data_ready:
+        one_liner = "全部 Raw Data 已更新，可进入 Morning Research"
+        if soft_missing:
+            shown = soft_missing[:5]
+            one_liner += (
+                f"；需关注：{', '.join(shown)}"
+                + ("…" if len(soft_missing) > 5 else "")
+            )
+    else:
+        shown_hard = hard_missing[:6]
+        one_liner = f"缺失项：{', '.join(shown_hard)}" + (
+            "…" if len(hard_missing) > 6 else ""
+        )
+        if soft_missing:
+            shown_soft = soft_missing[:4]
+            one_liner += (
+                f"；需关注：{', '.join(shown_soft)}"
+                + ("…" if len(soft_missing) > 4 else "")
+            )
 
     payload.update({
         "data_ready": data_ready,
@@ -106,14 +146,7 @@ def collect_step0(trading_date: date | None = None, *, force: bool = False) -> d
             "part_id": "Step0",
             "judgment": f"数据就绪：{'YES' if data_ready else 'NO'}",
             "confidence": None,
-            "one_liner": (
-                "全部 Raw Data 已更新，可进入 Morning Research"
-                if data_ready
-                else (
-                    f"缺失项：{', '.join(missing[:8])}"
-                    + ("…" if len(missing) > 8 else "")
-                )
-            ),
+            "one_liner": one_liner,
         },
     })
 

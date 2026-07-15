@@ -165,23 +165,29 @@ class MacroFreshnessTierTests(unittest.TestCase):
         self.assertTrue(any("FRED 最新" in a for a in result.attention))
         self.assertFalse(any("早于上一交易日" in a for a in result.attention))
 
-    def test_icsa_stale_only_after_ten_days(self) -> None:
-        trading_date = date(2026, 7, 6)
+    def test_icsa_stale_only_after_fourteen_days(self) -> None:
+        # Wed Jul 15: prior Saturday week-ending Jul 4 is 11 days old — still normal
+        # before Thursday's next release (week ending Jul 11).
+        trading_date = date(2026, 7, 15)
+        prior = prior_trading_day(trading_date)
         raw = _minimal_raw(trading_date)
-        raw["collected_at"] = "2026-07-06T07:45:00-04:00"
+        raw["collected_at"] = "2026-07-15T07:45:00-04:00"
+        raw["news"]["published_gte"] = "2026-07-14T20:00:00Z"
         raw["macro"]["series"] = {
-            "ICSA": {"series_id": "ICSA", "date": "2026-06-28", "value": "240000"},
+            "ICSA": {"series_id": "ICSA", "date": "2026-07-04", "value": "215000"},
         }
 
-        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-02T20:00:00Z"):
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-14T20:00:00Z"):
             result = validate_raw_for_trading_date(raw, trading_date)
 
         self.assertTrue(result.ok)
         self.assertEqual(len(result.macro_reference), 1)
         self.assertEqual(result.attention, [])
+        self.assertEqual(prior, date(2026, 7, 14))
 
-        raw["macro"]["series"]["ICSA"]["date"] = "2026-06-20"
-        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-02T20:00:00Z"):
+        # 15 calendar days exceeds the 14-day weekly allowance.
+        raw["macro"]["series"]["ICSA"]["date"] = "2026-06-27"
+        with patch("src.utils.data_freshness.prior_close_utc_iso", return_value="2026-07-14T20:00:00Z"):
             stale = validate_raw_for_trading_date(raw, trading_date)
         self.assertTrue(any("已超过" in a for a in stale.attention))
 

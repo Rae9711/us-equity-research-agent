@@ -132,6 +132,7 @@ def collect_news(*, published_gte: str | None = None) -> dict[str, Any]:
 
     has_polygon = len(polygon_articles) >= 5
     has_rss_fallback = len(rss_articles) >= 5 and bool(poly_errors)
+    # bloomberg/wsj are supplemental RSS — tracked for UI but do not gate ok/data_ready.
     checklist = {
         "polygon_news": has_polygon or has_rss_fallback,
         "bloomberg": any(a["source"] == "Bloomberg" for a in rss_articles),
