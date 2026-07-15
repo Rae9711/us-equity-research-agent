@@ -75,6 +75,46 @@ def _has_market_data(obs: dict[str, Any], q: dict[str, Any]) -> bool:
     return current is not None and current > 0
 
 
+def _pass_stub_row(symbol: str, reason: str = "No quote data") -> dict[str, Any]:
+    """Minimal ranked row for symbols lacking usable market data.
+
+    Must include every key `_build_trade_slot` / transparency expect so universe
+    expansion (extra tickers without quotes) cannot KeyError on Pass stubs.
+    """
+    return {
+        "symbol": symbol,
+        "win_prob": 50.0,
+        "win_prob_breakdown": None,
+        "expected_return_pct": 0.0,
+        "expected_high": 0.0,
+        "expected_low": 0.0,
+        "expected_close": 0.0,
+        "current_price": None,
+        "upside_pct": 0.0,
+        "downside_risk_pct": 0.0,
+        "risk_reward": 0.0,
+        "rr_display": None,
+        "final_score": 0.0,
+        "trade_action": "Pass",
+        "trade": "Pass",
+        "gap_pct": None,
+        "relative_strength": None,
+        "relative_strength_vs_smh": None,
+        "relative_weakness_score": 0,
+        "prior_day_change_pct": None,
+        "why_factors": [reason],
+        "why": reason,
+        "score": 0,
+        "news_count": 0,
+        "factor_breakdown": {},
+        "edge_type": None,
+        "score_formula_display": None,
+        "rr_weight": None,
+        "why_vs_runner_up": "—",
+        "advisory": True,
+    }
+
+
 def _quote(raw: dict[str, Any], symbol: str) -> dict[str, Any]:
     sym = symbol.upper()
     section = _SYMBOL_SECTION.get(sym, "stocks")
@@ -936,9 +976,93 @@ def _build_trade_slot(
     macro_calendar: dict[str, Any] | None = None,
     total_score: int = 0,
 ) -> dict[str, Any]:
-    current = _safe_float(obs.get("last")) or _safe_float(obs.get("close")) or row["current_price"]
+    sym = row.get("symbol") or ""
+    current = (
+        _safe_float(obs.get("last"))
+        or _safe_float(obs.get("close"))
+        or _safe_float(row.get("current_price"))
+        or _safe_float(q.get("close"))
+        or _safe_float(q.get("last"))
+    )
+    why_factors = list(row.get("why_factors") or [])
+    why_chain = row.get("why") or (" · ".join(why_factors[:4]) if why_factors else "—")
+    er = float(row.get("expected_return_pct") or 0.0)
+    win_prob = float(row.get("win_prob") or 50.0)
+    risk_reward = float(row.get("risk_reward") or 0.0)
+    final_score = float(row.get("final_score") or 0.0)
+    trade_action = row.get("trade_action") or "Pass"
+    expected_high = _safe_float(row.get("expected_high"))
+    expected_low = _safe_float(row.get("expected_low"))
+    expected_close = _safe_float(row.get("expected_close"))
+    upside_pct = float(row.get("upside_pct") or 0.0)
+
+    # No usable price (Pass stub / missing quote after universe expansion):
+    # emit a transparency Pass slot without calling level derivation.
+    if current is None or current <= 0:
+        if "No quote data" not in why_factors:
+            why_factors = (why_factors + ["No quote data"])[:8]
+            why_chain = " · ".join(why_factors[:4]) if why_factors else why_chain
+        inst = _instrument(sym, direction, p9)
+        score = int(row.get("_total_score") if row.get("_total_score") is not None else total_score)
+        horizon = row.get("horizon") or _trade_horizon(
+            direction=direction, p9=p9, total=score, instrument=inst
+        )
+        conf = int(min(95, max(40, win_prob)))
+        conf_stars = "★" * min(5, max(1, conf // 20)) + "☆" * (5 - min(5, max(1, conf // 20)))
+        return {
+            "rank": rank,
+            "symbol": sym,
+            "direction": direction,
+            "instrument": inst,
+            "horizon": horizon,
+            "confidence": conf,
+            "confidence_stars": conf_stars,
+            "expected_move": f"{er:+.2f}%",
+            "expected_return_pct": er,
+            "win_prob": win_prob,
+            "win_prob_breakdown": row.get("win_prob_breakdown"),
+            "risk_reward": risk_reward,
+            "final_score": final_score,
+            "trade_action": "Pass",
+            "trade": "Pass",
+            "relative_strength": row.get("relative_strength"),
+            "entry": "—",
+            "entry_source": None,
+            "entry_price": None,
+            "entry_zone": None,
+            "stop": "—",
+            "stop_source": None,
+            "stop_price": None,
+            "target": "—",
+            "target_source": None,
+            "target_price": None,
+            "targets": [],
+            "level_anchors": None,
+            "levels_valid": False,
+            "why": why_factors,
+            "why_chain": why_chain,
+            "why_vs_runner_up": row.get("why_vs_runner_up", "—"),
+            "factor_breakdown": row.get("factor_breakdown") or {},
+            "edge_type": row.get("edge_type"),
+            "score_formula_display": row.get("score_formula_display"),
+            "expected_high": expected_high if expected_high is not None else 0.0,
+            "expected_low": expected_low if expected_low is not None else 0.0,
+            "expected_close": expected_close if expected_close is not None else 0.0,
+            "current_price": None,
+            "upside_pct": upside_pct,
+            "downside_risk_pct": row.get("downside_risk_pct"),
+            "why_factors": why_factors,
+            "why_today": row.get("why_chain") or why_chain,
+            "gap_pct": row.get("gap_pct"),
+            "rr_display": row.get("rr_display"),
+            "catalyst": _catalyst_for_symbol(sym, macro_calendar),
+            "invalidation": "—",
+            "invalid_levels_reason": "No quote data",
+            "advisory": True,
+        }
+
     anchors = compute_anchors(
-        row["symbol"],
+        sym,
         raw,
         prior_raw,
         trading_day,
@@ -951,12 +1075,12 @@ def _build_trade_slot(
         direction,
         anchors,
         current=current,
-        expected_high=row["expected_high"],
-        expected_low=row["expected_low"],
-        expected_close=row["expected_close"],
+        expected_high=expected_high if expected_high is not None else current,
+        expected_low=expected_low if expected_low is not None else current,
+        expected_close=expected_close if expected_close is not None else current,
     )
-    inst = _instrument(row["symbol"], direction, p9)
-    conf = int(min(95, max(40, row["win_prob"])))
+    inst = _instrument(sym, direction, p9)
+    conf = int(min(95, max(40, win_prob)))
     conf_stars = "★" * min(5, max(1, conf // 20)) + "☆" * (5 - min(5, max(1, conf // 20)))
     score = int(row.get("_total_score") if row.get("_total_score") is not None else total_score)
     horizon = row.get("horizon") or _trade_horizon(
@@ -964,19 +1088,19 @@ def _build_trade_slot(
     )
     slot = {
         "rank": rank,
-        "symbol": row["symbol"],
+        "symbol": sym,
         "direction": direction,
         "instrument": inst,
         "horizon": horizon,
         "confidence": conf,
         "confidence_stars": conf_stars,
-        "expected_move": f"{row['expected_return_pct']:+.2f}%",
-        "expected_return_pct": row["expected_return_pct"],
-        "win_prob": row["win_prob"],
+        "expected_move": f"{er:+.2f}%",
+        "expected_return_pct": er,
+        "win_prob": win_prob,
         "win_prob_breakdown": row.get("win_prob_breakdown"),
-        "risk_reward": row["risk_reward"],
-        "final_score": row["final_score"],
-        "trade_action": row["trade_action"],
+        "risk_reward": risk_reward,
+        "final_score": final_score,
+        "trade_action": trade_action,
         "relative_strength": row.get("relative_strength"),
         "entry": levels["entry"],
         "entry_source": levels.get("entry_source"),
@@ -991,23 +1115,23 @@ def _build_trade_slot(
         "targets": levels.get("targets") or [],
         "level_anchors": levels.get("level_anchors"),
         "levels_valid": levels.get("levels_valid", True),
-        "why": row["why_factors"],
-        "why_chain": row["why"],
+        "why": why_factors,
+        "why_chain": why_chain,
         "why_vs_runner_up": row.get("why_vs_runner_up", "—"),
         "factor_breakdown": row.get("factor_breakdown") or {},
         "edge_type": row.get("edge_type"),
         "score_formula_display": row.get("score_formula_display"),
-        "expected_high": row["expected_high"],
-        "expected_low": row["expected_low"],
-        "expected_close": row["expected_close"],
-        "current_price": row["current_price"],
-        "upside_pct": row["upside_pct"],
+        "expected_high": expected_high if expected_high is not None else current,
+        "expected_low": expected_low if expected_low is not None else current,
+        "expected_close": expected_close if expected_close is not None else current,
+        "current_price": round(current, 2),
+        "upside_pct": upside_pct,
         "downside_risk_pct": row.get("downside_risk_pct"),
-        "why_factors": row["why_factors"],
-        "why_today": row.get("why_chain") or " · ".join(row.get("why_factors") or []),
+        "why_factors": why_factors,
+        "why_today": row.get("why_chain") or why_chain,
         "gap_pct": row.get("gap_pct"),
         "rr_display": row.get("rr_display"),
-        "catalyst": _catalyst_for_symbol(row["symbol"], macro_calendar),
+        "catalyst": _catalyst_for_symbol(sym, macro_calendar),
         "invalidation": "—",
         "advisory": True,
     }
@@ -1026,7 +1150,7 @@ def _build_trade_slot(
     slot = _apply_price_based_return(
         slot,
         direction=direction,
-        heuristic_er=row["expected_return_pct"],
+        heuristic_er=er,
     )
     slot["levels_valid"] = bool(levels.get("levels_valid", True))
     slot = _enforce_level_invariants(slot)
@@ -1439,19 +1563,7 @@ def compute_trade_decision(
         quote_by_sym[sym] = q
         obs = obs_by_sym.get(sym, {})
         if not _has_market_data(obs, q):
-            ranked.append({
-                "symbol": sym,
-                "win_prob": 50.0,
-                "expected_return_pct": 0.0,
-                "final_score": 0.0,
-                "trade_action": "Pass",
-                "trade": "Pass",
-                "risk_reward": 0.0,
-                "why_factors": ["No quote data"],
-                "why": "No quote data",
-                "relative_strength": None,
-                "advisory": True,
-            })
+            ranked.append(_pass_stub_row(sym, "No quote data"))
             continue
         sym_pct = sym_pcts.get(sym)
         prior_chg = _prior_day_change(sym, prior_raw, prior_day) if prior_day else None

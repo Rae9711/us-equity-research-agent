@@ -705,3 +705,100 @@ def test_actionable_top_trades_never_violate_geometry():
             assert primary["target_price"] >= primary["entry_price"]
             assert primary["expected_return_pct"] >= 0
 
+
+def test_no_quote_pass_stubs_include_current_price_key():
+    """Universe symbols without quotes must not KeyError in P18 decision tree.
+
+    After CANDIDATE_SYMBOLS expansion, missing-quote Pass stubs used to omit
+    ``current_price`` / expected_* keys; ``_build_trade_slot`` then raised
+    KeyError when filling top_trades transparency.
+    """
+    raw = _bullish_raw()
+    # Leave AMD/MU/AVGO/META/ARM without quotes (typical PIT partial universe).
+    assert "AMD" not in ((raw.get("stocks") or {}).get("quotes") or {})
+
+    rule_bundle = {
+        "bias": "Bullish Bias",
+        "total": 3,
+        "driver_type": "Momentum",
+        "daily_driver": "AI Momentum",
+        "catalysts_today": [],
+        "macro_calendar": {"catalysts": [], "has_material_catalyst": False},
+        "driver_tree": {"primary": {"type": "Momentum", "label": "AI Momentum"}},
+    }
+    parts = {
+        "P9": {"buy_options": "Yes", "zero_dte": "No", "buy_call": "Yes", "buy_put": "No"},
+        "P16": {"judgment": "计划 Trade", "one_liner": "做多"},
+    }
+
+    def _obs_partial(symbol: str, raw_in: dict, prior_raw: dict, trading_day, **kwargs):
+        section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
+            "sector" if symbol == "SMH" else "stocks"
+        )
+        q = ((raw_in.get(section) or {}).get("quotes") or {}).get(symbol) or {}
+        if not q:
+            return {"ticker": symbol, "error": "no quote"}
+        return _mock_obs(symbol, raw_in, prior_raw, trading_day, **kwargs)
+
+    with patch("src.research.trade_candidates._observation", side_effect=_obs_partial):
+        with patch("src.research.trade_candidates._load_prior_raw", return_value={}):
+            result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
+
+    # Must complete without KeyError; every ranked row carries current_price key.
+    assert "trade_candidates" in result
+    assert "top_trades" in result
+    for row in result["trade_candidates"]:
+        assert "current_price" in row, f"{row.get('symbol')} missing current_price"
+        assert "expected_high" in row
+        assert "expected_low" in row
+        assert "expected_close" in row
+
+    stub_syms = {
+        r["symbol"]
+        for r in result["trade_candidates"]
+        if r.get("why") == "No quote data" or "No quote data" in (r.get("why_factors") or [])
+    }
+    assert stub_syms, "expected at least one no-quote Pass stub"
+    for sym in stub_syms:
+        stub = next(r for r in result["trade_candidates"] if r["symbol"] == sym)
+        assert stub["trade_action"] == "Pass"
+        assert stub["current_price"] is None
+
+    # Transparency board may include Pass stubs; all slots have current_price key.
+    for slot in result["top_trades"]:
+        assert "current_price" in slot
+
+
+def test_build_trade_slot_survives_legacy_pass_row_without_current_price():
+    """Defensive: even a legacy incomplete Pass row must not KeyError."""
+    from src.research.trade_candidates import _build_trade_slot
+
+    legacy = {
+        "symbol": "AMD",
+        "win_prob": 50.0,
+        "expected_return_pct": 0.0,
+        "final_score": 0.0,
+        "trade_action": "Pass",
+        "trade": "Pass",
+        "risk_reward": 0.0,
+        "why_factors": ["No quote data"],
+        "why": "No quote data",
+        # deliberately omit current_price / expected_*
+    }
+    slot = _build_trade_slot(
+        legacy,
+        rank=1,
+        direction="LONG",
+        p9={},
+        obs={"error": "no quote"},
+        raw={},
+        prior_raw={},
+        trading_day=__import__("datetime").date(2026, 7, 14),
+        section="stocks",
+        q={},
+    )
+    assert slot["trade_action"] == "Pass"
+    assert "current_price" in slot
+    assert slot["current_price"] is None
+    assert slot["levels_valid"] is False
+
