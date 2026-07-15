@@ -291,8 +291,55 @@
       <div class="decision-meta-row">
         {% set ta = decision_card.trade_action %}
         <span class="trade-badge trade-{{ ta | lower | replace(' ', '-') }}">{{ ta }}</span>
+        <span class="muted small">↑ Intraday Primary</span>
         <a class="muted" href="/today?date={{ day.trading_date }}#candidates">Bond · Dollar · Sector 证据 →</a>
       </div>
+      {% if decision_card.swing_trade and decision_card.swing_trade.direction in ('LONG', 'SHORT') %}
+      {% set swing = decision_card.swing_trade %}
+      <div class="swing-trade-panel swing-trade-inline" id="swing-trade">
+        <div class="decision-card-head">
+          <h3 class="section-title-inline">长线 · Swing Trade</h3>
+          <span class="horizon-badge horizon-swing">Swing</span>
+        </div>
+        <p class="advisory-banner advisory-banner-compact">ADVISORY — 独立于上方 Intraday Primary · 多日–数周</p>
+        <div class="decision-grid decision-grid-exec decision-grid-compact">
+          <div class="decision-field">
+            <span class="decision-label">Symbol · Direction</span>
+            <span class="decision-value">{{ swing.symbol }} · {{ swing.direction }}</span>
+          </div>
+          <div class="decision-field">
+            <span class="decision-label">Ideal Entry Zone</span>
+            <span class="decision-value">{% if swing.entry_zone %}{{ swing.entry_zone.display }}{% elif swing.entry_price is not none %}${{ swing.entry_price }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="decision-field">
+            <span class="decision-label">Stop · Target</span>
+            <span class="decision-value">
+              {% if swing.stop_price is not none %}${{ swing.stop_price }}{% endif %}
+              →
+              {% if swing.target_price is not none %}${{ swing.target_price }}{% endif %}
+              {% if swing.targets and swing.targets|length > 1 %} / T2 ${{ swing.targets[1].price }}{% endif %}
+            </span>
+          </div>
+          <div class="decision-field">
+            <span class="decision-label">Horizon</span>
+            <span class="decision-value">{{ swing.duration or 'Swing (days–weeks)' }}</span>
+          </div>
+          <div class="decision-field decision-field-wide">
+            <span class="decision-label">Why</span>
+            <span class="decision-value">{% if swing.why %}{{ swing.why[:3] | join(' · ') }}{% else %}{{ swing.why_chain or '—' }}{% endif %}</span>
+          </div>
+          {% if swing.invalidation %}
+          <div class="decision-field decision-field-wide">
+            <span class="decision-label">Invalidation</span>
+            <span class="decision-value muted">{{ swing.invalidation }}</span>
+          </div>
+          {% endif %}
+        </div>
+        {% if swing.trade_summary_cn %}
+        <p class="decision-oneliner">「{{ swing.trade_summary_cn }}」</p>
+        {% endif %}
+      </div>
+      {% endif %}
       <details class="decision-hypothesis">
         <summary class="decision-label">Hypothesis (P17) · 失效条件</summary>
         <p class="decision-value">{{ decision_card.hypothesis }}</p>

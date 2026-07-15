@@ -72,20 +72,20 @@
     </section>
     {% endif %}
     {% if primary %}
-    {{ trade_detail_card(primary, '🥇 Primary Trade · #' ~ primary.rank|string, transparency=transparency) }}
+    {{ trade_detail_card(primary, '🥇 Intraday Primary · #' ~ primary.rank|string, transparency=transparency) }}
     {% if meta.get('best_opportunity') and meta.best_opportunity.one_liner %}
     <p class="best-opp-oneliner">「{{ meta.best_opportunity.one_liner }}」</p>
     {% endif %}
     {% elif best_trades.get('threshold_message') %}
     <section class="best-opportunity-panel threshold-panel" id="best-opportunity">
-      <h2 class="section-title">今日交易</h2>
+      <h2 class="section-title">今日交易 · Intraday</h2>
       <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
       <p class="threshold-message">{{ best_trades.threshold_message }}</p>
     </section>
     {% elif meta and meta.get('best_opportunity') %}
     {% set best = meta.best_opportunity %}
     <section class="best-opportunity-panel" id="best-opportunity">
-      <h2 class="section-title">🥇 Best Opportunity Today</h2>
+      <h2 class="section-title">🥇 Intraday Primary</h2>
       <p class="advisory-banner">ADVISORY — 不构成投资建议</p>
       <div class="best-opp-grid">
         <div><span class="decision-label">方向 Direction</span><strong>{{ best.direction }}</strong></div>
@@ -122,6 +122,57 @@
       {% endif %}
       <p><strong>Why：</strong>{{ best.why_chain or (best.why | join(' · ')) }}</p>
       <p class="best-opp-oneliner">「{{ best.one_liner }}」</p>
+    </section>
+    {% endif %}
+
+    {% set swing = (meta.get('swing_trade') if meta else none) or best_trades.get('swing') %}
+    {% if swing and swing.direction in ('LONG', 'SHORT') %}
+    <section class="panel swing-trade-panel" id="swing-trade">
+      <div class="decision-card-head">
+        <h2 class="section-title-inline">长线 · Swing Trade</h2>
+        <span class="horizon-badge horizon-swing">Swing</span>
+      </div>
+      <p class="advisory-banner">ADVISORY — 不构成投资建议 · 独立于 Intraday Primary（多日–数周持仓）</p>
+      <div class="best-opp-grid trade-detail-grid">
+        <div><span class="decision-label">标的 · 方向</span><strong>{{ swing.symbol }} · {{ swing.direction }}</strong></div>
+        <div><span class="decision-label">Horizon</span><strong>{{ swing.duration or 'Swing (days–weeks)' }}</strong></div>
+        <div class="trade-level-field">
+          <span class="decision-label">Ideal Entry Zone</span>
+          <strong>{% if swing.entry_zone %}{{ swing.entry_zone.display }}{% elif swing.entry_price is not none %}${{ swing.entry_price }}{% else %}{{ swing.entry }}{% endif %}</strong>
+        </div>
+        <div class="trade-level-field">
+          <span class="decision-label">止损 Stop</span>
+          <strong>{% if swing.stop_price is not none %}${{ swing.stop_price }}{% endif %} {% if swing.stop %}({{ swing.stop }}){% endif %}</strong>
+        </div>
+        <div class="trade-level-field">
+          <span class="decision-label">目标 Target(s)</span>
+          <strong>
+            {% if swing.target_price is not none %}${{ swing.target_price }}{% endif %}
+            {% if swing.targets and swing.targets|length > 1 %}
+            · T2 ${{ swing.targets[1].price }}
+            {% endif %}
+          </strong>
+          {% if swing.expected_move %}<span class="muted small">{{ swing.expected_move }}</span>{% endif %}
+        </div>
+        <div><span class="decision-label">置信度</span><strong>{% if swing.confidence is not none %}{{ swing.confidence }}%{% else %}—{% endif %}</strong></div>
+      </div>
+      {% if swing.trade_summary_cn %}
+      <p class="trade-summary-cn"><strong>{{ swing.trade_summary_cn }}</strong></p>
+      {% endif %}
+      {% if swing.why %}
+      <div class="why-factors-block">
+        <strong>Why</strong>
+        <ul class="why-factors">{% for f in swing.why %}<li>{{ f }}</li>{% endfor %}</ul>
+      </div>
+      {% elif swing.why_chain %}
+      <p><strong>Why：</strong>{{ swing.why_chain }}</p>
+      {% endif %}
+      {% if swing.invalidation %}
+      <p class="muted"><strong>Invalidation：</strong>{{ swing.invalidation }}</p>
+      {% endif %}
+      {% if swing.level_formula %}
+      <p class="score-formula muted small">{{ swing.level_formula }}{% if swing.atr_source %} · ATR: {{ swing.atr_source }}{% endif %}</p>
+      {% endif %}
     </section>
     {% endif %}
 

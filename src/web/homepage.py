@@ -539,6 +539,9 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
         "trade_candidates": morning.get("trade_candidates") or [],
         "best_opportunity": best,
         "primary_trade": primary_out,
+        "swing_trade": morning.get("swing_trade")
+        or best_trades.get("swing")
+        or None,
         "macro_calendar": morning.get("macro_calendar") or transparency.get("macro_calendar"),
         "driver_tree": morning.get("driver_tree") or (morning.get("parts") or {}).get("P10", {}).get("driver_tree"),
         "trade_plan": morning.get("trade_plan") or transparency.get("trade_plan"),

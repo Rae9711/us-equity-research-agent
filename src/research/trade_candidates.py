@@ -47,6 +47,9 @@ MIN_UPSIDE_PCT = 1.0
 
 _STOCK_SYMBOLS = frozenset({"TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM"})
 _SEMI_SYMBOLS = frozenset({"NVDA", "AMD", "MU", "AVGO", "ARM", "SMH"})
+# Liquid names preferred for multi-day / swing positions (not 0DTE).
+_SWING_PREFERRED = ("NVDA", "META", "QQQ", "AVGO", "AMD", "TSLA", "SMH", "SPY")
+_SWING_MIN_QUALITY = 2.0  # independent of intraday BUY/Small threshold
 
 _SYMBOL_SECTION: dict[str, str] = {
     "QQQ": "market",
@@ -1386,6 +1389,407 @@ def _decision_tree(
     return slots
 
 
+def _fetch_swing_context(symbol: str, *, current: float) -> dict[str, Any]:
+    """Daily ATR(14) + prior-week high/low for swing level sizing.
+
+    Falls back to a ~1.5% price ATR proxy when Yahoo history is unavailable
+    (tests / offline). Never raises — swing is advisory and optional.
+    """
+    atr_proxy = max(current * 0.015, 0.01)
+    out: dict[str, Any] = {
+        "atr": atr_proxy,
+        "atr_source": "proxy_1.5pct",
+        "week_high": None,
+        "week_low": None,
+        "prior_5d_chg_pct": None,
+    }
+    try:
+        import yfinance as yf
+
+        hist = yf.Ticker(symbol).history(period="30d", auto_adjust=True)
+        if hist is None or hist.empty or len(hist) < 3:
+            return out
+        highs = hist["High"].astype(float)
+        lows = hist["Low"].astype(float)
+        closes = hist["Close"].astype(float)
+        prev_close = closes.shift(1)
+        tr = (highs - lows).to_frame("hl")
+        tr["hc"] = (highs - prev_close).abs()
+        tr["lc"] = (lows - prev_close).abs()
+        true_range = tr.max(axis=1)
+        atr = float(true_range.tail(14).mean())
+        if atr > 0:
+            out["atr"] = atr
+            out["atr_source"] = "ATR14"
+        week = hist.tail(5)
+        out["week_high"] = round(float(week["High"].max()), 2)
+        out["week_low"] = round(float(week["Low"].min()), 2)
+        if len(closes) >= 6 and float(closes.iloc[-6]) > 0:
+            out["prior_5d_chg_pct"] = round(
+                (float(closes.iloc[-1]) / float(closes.iloc[-6]) - 1.0) * 100.0, 2
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _swing_direction(
+    *,
+    bias_direction: str,
+    prior_day_chg: float | None,
+    rs_vs_qqq: float | None,
+    prior_5d_chg: float | None,
+) -> str:
+    """Prefer multi-day trend for position trades; fall back to morning bias.
+
+    Does not force the opposite of a weak intraday bias when the stock's own
+    multi-day momentum is clear (LONG on strength / SHORT on weakness).
+    """
+    mom = 0.0
+    if prior_5d_chg is not None:
+        mom += float(prior_5d_chg)
+    if prior_day_chg is not None:
+        mom += float(prior_day_chg) * 0.5
+    if rs_vs_qqq is not None:
+        mom += float(rs_vs_qqq)
+    if mom >= 0.8:
+        return "LONG"
+    if mom <= -0.8:
+        return "SHORT"
+    if bias_direction in ("LONG", "SHORT"):
+        return bias_direction
+    return "LONG"
+
+
+def derive_swing_levels(
+    direction: str,
+    *,
+    current: float,
+    atr: float,
+    week_high: float | None = None,
+    week_low: float | None = None,
+) -> dict[str, Any]:
+    """Wider multi-day entry / stop / targets (documented formula).
+
+    Stop: 1.5–2× ATR from ideal entry, or prior-week low (LONG) / high (SHORT)
+    when that level sits inside the ATR band.
+    Targets: measured move toward 5–15% or 2–3× ATR (whichever is larger,
+    capped at ~15%).
+    """
+    atr = max(float(atr or 0), current * 0.01, 0.01)
+    if direction == "LONG":
+        entry_mid = round(current * 0.997, 2)
+        zone_low = round(entry_mid - 0.5 * atr, 2)
+        zone_high = round(min(current, entry_mid + 0.35 * atr), 2)
+        if zone_low >= zone_high:
+            zone_low = round(entry_mid * 0.99, 2)
+            zone_high = round(entry_mid * 1.005, 2)
+        stop_atr = entry_mid - 1.75 * atr
+        stop_candidates = [stop_atr, entry_mid - 1.5 * atr, entry_mid - 2.0 * atr]
+        if week_low is not None and week_low < entry_mid:
+            stop_candidates.append(float(week_low))
+        # Prefer structural week low when within 1.5–2.5 ATR of entry
+        stop_px = stop_atr
+        for cand in sorted(stop_candidates, reverse=True):
+            dist = entry_mid - cand
+            if 1.2 * atr <= dist <= 2.6 * atr:
+                stop_px = cand
+                break
+        else:
+            stop_px = entry_mid - 1.75 * atr
+        stop_src = "week_low" if week_low is not None and abs(stop_px - float(week_low)) < 0.02 else "1.75xATR"
+        t1_pct = max(0.05 * entry_mid, 2.0 * atr)
+        t2_pct = min(0.15 * entry_mid, max(0.10 * entry_mid, 3.0 * atr))
+        target1 = round(entry_mid + t1_pct, 2)
+        target2 = round(entry_mid + t2_pct, 2)
+        if target2 <= target1:
+            target2 = round(target1 * 1.04, 2)
+        er = (target1 - entry_mid) / entry_mid * 100.0
+        risk = (entry_mid - stop_px) / entry_mid * 100.0
+        stop_label = f"{stop_px:.1f} ({stop_src})"
+        entry_prefix = "Near"
+    elif direction == "SHORT":
+        entry_mid = round(current * 1.003, 2)
+        zone_high = round(entry_mid + 0.5 * atr, 2)
+        zone_low = round(max(current, entry_mid - 0.35 * atr), 2)
+        if zone_low >= zone_high:
+            zone_low = round(entry_mid * 0.995, 2)
+            zone_high = round(entry_mid * 1.01, 2)
+        stop_atr = entry_mid + 1.75 * atr
+        stop_candidates = [stop_atr, entry_mid + 1.5 * atr, entry_mid + 2.0 * atr]
+        if week_high is not None and week_high > entry_mid:
+            stop_candidates.append(float(week_high))
+        stop_px = stop_atr
+        for cand in sorted(stop_candidates):
+            dist = cand - entry_mid
+            if 1.2 * atr <= dist <= 2.6 * atr:
+                stop_px = cand
+                break
+        else:
+            stop_px = entry_mid + 1.75 * atr
+        stop_src = "week_high" if week_high is not None and abs(stop_px - float(week_high)) < 0.02 else "1.75xATR"
+        t1_pct = max(0.05 * entry_mid, 2.0 * atr)
+        t2_pct = min(0.15 * entry_mid, max(0.10 * entry_mid, 3.0 * atr))
+        target1 = round(entry_mid - t1_pct, 2)
+        target2 = round(entry_mid - t2_pct, 2)
+        if target2 >= target1:
+            target2 = round(target1 * 0.96, 2)
+        er = (entry_mid - target1) / entry_mid * 100.0
+        risk = (stop_px - entry_mid) / entry_mid * 100.0
+        stop_label = f"{stop_px:.1f} ({stop_src})"
+        entry_prefix = "Near"
+    else:
+        return {
+            "levels_valid": False,
+            "entry_price": None,
+            "stop_price": None,
+            "target_price": None,
+        }
+
+    rr = round(er / risk, 2) if risk > 0 else 0.0
+    entry_zone = {
+        "low": round(min(zone_low, zone_high), 2),
+        "high": round(max(zone_low, zone_high), 2),
+        "mid": entry_mid,
+        "display": f"${min(zone_low, zone_high):.2f}–${max(zone_low, zone_high):.2f}",
+        "source": "swing_pullback",
+    }
+    return {
+        "levels_valid": True,
+        "entry_price": entry_mid,
+        "entry": f"{entry_prefix} {entry_mid:.1f} (swing zone)",
+        "entry_source": "swing_zone",
+        "entry_zone": entry_zone,
+        "stop_price": round(stop_px, 2),
+        "stop": stop_label,
+        "stop_source": stop_src,
+        "target_price": target1,
+        "target": f"{target1:.1f} (T1 ~{er:.1f}%)",
+        "target_source": "2xATR_or_5pct",
+        "targets": [
+            {"price": target1, "label": "T1", "pct": round(er, 2)},
+            {
+                "price": target2,
+                "label": "T2",
+                "pct": round(abs(target2 - entry_mid) / entry_mid * 100.0, 2),
+            },
+        ],
+        "expected_return_pct": round(er, 2),
+        "risk_reward": rr,
+        "atr": round(atr, 4),
+        "level_formula": (
+            "stop=1.5–2×ATR or prior-week extreme; "
+            "T1=max(5%, 2×ATR); T2=min(15%, max(10%, 3×ATR))"
+        ),
+    }
+
+
+def _swing_quality_score(
+    row: dict[str, Any],
+    *,
+    direction: str,
+    prior_5d_chg: float | None,
+    has_catalyst: bool,
+) -> float:
+    """Rank swing candidates: liquidity + multi-day momentum + catalyst + setup."""
+    sym = str(row.get("symbol") or "")
+    score = float(row.get("final_score") or 0.0) * 0.35
+    if sym in _SWING_PREFERRED:
+        score += 1.5 + (0.15 * (len(_SWING_PREFERRED) - _SWING_PREFERRED.index(sym)))
+    prior = _safe_float(row.get("prior_day_change_pct"))
+    rs = _safe_float(row.get("relative_strength"))
+    if direction == "LONG":
+        if prior is not None and prior > 0:
+            score += min(2.0, prior * 0.35)
+        if rs is not None and rs > 0:
+            score += min(1.5, rs * 0.6)
+        if prior_5d_chg is not None and prior_5d_chg > 0:
+            score += min(2.5, prior_5d_chg * 0.25)
+    else:
+        if prior is not None and prior < 0:
+            score += min(2.0, abs(prior) * 0.35)
+        if rs is not None and rs < 0:
+            score += min(1.5, abs(rs) * 0.6)
+        if prior_5d_chg is not None and prior_5d_chg < 0:
+            score += min(2.5, abs(prior_5d_chg) * 0.25)
+    if has_catalyst:
+        score += 0.8
+    if row.get("trade_action") in ("BUY", "Small"):
+        score += 0.4
+    # Prefer stocks/ETFs over ultrashort levered for swing
+    if sym == "TQQQ":
+        score -= 1.0
+    return round(score, 3)
+
+
+def compute_swing_opportunity(
+    ranked: list[dict[str, Any]],
+    *,
+    bias_direction: str,
+    total_score: int,
+    obs_by_sym: dict[str, dict[str, Any]] | None = None,
+    quote_by_sym: dict[str, dict[str, Any]] | None = None,
+    catalysts: list[Any] | None = None,
+    raw: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Select best Swing / Position candidate independent of Intraday Primary.
+
+    Can return a setup even when intraday primary is NO TRADE, as long as
+    swing quality clears ``_SWING_MIN_QUALITY``. Horizon is always ``Swing``.
+    """
+    del total_score  # reserved: |total|>=4 already maps slots to Swing via _trade_horizon
+    obs_by_sym = obs_by_sym or {}
+    quote_by_sym = quote_by_sym or {}
+    catalysts = catalysts or []
+    catalyst_text = " ".join(str(c) for c in catalysts).upper()
+
+    # Cheap shortlist first (no Yahoo); ATR/week extremes only for top few.
+    prelim: list[tuple[float, dict[str, Any], float, str]] = []
+    for row in ranked:
+        sym = str(row.get("symbol") or "")
+        if not sym or sym == "TQQQ":
+            continue
+        obs = obs_by_sym.get(sym) or {}
+        q = quote_by_sym.get(sym) or _quote(raw or {}, sym)
+        current = (
+            _safe_float(obs.get("last"))
+            or _safe_float(obs.get("close"))
+            or _safe_float(row.get("current_price"))
+            or _safe_float(q.get("close"))
+            or _safe_float(q.get("last"))
+        )
+        if current is None or current <= 0:
+            continue
+        direction = _swing_direction(
+            bias_direction=bias_direction,
+            prior_day_chg=_safe_float(row.get("prior_day_change_pct")),
+            rs_vs_qqq=_safe_float(row.get("relative_strength")),
+            prior_5d_chg=None,
+        )
+        has_cat = bool(row.get("news_count")) or sym in catalyst_text
+        q_score = _swing_quality_score(
+            row, direction=direction, prior_5d_chg=None, has_catalyst=has_cat
+        )
+        if q_score < _SWING_MIN_QUALITY and sym not in _SWING_PREFERRED:
+            continue
+        if q_score < _SWING_MIN_QUALITY * 0.75:
+            continue
+        prelim.append((q_score, row, current, direction))
+
+    if not prelim:
+        return None
+    prelim.sort(key=lambda x: x[0], reverse=True)
+
+    best: tuple[float, dict[str, Any], dict[str, Any], str, float] | None = None
+    for _, row, current, direction in prelim[:5]:
+        sym = str(row["symbol"])
+        ctx = _fetch_swing_context(sym, current=current)
+        direction = _swing_direction(
+            bias_direction=bias_direction,
+            prior_day_chg=_safe_float(row.get("prior_day_change_pct")),
+            rs_vs_qqq=_safe_float(row.get("relative_strength")),
+            prior_5d_chg=_safe_float(ctx.get("prior_5d_chg_pct")),
+        )
+        has_cat = bool(row.get("news_count")) or sym in catalyst_text
+        refined = _swing_quality_score(
+            row,
+            direction=direction,
+            prior_5d_chg=ctx.get("prior_5d_chg_pct"),
+            has_catalyst=has_cat,
+        )
+        if refined < _SWING_MIN_QUALITY * 0.75:
+            continue
+        if best is None or refined > best[0]:
+            best = (refined, row, ctx, direction, current)
+
+    if best is None:
+        return None
+    q_score, row, ctx, direction, current = best
+    sym = str(row["symbol"])
+    levels = derive_swing_levels(
+        direction,
+        current=current,
+        atr=float(ctx.get("atr") or current * 0.015),
+        week_high=_safe_float(ctx.get("week_high")),
+        week_low=_safe_float(ctx.get("week_low")),
+    )
+    if not levels.get("levels_valid"):
+        return None
+
+    instrument = "Stock" if sym in _STOCK_SYMBOLS else "ETF"
+    why: list[str] = []
+    if sym in _SWING_PREFERRED:
+        why.append(f"高流动性波段标的 {sym}")
+    prior = row.get("prior_day_change_pct")
+    if prior is not None:
+        why.append(f"Prior day {prior:+.1f}%")
+    p5 = ctx.get("prior_5d_chg_pct")
+    if p5 is not None:
+        why.append(f"5D momentum {p5:+.1f}%")
+    rs = row.get("relative_strength")
+    if rs is not None:
+        why.append(f"RS vs QQQ {rs:+.2f}%")
+    if row.get("news_count"):
+        why.append(f"News/{row['news_count']} catalyst hints")
+    if not why:
+        why.append("Multi-day setup quality vs peer universe")
+    why.append(f"Swing score {q_score:.1f}")
+
+    entry_px = levels["entry_price"]
+    stop_px = levels["stop_price"]
+    target_px = levels["target_price"]
+    er = levels["expected_return_pct"]
+    conf = int(min(90, max(45, float(row.get("win_prob") or 55) + 5)))
+    invalidation = (
+        f"Close beyond stop ${stop_px} or thesis broken (trend flip / catalyst fade)"
+        if stop_px is not None
+        else "Stop breach or thesis broken"
+    )
+    trade_summary_cn = (
+        f"波段{'做多' if direction == 'LONG' else '做空'} {sym}："
+        f"理想入场 {(levels.get('entry_zone') or {}).get('display', entry_px)}，"
+        f"止损 ${stop_px}，目标 ${target_px}（约 {er:+.1f}%），持仓天数–数周"
+    )
+    return {
+        "symbol": sym,
+        "direction": direction,
+        "instrument": instrument,
+        "horizon": "Swing",
+        "duration": "Swing (days–weeks)",
+        "confidence": conf,
+        "entry": levels["entry"],
+        "entry_source": levels.get("entry_source"),
+        "entry_price": entry_px,
+        "entry_zone": levels.get("entry_zone"),
+        "stop": levels["stop"],
+        "stop_source": levels.get("stop_source"),
+        "stop_price": stop_px,
+        "target": levels["target"],
+        "target_source": levels.get("target_source"),
+        "target_price": target_px,
+        "targets": levels.get("targets") or [],
+        "expected_return_pct": er,
+        "expected_move": f"{er:+.2f}%",
+        "risk_reward": levels.get("risk_reward"),
+        "win_prob": row.get("win_prob"),
+        "final_score": row.get("final_score"),
+        "swing_quality": q_score,
+        "atr": levels.get("atr"),
+        "atr_source": ctx.get("atr_source"),
+        "level_formula": levels.get("level_formula"),
+        "current_price": round(current, 2),
+        "why": why[:6],
+        "why_chain": " · ".join(why[:4]),
+        "invalidation": invalidation,
+        "trade_summary_cn": trade_summary_cn,
+        "one_liner": trade_summary_cn,
+        "edge_type": row.get("edge_type") or "Swing / Position",
+        "advisory": True,
+        "label": "长线 · Swing Trade",
+        "separate_from_intraday": True,
+    }
+
+
 def _to_best_opportunity(
     primary: dict[str, Any] | None,
     *,
@@ -1635,6 +2039,18 @@ def compute_trade_decision(
         horizon=(best_trades.get("primary") or {}).get("horizon") or default_horizon,
     )
 
+    swing_trade = compute_swing_opportunity(
+        ranked,
+        bias_direction=direction,
+        total_score=total,
+        obs_by_sym=obs_by_sym,
+        quote_by_sym=quote_by_sym,
+        catalysts=catalysts,
+        raw=raw,
+    )
+    if swing_trade:
+        best_trades["swing"] = swing_trade
+
     gap_pct_market = None
     qqq_obs = obs_by_sym.get("QQQ", {})
     if qqq_obs.get("gap_pct") is not None:
@@ -1662,6 +2078,7 @@ def compute_trade_decision(
         "trade_candidates": ranked,
         "best_trades": best_trades,
         "best_opportunity": best_opportunity,
+        "swing_trade": swing_trade,
         "top_trades": best_trades.get("top_trades") or [],
         "watchlist": best_trades.get("watchlist_items") or [],
         "bias_stars": _bias_stars(bias),

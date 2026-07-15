@@ -286,6 +286,8 @@ def run_morning_research(
         "trade_candidates": trade_decision.get("trade_candidates") or [],
         "best_opportunity": trade_decision.get("best_opportunity") or {},
         "best_trades": trade_decision.get("best_trades") or {},
+        "swing_trade": trade_decision.get("swing_trade")
+        or (trade_decision.get("best_trades") or {}).get("swing"),
         "edges": trade_decision.get("edges") or rule_bundle.get("edges") or {},
         "index_trade": trade_decision.get("index_trade"),
         "stock_trades": trade_decision.get("stock_trades") or [],

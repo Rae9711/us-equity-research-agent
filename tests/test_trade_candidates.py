@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from src.research.edges import compute_edges, format_p13_from_edges
 from src.research.trade_candidates import (
     CANDIDATE_SYMBOLS,
@@ -21,6 +23,25 @@ from src.research.trade_candidates import (
     _trade_horizon,
     compute_trade_decision,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_swing_yahoo(request):
+    """Avoid live Yahoo ATR fetches in unit tests (unless test already patches)."""
+    if "no_swing_mock" in request.keywords:
+        yield
+        return
+    with patch(
+        "src.research.trade_candidates._fetch_swing_context",
+        return_value={
+            "atr": 3.0,
+            "atr_source": "proxy_test",
+            "week_high": None,
+            "week_low": None,
+            "prior_5d_chg_pct": 3.0,
+        },
+    ):
+        yield
 
 
 def _bullish_raw() -> dict:
@@ -92,6 +113,8 @@ def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  
         "sector" if symbol == "SMH" else "stocks"
     )
     q = ((raw.get(section) or {}).get("quotes") or {}).get(symbol) or {}
+    if not q:
+        return {"ticker": symbol, "error": "no quote"}
     close = float(q.get("close") or 100)
     prev = float(q.get("prev_close") or close * 0.99)
     open_px = float(q.get("open") or prev * 1.01)
@@ -801,4 +824,180 @@ def test_build_trade_slot_survives_legacy_pass_row_without_current_price():
     assert "current_price" in slot
     assert slot["current_price"] is None
     assert slot["levels_valid"] is False
+
+
+# ── Swing / Position trade ─────────────────────────────────────────────
+
+
+def test_derive_swing_levels_wider_than_intraday():
+    from src.research.trade_candidates import derive_swing_levels
+
+    levels = derive_swing_levels(
+        "LONG", current=100.0, atr=3.0, week_high=108.0, week_low=94.0
+    )
+    assert levels["levels_valid"] is True
+    entry = levels["entry_price"]
+    stop = levels["stop_price"]
+    target = levels["target_price"]
+    assert stop < entry < target
+    # Stop at least ~1.2 ATR below entry (wider multi-day risk)
+    assert entry - stop >= 1.2 * 3.0
+    # Target at least ~5% or 2 ATR
+    assert target - entry >= min(5.0, 2.0 * 3.0) - 0.01
+    assert levels["entry_zone"]["low"] < levels["entry_zone"]["high"]
+    assert "1.5–2×ATR" in levels["level_formula"]
+    assert len(levels["targets"]) >= 2
+
+
+def test_swing_direction_follows_trend_not_forced_bias():
+    from src.research.trade_candidates import _swing_direction
+
+    # Strong multi-day strength → LONG even if bias is SHORT
+    assert (
+        _swing_direction(
+            bias_direction="SHORT",
+            prior_day_chg=2.0,
+            rs_vs_qqq=1.5,
+            prior_5d_chg=4.0,
+        )
+        == "LONG"
+    )
+    # Strong multi-day weakness → SHORT even if bias is LONG
+    assert (
+        _swing_direction(
+            bias_direction="LONG",
+            prior_day_chg=-2.0,
+            rs_vs_qqq=-1.5,
+            prior_5d_chg=-4.0,
+        )
+        == "SHORT"
+    )
+    # Flat momentum → fall back to bias
+    assert (
+        _swing_direction(
+            bias_direction="SHORT",
+            prior_day_chg=0.1,
+            rs_vs_qqq=0.0,
+            prior_5d_chg=0.2,
+        )
+        == "SHORT"
+    )
+
+
+@patch("src.research.trade_candidates._fetch_swing_context")
+def test_compute_swing_opportunity_independent_of_intraday(mock_ctx):
+    from src.research.trade_candidates import compute_swing_opportunity
+
+    mock_ctx.return_value = {
+        "atr": 4.0,
+        "atr_source": "proxy",
+        "week_high": 150.0,
+        "week_low": 130.0,
+        "prior_5d_chg_pct": 5.5,
+    }
+    ranked = [
+        {
+            "symbol": "NVDA",
+            "final_score": 1.2,  # below intraday BUY threshold often
+            "trade_action": "Pass",
+            "win_prob": 58,
+            "prior_day_change_pct": 2.0,
+            "relative_strength": 1.1,
+            "current_price": 140.0,
+            "news_count": 1,
+            "edge_type": "Momentum",
+        },
+        {
+            "symbol": "MU",
+            "final_score": 0.5,
+            "trade_action": "Pass",
+            "win_prob": 50,
+            "prior_day_change_pct": -1.0,
+            "relative_strength": -0.5,
+            "current_price": 100.0,
+            "news_count": 0,
+        },
+    ]
+    obs = {
+        "NVDA": {"last": 140.0, "close": 140.0},
+        "MU": {"last": 100.0, "close": 100.0},
+    }
+    swing = compute_swing_opportunity(
+        ranked,
+        bias_direction="LONG",
+        total_score=1,  # not |≥4| — still eligible for dedicated swing pick
+        obs_by_sym=obs,
+        quote_by_sym={},
+        catalysts=["NVDA AI demand"],
+        raw={},
+    )
+    assert swing is not None
+    assert swing["symbol"] == "NVDA"
+    assert swing["horizon"] == "Swing"
+    assert swing["direction"] == "LONG"
+    assert swing["separate_from_intraday"] is True
+    assert swing["entry_zone"]
+    assert swing["stop_price"] < swing["entry_price"] < swing["target_price"]
+    assert swing["invalidation"]
+    assert "ADVISORY" in str(swing.get("advisory") or True) or swing["advisory"] is True
+
+
+@patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
+@patch("src.research.trade_candidates._load_prior_raw")
+@patch("src.research.trade_candidates._fetch_swing_context")
+def test_swing_attached_when_intraday_no_trade(mock_ctx, _prior, _obs):
+    """Swing pick can still appear when P16 No Trade / no primary."""
+    from src.research.trade_candidates import compute_trade_decision
+
+    mock_ctx.return_value = {
+        "atr": 5.0,
+        "atr_source": "proxy",
+        "week_high": 270.0,
+        "week_low": 230.0,
+        "prior_5d_chg_pct": 6.0,
+    }
+    _prior.return_value = {
+        "stocks": {"quotes": {"TSLA": {"change_pct": 4.0, "close": 240.0}}}
+    }
+    raw = _bullish_raw()
+    # Quiet gaps so primary may fail threshold; swing uses preferred + momentum
+    raw["stocks"]["quotes"]["TSLA"]["change_pct"] = 0.3
+    raw["stocks"]["quotes"]["NVDA"]["change_pct"] = 0.2
+    rule_bundle = {
+        "bias": "Bullish Bias",
+        "total": 1,
+        "driver_type": "Momentum",
+        "daily_driver": "AI",
+        "catalysts_today": [{"name": "TSLA delivery", "symbol": "TSLA"}],
+        "edges": compute_edges(
+            raw,
+            catalysts_today=[{"name": "TSLA delivery", "symbol": "TSLA"}],
+            qqq_pct=0.4,
+            smh_pct=1.8,
+            spy_pct=0.2,
+            sym_pcts={"TSLA": 0.3, "NVDA": 0.2},
+            driver_type="Momentum",
+        ),
+    }
+    parts = {
+        "P9": {
+            "buy_options": "No",
+            "zero_dte": "No",
+            "buy_call": "No",
+            "buy_put": "No",
+        },
+        "P16": {"judgment": "计划：不交易", "one_liner": "No Trade"},
+    }
+    result = compute_trade_decision(
+        raw,
+        rule_bundle=rule_bundle,
+        parts=parts,
+        edges=rule_bundle["edges"],
+    )
+    assert result["best_trades"].get("p16_gate") == "No Trade"
+    swing = result.get("swing_trade") or result["best_trades"].get("swing")
+    # Preferred liquid + mocked 5d momentum should clear quality floor
+    assert swing is not None
+    assert swing["horizon"] == "Swing"
+    assert swing["symbol"] in ("TSLA", "NVDA", "META", "QQQ", "AVGO", "AMD", "SMH", "SPY")
 

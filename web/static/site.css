@@ -561,6 +561,21 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .horizon-intraday { background: #e0f2fe; color: #075985; }
 .horizon-swing { background: #ede9fe; color: #5b21b6; }
 
+.swing-trade-panel {
+  margin: 1rem 0 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #c4b5fd;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f5f3ff 0%, #fafafa 55%);
+}
+.swing-trade-inline {
+  margin-top: 1rem;
+}
+.advisory-banner-compact {
+  margin: 0.35rem 0 0.65rem;
+  font-size: 0.82rem;
+}
+
 .alt-action-badge {
   display: inline-block;
   font-size: 0.72rem;
