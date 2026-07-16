@@ -127,6 +127,7 @@ def execute_entry(
         "shares": shares,
         "price": round(price, 4),
         "notional": notional,
+        "pnl": None,
         "reason": reason,
         "trading_date": trading_date,
         "signal_source": sig.get("source"),

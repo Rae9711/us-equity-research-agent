@@ -32,7 +32,12 @@
       {% if trade.return_calculation %}
       <span class="muted small">（Ideal：从入场到目标，已验算：{{ trade.return_calculation }}）</span>
       {% endif %}
-      {% set live_er = trade.live_expected_return_pct if trade.live_expected_return_pct is not none else (trade.entry_status.live_expected_return_pct if trade.entry_status else none) or (trade.entry_status.remaining_er_pct if trade.entry_status else none) or trade.remaining_er_pct %}
+      {% set live_er = trade.get('live_expected_return_pct', none) %}
+      {% if live_er is none and trade.entry_status %}
+        {% set live_er = trade.entry_status.get('live_expected_return_pct', none) %}
+        {% if live_er is none %}{% set live_er = trade.entry_status.get('remaining_er_pct', none) %}{% endif %}
+      {% endif %}
+      {% if live_er is none %}{% set live_er = trade.get('remaining_er_pct', none) %}{% endif %}
       {% if live_er is not none %}
       <span class="entry-status-meta">Live ER {{ '%+.2f'|format(live_er) }}% (current→target)</span>
       {% endif %}

@@ -100,6 +100,7 @@
         </thead>
         <tbody>
           {% for t in trades %}
+          {% set pnl = t.get('pnl') %}
           <tr>
             <td class="muted">{{ t.ts[:16] if t.ts else '—' }}</td>
             <td>{{ t.action }} / {{ t.side }}</td>
@@ -107,8 +108,8 @@
             <td><strong>{{ t.symbol }}</strong></td>
             <td>{{ t.shares }}</td>
             <td>${{ t.price }}</td>
-            <td class="{% if t.pnl is not none %}{% if t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}{% endif %}">
-              {% if t.pnl is not none %}${{ '%.2f'|format(t.pnl) }}{% else %}—{% endif %}
+            <td class="{% if pnl is not none %}{% if pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}{% endif %}">
+              {% if pnl is not none %}${{ '%.2f'|format(pnl) }}{% else %}—{% endif %}
             </td>
             <td>{{ t.reason }}</td>
           </tr>
