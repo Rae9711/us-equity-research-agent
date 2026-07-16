@@ -12,6 +12,7 @@ import pytest
 from src.paper.account import default_account, get_position, load_account, save_account
 from src.paper.broker_sim import (
     InsufficientCashError,
+    NonsensePriceError,
     can_afford,
     execute_entry,
     execute_exit,
@@ -137,6 +138,99 @@ def test_stop_exit(data_root):
     )
     out = execute_exit(acct, price=334.0, reason="止损", trading_date="2026-07-08")
     assert out["pnl"] == pytest.approx((334.0 - 341.0) * 5)
+
+
+def test_reject_nonsense_exit_price(data_root):
+    """META-style bug: fill @ $100 with entry ~$670 must not close."""
+    from src.paper.price_guard import is_sane_fill_price
+
+    ok, reason = is_sane_fill_price(
+        100.0, anchors=[670.925, 637.68, 738.41], max_deviation_pct=30.0
+    )
+    assert ok is False
+    assert reason and "异常" in reason
+
+    acct = default_account()
+    execute_entry(
+        acct,
+        symbol="META",
+        direction="LONG",
+        price=670.925,
+        shares=3,
+        stop=637.68,
+        target=738.41,
+        reason="entry",
+        trading_date="2026-07-16",
+        signal={"source": "swing", "horizon": "Swing", "entry_price": 670.925},
+        book="swing",
+    )
+    with pytest.raises(NonsensePriceError):
+        execute_exit(acct, price=100.0, reason="bogus", trading_date="2026-07-16", book="swing")
+    assert get_position(acct, "swing")["symbol"] == "META"
+    assert acct["realized_pnl"] == 0.0
+
+
+def test_force_price_does_not_false_stop_swing(data_root):
+    """Global --force-price 100 must HOLD swing META, not EXIT on stop."""
+    acct = default_account()
+    execute_entry(
+        acct,
+        symbol="META",
+        direction="LONG",
+        price=670.925,
+        shares=3,
+        stop=637.68,
+        target=738.41,
+        reason="entry",
+        trading_date="2026-07-16",
+        signal={
+            "source": "swing",
+            "horizon": "Swing",
+            "entry_price": 670.925,
+            "stop_price": 637.68,
+            "target_price": 738.41,
+        },
+        book="swing",
+    )
+    decision = decide_and_act(
+        acct,
+        "2026-07-16",
+        session_phase="open",
+        force_price=100.0,
+    )
+    assert get_position(acct, "swing") is not None
+    assert get_position(acct, "swing")["symbol"] == "META"
+    assert get_position(acct, "swing")["shares"] == 3
+    assert acct["realized_pnl"] == 0.0
+    books = {b["book"]: b for b in (decision.get("books") or [])}
+    swing = books.get("swing") or {}
+    assert swing.get("action") == "HOLD"
+    assert swing.get("quote_rejected") is True or "拒绝" in (swing.get("reason") or "")
+
+
+def test_reject_nonsense_entry_quote(data_root):
+    primary = {
+        "symbol": "META",
+        "direction": "LONG",
+        "entry_price": 670.0,
+        "entry_zone": {"low": 666.0, "mid": 670.0, "high": 682.0},
+        "stop_price": 637.0,
+        "target_price": 738.0,
+        "win_prob": 69,
+        "expected_return_pct": 8.0,
+        "horizon": "Intraday",
+    }
+    _write_morning(data_root, "2026-07-16", primary)
+    acct = default_account()
+    decision = decide_and_act(
+        acct,
+        "2026-07-16",
+        session_phase="open",
+        force_price=100.0,
+    )
+    assert get_position(acct, "intraday") is None
+    assert decision["action"] in ("SKIP", "HOLD", "WAIT")
+    assert acct["cash"] == pytest.approx(10000.0)
 
 
 def test_decide_entry_when_ready(data_root, monkeypatch):

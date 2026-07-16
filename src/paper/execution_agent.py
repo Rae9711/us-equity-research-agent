@@ -23,9 +23,16 @@ from src.paper.account import (
 from src.paper.allocation import allocate_for_entry
 from src.paper.broker_sim import (
     InsufficientCashError,
+    NonsensePriceError,
     can_afford,
     execute_entry,
     execute_exit,
+)
+from src.paper.price_guard import (
+    DEFAULT_MAX_DEVIATION_PCT,
+    anchors_from_position,
+    anchors_from_signal,
+    is_sane_fill_price,
 )
 from src.paper.signals import (
     load_candidate_signals,
@@ -134,6 +141,19 @@ def _manage_position(
         base["reason"] = f"{label}持仓 {sym}：无报价，继续持有"
         return base
 
+    max_dev = float(
+        params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
+    )
+    sane, reject = is_sane_fill_price(
+        px, anchors=anchors_from_position(pos), max_deviation_pct=max_dev
+    )
+    if not sane:
+        base["reason"] = (
+            f"{label}持仓 {sym}：{reject or '报价异常'}，拒绝止损/止盈/平仓，继续持有"
+        )
+        base["quote_rejected"] = True
+        return base
+
     stop = _safe_float(pos.get("stop"))
     target = _safe_float(pos.get("target"))
     horizon = (pos.get("horizon") or ("Swing" if book == BOOK_SWING else "Intraday")).lower()
@@ -226,6 +246,20 @@ def _try_entry(
         return result
 
     params = account.get("params") or {}
+    max_dev = float(
+        params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
+    )
+    sane, reject = is_sane_fill_price(
+        float(px),
+        anchors=anchors_from_signal(sig),
+        max_deviation_pct=max_dev,
+    )
+    if not sane:
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}拒绝开仓：{reject or '报价异常'}"
+        result["quote_rejected"] = True
+        return result
+
     smart = bool(params.get("smart_allocation", True))
     allocation = None
     if smart:
@@ -286,6 +320,11 @@ def _try_entry(
     except InsufficientCashError as exc:
         result["action"] = "SKIP"
         result["reason"] = f"{label}资金不足：{exc}"
+        return result
+    except NonsensePriceError as exc:
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}拒绝开仓：{exc}"
+        result["quote_rejected"] = True
         return result
 
     if allocation:

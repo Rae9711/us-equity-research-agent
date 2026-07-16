@@ -20,6 +20,17 @@ from src.paper.account import (
     mark_to_market,
     set_position,
 )
+from src.paper.price_guard import (
+    DEFAULT_MAX_DEVIATION_PCT,
+    anchors_from_position,
+    anchors_from_signal,
+    collect_price_anchors,
+    is_sane_fill_price,
+)
+
+
+class NonsensePriceError(ValueError):
+    """Fill price is absurd vs entry/stop/target anchors."""
 
 
 class InsufficientCashError(ValueError):
@@ -103,6 +114,23 @@ def execute_entry(
         raise InsufficientCashError("shares must be > 0")
     if price <= 0:
         raise ValueError("price must be > 0")
+
+    params = account.get("params") or {}
+    max_dev = float(
+        params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
+    )
+    ok, reject = is_sane_fill_price(
+        price,
+        anchors=collect_price_anchors(
+            entry=_safe_float((signal or {}).get("entry_price")),
+            stop=_safe_float(stop),
+            target=_safe_float(target),
+            extra=anchors_from_signal(signal),
+        ),
+        max_deviation_pct=max_dev,
+    )
+    if not ok:
+        raise NonsensePriceError(reject or "nonsense fill price")
 
     direction = (direction or "LONG").upper()
     notional = round(shares * price, 2)
@@ -205,6 +233,18 @@ def execute_exit(
         raise ValueError("No open position")
     if price <= 0:
         raise ValueError("price must be > 0")
+
+    params = account.get("params") or {}
+    max_dev = float(
+        params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
+    )
+    ok, reject = is_sane_fill_price(
+        price,
+        anchors=anchors_from_position(pos),
+        max_deviation_pct=max_dev,
+    )
+    if not ok:
+        raise NonsensePriceError(reject or "nonsense fill price")
 
     shares = int(pos["shares"])
     avg = float(pos["avg_entry"])
