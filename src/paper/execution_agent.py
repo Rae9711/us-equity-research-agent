@@ -20,6 +20,7 @@ from src.paper.account import (
     mark_to_market,
     open_positions,
 )
+from src.paper.allocation import allocate_for_entry
 from src.paper.broker_sim import (
     InsufficientCashError,
     can_afford,
@@ -191,6 +192,8 @@ def _try_entry(
     book: str,
     picked: dict[str, Any],
     trading_date: str,
+    *,
+    peer_entering: bool = False,
 ) -> dict[str, Any]:
     label = BOOK_LABEL_ZH.get(book, book)
     action = picked.get("action")
@@ -204,6 +207,7 @@ def _try_entry(
         "quote": picked.get("quote"),
         "quote_source": picked.get("quote_source"),
         "entry_status": picked.get("entry_status"),
+        "allocation": None,
     }
 
     if action == "skip":
@@ -221,16 +225,48 @@ def _try_entry(
         result["reason"] = f"{label}有信号但无报价：{sig.get('symbol')}"
         return result
 
+    params = account.get("params") or {}
+    smart = bool(params.get("smart_allocation", True))
+    allocation = None
+    if smart:
+        allocation = allocate_for_entry(
+            account,
+            book=book,
+            signal=sig,
+            quote=float(px),
+            entry_status=picked.get("entry_status"),
+            peer_entering=peer_entering,
+        )
+        result["allocation"] = allocation
+        if allocation.get("hold_cash"):
+            result["action"] = "SKIP"
+            result["reason"] = allocation.get("reason_zh") or "保留现金"
+            return result
+
     shares, err = can_afford(
         account,
         price=px,
         stop=sig.get("stop_price"),
         direction=sig.get("direction") or "LONG",
+        risk_pct=(allocation or {}).get("risk_pct"),
+        max_position_pct=(allocation or {}).get("max_position_pct"),
+        max_notional=(allocation or {}).get("deployable_cash"),
     )
     if shares <= 0:
         result["action"] = "SKIP"
-        result["reason"] = f"{label}资金不足无法开仓：{err}"
+        if allocation and float(allocation.get("deployable_cash") or 0) <= 0:
+            result["reason"] = (
+                f"{label}保留现金：现金储备下限 "
+                f"{allocation.get('cash_reserve_pct')}%，无可部署资金"
+            )
+        else:
+            result["reason"] = f"{label}资金不足无法开仓：{err}"
         return result
+
+    alloc_reason = (allocation or {}).get("reason_zh") or ""
+    entry_reason = picked.get("reason") or f"模拟{label}买入"
+    if alloc_reason:
+        entry_reason = f"{entry_reason} · {alloc_reason}"
 
     try:
         trade = execute_entry(
@@ -243,7 +279,7 @@ def _try_entry(
             target=sig.get("target_price"),
             entry_zone=sig.get("entry_zone"),
             signal=sig,
-            reason=picked.get("reason") or f"模拟{label}买入",
+            reason=entry_reason,
             trading_date=trading_date,
             book=book,
         )
@@ -252,8 +288,21 @@ def _try_entry(
         result["reason"] = f"{label}资金不足：{exc}"
         return result
 
+    if allocation:
+        trade["allocation"] = {
+            "cash_reserve_pct": allocation.get("cash_reserve_pct"),
+            "risk_pct": allocation.get("risk_pct"),
+            "max_position_pct": allocation.get("max_position_pct"),
+            "budget_share": allocation.get("budget_share"),
+            "confidence": allocation.get("confidence"),
+            "reason_zh": allocation.get("reason_zh"),
+        }
+        equity = float(account.get("equity") or 1)
+        notional = float(trade.get("notional") or 0)
+        trade["position_pct"] = round(notional / equity * 100.0, 1) if equity else 0
+
     result["action"] = "ENTRY"
-    result["reason"] = trade.get("reason") or picked.get("reason")
+    result["reason"] = trade.get("reason") or entry_reason
     result["trade"] = trade
     return result
 
@@ -270,6 +319,7 @@ def _aggregate(books: list[dict[str, Any]], trading_date: str, phase: str) -> di
         if r.get("reason")
     )
     quotes = {r["book"]: r.get("quote") for r in books if r.get("quote") is not None}
+    allocations = [r.get("allocation") for r in books if r.get("allocation")]
     return {
         "trading_date": trading_date,
         "session_phase": phase,
@@ -280,11 +330,15 @@ def _aggregate(books: list[dict[str, Any]], trading_date: str, phase: str) -> di
         "quote": (best or {}).get("quote"),
         "quote_source": (best or {}).get("quote_source"),
         "entry_status": (best or {}).get("entry_status"),
+        "allocation": (best or {}).get("allocation")
+        or (allocations[0] if allocations else None),
+        "allocations": allocations,
         "books": books,
         "quotes": quotes,
         "advisory": True,
         "advisory_zh": "模拟交易 · 不构成投资建议",
     }
+
 
 
 def decide_and_act(
@@ -349,26 +403,35 @@ def decide_and_act(
 
     miss = float(params.get("miss_threshold_pct") or 1.0)
 
-    if not get_position(account, BOOK_INTRADAY) and phase != "closed":
-        # Inject force_price for whichever symbol pick uses
-        inj = dict(price_map or {})
-        if force_price is not None and not inj:
-            # Will be applied after pick via re-call if needed — seed with signal symbols
-            for s in _collect_symbols(trading_date, account):
-                inj[s] = float(force_price)
-        picked = pick_intraday_signal(
+    def _inject_force(picked: dict[str, Any], inj: dict[str, float]) -> dict[str, Any]:
+        if force_price is not None and picked.get("signal"):
+            sym = str(picked["signal"].get("symbol") or "").upper()
+            if sym:
+                picked = dict(picked)
+                picked["quote"] = float(force_price)
+                picked["quote_source"] = "forced"
+                inj[sym] = float(force_price)
+        return picked
+
+    inj = dict(price_map or {})
+    if force_price is not None:
+        for s in _collect_symbols(trading_date, account):
+            inj[s] = float(force_price)
+
+    need_intraday = not get_position(account, BOOK_INTRADAY) and phase != "closed"
+    need_swing = not get_position(account, BOOK_SWING)
+
+    picked_intra = None
+    picked_swing = None
+    if need_intraday:
+        picked_intra = pick_intraday_signal(
             trading_date,
             session_phase=phase,
             miss_threshold_pct=miss,
             raw=raw,
             current_price_by_symbol=inj or None,
         )
-        if force_price is not None and picked.get("signal"):
-            sym = str(picked["signal"].get("symbol") or "").upper()
-            if sym:
-                picked["quote"] = float(force_price)
-                picked["quote_source"] = "forced"
-        book_results.append(_try_entry(account, BOOK_INTRADAY, picked, trading_date))
+        picked_intra = _inject_force(picked_intra, inj)
     elif not get_position(account, BOOK_INTRADAY) and phase == "closed":
         book_results.append(
             {
@@ -383,24 +446,43 @@ def decide_and_act(
             }
         )
 
-    if not get_position(account, BOOK_SWING):
-        inj = dict(price_map or {})
-        if force_price is not None:
-            for s in _collect_symbols(trading_date, account):
-                inj[s] = float(force_price)
-        picked = pick_swing_signal(
+    if need_swing:
+        picked_swing = pick_swing_signal(
             trading_date,
             session_phase=phase,
             miss_threshold_pct=miss,
             raw=raw,
             current_price_by_symbol=inj or None,
         )
-        if force_price is not None and picked.get("signal"):
-            sym = str(picked["signal"].get("symbol") or "").upper()
-            if sym:
-                picked["quote"] = float(force_price)
-                picked["quote_source"] = "forced"
-        book_results.append(_try_entry(account, BOOK_SWING, picked, trading_date))
+        picked_swing = _inject_force(picked_swing, inj)
+
+    both_enter = (
+        bool(picked_intra and picked_intra.get("action") == "enter")
+        and bool(picked_swing and picked_swing.get("action") == "enter")
+    )
+
+    # Swing core first so cash reserve + budget share apply cleanly, then satellite
+    if picked_swing is not None:
+        book_results.append(
+            _try_entry(
+                account,
+                BOOK_SWING,
+                picked_swing,
+                trading_date,
+                peer_entering=both_enter,
+            )
+        )
+    if picked_intra is not None:
+        book_results.append(
+            _try_entry(
+                account,
+                BOOK_INTRADAY,
+                picked_intra,
+                trading_date,
+                peer_entering=both_enter
+                or bool(get_position(account, BOOK_SWING)),
+            )
+        )
 
     # Final mark with all known quotes
     px_map: dict[str, float] = {}
@@ -506,6 +588,7 @@ def _decide_single_book(
             "quote": entered["quote"],
             "quote_source": entered["quote_source"],
             "entry_status": entered.get("entry_status"),
+            "allocation": entered.get("allocation"),
             "books": [entered],
         }
     )

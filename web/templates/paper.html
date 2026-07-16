@@ -10,8 +10,8 @@
   {% include "nav.html" %}
   <div class="page-wrap">
     <h1 class="page-title">模拟交易</h1>
-    <p class="advisory-banner">模拟交易 · 不构成投资建议 · 资金虚拟 $10,000 · 双账本：短线 + 长线</p>
-    <p class="muted">日期 {{ trading_date }} · 阶段 {{ session_phase }} · 短线跟 Intraday #1（收盘平仓）· 长线跟 Swing（可隔夜）</p>
+    <p class="advisory-banner">模拟交易 · 不构成投资建议 · 资金虚拟 $10,000 · 智能分配仓位与现金储备</p>
+    <p class="muted">日期 {{ trading_date }} · 阶段 {{ session_phase }} · 双账本：短线 Intraday + 长线 Swing · 可执行 setup 优选（非盲目 #1）</p>
 
     <section class="panel paper-metrics">
       <div class="paper-metrics-grid">
@@ -22,6 +22,14 @@
         <div>
           <div class="paper-metric-label">现金</div>
           <div class="paper-metric-value">${{ '%.2f'|format(account.cash or 0) }}</div>
+        </div>
+        <div>
+          <div class="paper-metric-label">现金占比</div>
+          <div class="paper-metric-value">{{ '%.1f'|format(cash_pct or 0) }}%</div>
+        </div>
+        <div>
+          <div class="paper-metric-label">仓位占比</div>
+          <div class="paper-metric-value">{{ '%.1f'|format(position_pct or 0) }}%</div>
         </div>
         <div>
           <div class="paper-metric-label">累计收益</div>
@@ -39,81 +47,63 @@
           </div>
         </div>
       </div>
+
+      {% if allocation_reason %}
+      <div class="paper-allocation-box">
+        <div class="paper-metric-label">分配理由</div>
+        <p class="paper-allocation-reason">{{ allocation_reason }}</p>
+      </div>
+      {% endif %}
+
       <form method="post" action="/paper/tick" class="paper-tick-form">
         <input type="hidden" name="trading_date" value="{{ trading_date }}" />
         <button type="submit" class="btn-primary">运行 Tick</button>
-        <span class="muted">用当前/快照价模拟一次买入·持仓·卖出判断（双账本各判一次）</span>
+        <span class="muted">用当前/快照价模拟一次买入·持仓·卖出判断（含仓位/现金分配）</span>
       </form>
       {% if tick_result %}
       <div class="paper-tick-result">
         <strong>{{ tick_result.action }}</strong> — {{ tick_result.reason }}
         {% if tick_result.quote %} · 报价 {{ tick_result.quote }} ({{ tick_result.quote_source }}){% endif %}
-        {% if tick_result.books %}
-        <ul class="paper-book-tick-list">
-          {% for b in tick_result.books %}
-          <li>
-            <span class="horizon-badge horizon-{{ 'swing' if b.book == 'swing' else 'intraday' }}">
-              {{ b.book_zh or b.book }}
-            </span>
-            <strong>{{ b.action }}</strong> — {{ b.reason }}
-          </li>
-          {% endfor %}
-        </ul>
+        {% if tick_result.portfolio %}
+        <div class="muted" style="margin-top:0.35rem">
+          现金 {{ '%.1f'|format(tick_result.portfolio.cash_pct or 0) }}% ·
+          仓位 {{ '%.1f'|format(tick_result.portfolio.position_pct or 0) }}%
+          {% if tick_result.allocation and tick_result.allocation.reason_zh %}
+          · {{ tick_result.allocation.reason_zh }}
+          {% endif %}
+        </div>
         {% endif %}
       </div>
       {% endif %}
     </section>
 
     <section class="panel">
-      <h2>持仓 · 双账本</h2>
-      <div class="paper-books-grid">
-        {% set intraday_pos = positions.intraday if positions else none %}
-        {% set swing_pos = positions.swing if positions else none %}
-
-        <div class="paper-book-card">
-          <h3 class="paper-book-title">
-            短线
-            <span class="horizon-badge horizon-intraday">Intraday</span>
-          </h3>
-          <p class="muted small">跟 Primary #1 · 收盘强制平仓</p>
-          {% if intraday_pos %}
+      <h2>持仓</h2>
+      {% if open_legs %}
+        {% for leg in open_legs %}
+        <div class="paper-leg {% if not loop.last %}paper-leg-gap{% endif %}">
+          <div class="muted">{{ leg.book_zh }} · {{ leg.book }}</div>
           <dl class="kv">
-            <dt>标的</dt><dd><strong>{{ intraday_pos.symbol }}</strong> {{ intraday_pos.direction }} · {{ intraday_pos.shares }} 股</dd>
-            <dt>成本</dt><dd>${{ intraday_pos.avg_entry }} · 现价 {{ intraday_pos.last_price or '—' }}</dd>
-            <dt>止损 / 止盈</dt><dd>{{ intraday_pos.stop or '—' }} / {{ intraday_pos.target or '—' }}</dd>
-            <dt>未实现</dt>
-            <dd class="{% if (intraday_pos.unrealized_pnl or 0) >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-              ${{ '%.2f'|format(intraday_pos.unrealized_pnl or 0) }}
+            <dt>标的</dt><dd><strong>{{ leg.symbol }}</strong> {{ leg.direction }} · {{ leg.shares }} 股</dd>
+            <dt>成本</dt><dd>${{ leg.avg_entry }} · 现价 {{ leg.last_price or '—' }}</dd>
+            <dt>止损 / 止盈</dt><dd>{{ leg.stop or '—' }} / {{ leg.target or '—' }}</dd>
+            <dt>市值 / 占比</dt>
+            <dd>${{ '%.2f'|format(leg.market_value or 0) }}
+              {% if account.equity %}
+              · {{ '%.1f'|format(((leg.market_value or 0) / account.equity) * 100) }}%
+              {% endif %}
             </dd>
-            <dt>来源</dt><dd>{{ intraday_pos.signal_source or '—' }} · 开仓日 {{ intraday_pos.opened_date or '—' }}</dd>
-          </dl>
-          {% else %}
-          <p class="muted">空仓</p>
-          {% endif %}
-        </div>
-
-        <div class="paper-book-card paper-book-swing">
-          <h3 class="paper-book-title">
-            长线
-            <span class="horizon-badge horizon-swing">Swing</span>
-          </h3>
-          <p class="muted small">跟 swing_trade · 可隔夜持仓</p>
-          {% if swing_pos %}
-          <dl class="kv">
-            <dt>标的</dt><dd><strong>{{ swing_pos.symbol }}</strong> {{ swing_pos.direction }} · {{ swing_pos.shares }} 股</dd>
-            <dt>成本</dt><dd>${{ swing_pos.avg_entry }} · 现价 {{ swing_pos.last_price or '—' }}</dd>
-            <dt>止损 / 止盈</dt><dd>{{ swing_pos.stop or '—' }} / {{ swing_pos.target or '—' }}</dd>
             <dt>未实现</dt>
-            <dd class="{% if (swing_pos.unrealized_pnl or 0) >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-              ${{ '%.2f'|format(swing_pos.unrealized_pnl or 0) }}
+            <dd class="{% if (leg.unrealized_pnl or 0) >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+              ${{ '%.2f'|format(leg.unrealized_pnl or 0) }}
             </dd>
-            <dt>来源</dt><dd>{{ swing_pos.signal_source or '—' }} · 开仓日 {{ swing_pos.opened_date or '—' }}</dd>
+            <dt>来源</dt><dd>{{ leg.signal_source or '—' }} · {{ leg.horizon or '—' }} · 开仓日 {{ leg.opened_date or '—' }}</dd>
           </dl>
-          {% else %}
-          <p class="muted">空仓</p>
-          {% endif %}
         </div>
-      </div>
+        {% endfor %}
+      {% else %}
+      <p class="muted">空仓（可主动保留现金）</p>
+      {% endif %}
     </section>
 
     <section class="panel">
@@ -125,13 +115,7 @@
           {% for d in today_decisions %}
           <tr>
             <td class="muted">{{ d.ts[11:19] if d.ts else '—' }}</td>
-            <td>
-              {% if d.book == 'swing' or d.book_zh == '长线' %}
-              <span class="horizon-badge horizon-swing">长线</span>
-              {% elif d.book == 'intraday' or d.book_zh == '短线' %}
-              <span class="horizon-badge horizon-intraday">短线</span>
-              {% else %}—{% endif %}
-            </td>
+            <td class="muted">{{ d.book_zh or d.book or '—' }}</td>
             <td><span class="tag">{{ d.action }}</span></td>
             <td>{{ d.symbol or '—' }}</td>
             <td>{{ d.reason }}</td>
@@ -141,6 +125,28 @@
       </table>
       {% else %}
       <p class="muted">今日尚无决策。可点「运行 Tick」或等待 Step 2/3/4 自动触发。</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>分配记录</h2>
+      {% if allocation_notes %}
+      <ul class="paper-journal">
+        {% for j in allocation_notes %}
+        <li>
+          <strong>{{ j.trading_date or (j.ts[:10] if j.ts else '—') }}</strong>
+          {% if j.action %}<span class="tag">{{ j.action }}</span>{% endif %}
+          {% if j.symbol %} · {{ j.symbol }}{% endif %}
+          {% if j.cash_reserve_pct is not none %}
+          · 预留现金 {{ j.cash_reserve_pct }}%
+          {% endif %}
+          {% if j.position_pct is not none %} · 仓位约 {{ j.position_pct }}%{% endif %}
+          <div>{{ j.note or j.reason_zh or '' }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">尚无分配笔记。Tick 开仓/保留现金时会写入「为何用 X% 仓位 / 留 Y% 现金」。</p>
       {% endif %}
     </section>
 
@@ -156,15 +162,7 @@
           {% set pnl = t.get('pnl') %}
           <tr>
             <td class="muted">{{ t.ts[:16] if t.ts else '—' }}</td>
-            <td>
-              {% if t.book == 'swing' or (t.horizon and 'wing' in (t.horizon|lower)) %}
-              <span class="horizon-badge horizon-swing">长线</span>
-              {% elif t.book == 'intraday' %}
-              <span class="horizon-badge horizon-intraday">短线</span>
-              {% elif t.horizon %}
-              <span class="horizon-badge horizon-{{ t.horizon | lower }}">{{ t.horizon }}</span>
-              {% else %}—{% endif %}
-            </td>
+            <td class="muted">{{ t.book or '—' }}</td>
             <td>{{ t.action }} / {{ t.side }}</td>
             <td>{{ t.direction }}</td>
             <td><strong>{{ t.symbol }}</strong></td>
@@ -188,7 +186,7 @@
       <p class="muted">挂钩 Step 7 晚间复盘 / Step 8 Learning — 记录胜负 vs Morning 计划，并微调 risk_pct。</p>
       {% if journal %}
       <ul class="paper-journal">
-        {% for j in journal %}
+        {% for j in journal if j.type != 'allocation' %}
         <li>
           <strong>{{ j.trading_date or j.ts[:10] }}</strong>
           · PnL ${{ '%.2f'|format(j.day_pnl or 0) }}
@@ -197,6 +195,8 @@
           {% if j.param_adjust %}<span class="muted"> · {{ j.param_adjust }}</span>{% endif %}
           {% if j.lesson %}<div class="muted">{{ j.lesson }}</div>{% endif %}
         </li>
+        {% else %}
+        <li class="muted">尚无晚间复盘笔记</li>
         {% endfor %}
       </ul>
       {% else %}
@@ -207,7 +207,7 @@
     <section class="panel">
       <h2>今日信号预览</h2>
       <dl class="kv">
-        <dt>短线 · Morning Primary <span class="horizon-badge horizon-intraday">Intraday</span></dt>
+        <dt>Morning Primary</dt>
         <dd>{{ signal_preview.morning_primary.symbol or '—' }}
           {{ signal_preview.morning_primary.direction or '' }}
           {% if signal_preview.morning_primary.entry_price %}
@@ -215,18 +215,22 @@
           · Stop {{ signal_preview.morning_primary.stop }}
           · Target {{ signal_preview.morning_primary.target }}
           {% endif %}
+          {% if signal_preview.morning_primary.win_prob %} · WP {{ signal_preview.morning_primary.win_prob }}%{% endif %}
         </dd>
-        <dt>短线 · Session #1</dt>
+        <dt>Session #1</dt>
         <dd>{{ signal_preview.session_primary.symbol or '—' }} {{ signal_preview.session_primary.direction or '' }}</dd>
-        <dt>长线 · Swing <span class="horizon-badge horizon-swing">Swing</span></dt>
-        <dd>{{ signal_preview.swing.symbol or '—' }}
-          {{ signal_preview.swing.direction or '' }}
-          {% if signal_preview.swing.entry_price %}
-          · Entry {{ signal_preview.swing.entry_price }}
-          · Stop {{ signal_preview.swing.stop }}
-          · Target {{ signal_preview.swing.target }}
-          {% endif %}
+        <dt>Swing</dt>
+        <dd>{{ signal_preview.swing.symbol or '—' }} {{ signal_preview.swing.direction or '' }}
+          {% if signal_preview.swing.win_prob %} · WP {{ signal_preview.swing.win_prob }}%{% endif %}
         </dd>
+        {% if signal_preview.top_trades %}
+        <dt>Top trades</dt>
+        <dd>
+          {% for t in signal_preview.top_trades %}
+            #{{ t.rank }} {{ t.symbol }} {{ t.direction }}{% if t.win_prob %} ({{ t.win_prob }}%){% endif %}{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        </dd>
+        {% endif %}
       </dl>
     </section>
   </div>

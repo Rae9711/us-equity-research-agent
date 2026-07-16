@@ -1175,6 +1175,23 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 }
 .pnl-pos { color: #166534; }
 .pnl-neg { color: #991b1b; }
+.paper-allocation-box {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.paper-allocation-reason {
+  margin: 0.25rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.paper-leg-gap {
+  margin-bottom: 1rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
 .paper-books-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

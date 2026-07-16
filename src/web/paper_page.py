@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.paper.account import ensure_positions, load_account
+from src.paper.account import ensure_positions, load_account, open_positions
+from src.paper.allocation import portfolio_allocation_snapshot
 from src.paper.signals import load_candidate_signals
 from src.research.entry_status import infer_session_phase
 from src.utils.trading_calendar import today_et
@@ -19,18 +20,32 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
     ensure_positions(account)
     phase = infer_session_phase(date_str)
     signals = load_candidate_signals(date_str)
+    portfolio = portfolio_allocation_snapshot(account)
 
     decisions = list(reversed(account.get("decisions") or []))[:40]
     trades = list(reversed(account.get("trades") or []))[:40]
-    journal = list(reversed(account.get("journal") or []))[:20]
+    journal = list(reversed(account.get("journal") or []))[:30]
     curve = account.get("equity_curve") or []
 
     today_decisions = [d for d in decisions if d.get("trading_date") == date_str]
-    positions = account.get("positions") or {}
+    allocation_notes = [
+        j for j in journal if j.get("type") == "allocation" or j.get("reason_zh")
+    ][:12]
 
     primary = signals.get("morning_primary") or {}
     session_p = signals.get("session_primary") or {}
     swing = signals.get("swing") or {}
+    top = signals.get("top_trades") or []
+
+    positions = account.get("positions") or {}
+    open_legs = [
+        {
+            "book": book,
+            "book_zh": "短线" if book == "intraday" else "长线",
+            **pos,
+        }
+        for book, pos in open_positions(account)
+    ]
 
     return {
         "trading_date": date_str,
@@ -41,6 +56,12 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
             "intraday": positions.get("intraday"),
             "swing": positions.get("swing"),
         },
+        "open_legs": open_legs,
+        "portfolio": portfolio,
+        "cash_pct": portfolio.get("cash_pct"),
+        "position_pct": portfolio.get("position_pct"),
+        "allocation_reason": portfolio.get("allocation_reason"),
+        "allocation_notes": allocation_notes,
         "decisions": decisions,
         "today_decisions": today_decisions,
         "trades": trades,
@@ -53,6 +74,7 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
                 "entry_price": primary.get("entry_price") or primary.get("entry"),
                 "stop": primary.get("stop_price") or primary.get("stop"),
                 "target": primary.get("target_price") or primary.get("target"),
+                "win_prob": primary.get("win_prob"),
             },
             "session_primary": {
                 "symbol": session_p.get("symbol"),
@@ -61,10 +83,17 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
             "swing": {
                 "symbol": swing.get("symbol"),
                 "direction": swing.get("direction"),
-                "entry_price": swing.get("entry_price") or swing.get("entry"),
-                "stop": swing.get("stop_price") or swing.get("stop"),
-                "target": swing.get("target_price") or swing.get("target"),
+                "win_prob": swing.get("win_prob") if isinstance(swing, dict) else None,
             },
+            "top_trades": [
+                {
+                    "symbol": t.get("symbol"),
+                    "direction": t.get("direction"),
+                    "win_prob": t.get("win_prob"),
+                    "rank": t.get("rank") or i + 1,
+                }
+                for i, t in enumerate(top[:5])
+            ],
         },
         "advisory_zh": "模拟交易 · 不构成投资建议",
     }

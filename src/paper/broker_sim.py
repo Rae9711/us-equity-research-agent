@@ -53,8 +53,12 @@ def size_shares(
     direction: str,
     risk_pct: float = 1.0,
     max_position_pct: float = 25.0,
+    max_notional: float | None = None,
 ) -> int:
-    """Risk-based share count; floor to whole shares; 0 if unaffordable."""
+    """Risk-based share count; floor to whole shares; 0 if unaffordable.
+
+    ``max_notional`` (optional) caps size by allocation deployable cash.
+    """
     if entry_price <= 0 or cash <= 0 or equity <= 0:
         return 0
     risk_budget = equity * (risk_pct / 100.0)
@@ -66,8 +70,10 @@ def size_shares(
     if per_share_risk <= 0:
         return 0
     by_risk = int(risk_budget // per_share_risk)
-    max_notional = equity * (max_position_pct / 100.0)
-    by_cap = int(max_notional // entry_price)
+    max_cap_notional = equity * (max_position_pct / 100.0)
+    if max_notional is not None:
+        max_cap_notional = min(max_cap_notional, max(0.0, float(max_notional)))
+    by_cap = int(max_cap_notional // entry_price)
     by_cash = int(cash // entry_price)
     shares = max(0, min(by_risk, by_cap, by_cash))
     return shares
@@ -249,6 +255,9 @@ def can_afford(
     price: float,
     stop: float | None,
     direction: str,
+    risk_pct: float | None = None,
+    max_position_pct: float | None = None,
+    max_notional: float | None = None,
 ) -> tuple[int, str | None]:
     """Return (shares, error_message). shares=0 means cannot enter."""
     params = account.get("params") or {}
@@ -258,8 +267,15 @@ def can_afford(
         entry_price=price,
         stop_price=stop,
         direction=direction,
-        risk_pct=float(params.get("risk_pct") or 1.0),
-        max_position_pct=float(params.get("max_position_pct") or 25.0),
+        risk_pct=float(
+            risk_pct if risk_pct is not None else (params.get("risk_pct") or 1.0)
+        ),
+        max_position_pct=float(
+            max_position_pct
+            if max_position_pct is not None
+            else (params.get("max_position_pct") or 25.0)
+        ),
+        max_notional=max_notional,
     )
     if shares <= 0:
         return 0, "insufficient cash or risk budget for even 1 share"

@@ -18,6 +18,7 @@ from src.paper.account import (
     open_positions,
     save_account,
 )
+from src.paper.allocation import portfolio_allocation_snapshot
 from src.paper.execution_agent import decide_and_act
 from src.paper.journal import record_tick_decision
 from src.research.entry_status import infer_session_phase
@@ -98,6 +99,7 @@ def run_paper_tick(
     save_account(account)
 
     positions = account.get("positions") or {}
+    alloc_snap = portfolio_allocation_snapshot(account)
     summary = {
         "ok": True,
         "trading_date": date_str,
@@ -109,6 +111,8 @@ def run_paper_tick(
         "trade": decision.get("trade"),
         "signal": decision.get("signal"),
         "entry_status": decision.get("entry_status"),
+        "allocation": decision.get("allocation"),
+        "portfolio": alloc_snap,
         "books": decision.get("books"),
         "account": {
             "cash": account.get("cash"),
@@ -122,6 +126,8 @@ def run_paper_tick(
                 "intraday": positions.get("intraday"),
                 "swing": positions.get("swing"),
             },
+            "cash_pct": alloc_snap.get("cash_pct"),
+            "position_pct": alloc_snap.get("position_pct"),
         },
         "advisory": True,
         "advisory_zh": "模拟交易 · 不构成投资建议",

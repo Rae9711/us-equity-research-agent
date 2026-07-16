@@ -24,15 +24,56 @@ def _load_json(path) -> dict[str, Any]:
         return {}
 
 
+def _append_allocation_note(
+    account: dict[str, Any],
+    *,
+    trading_date: str | None,
+    action: str | None,
+    symbol: str | None,
+    allocation: dict[str, Any],
+    trade: dict[str, Any] | None = None,
+    fallback_reason: str | None = None,
+) -> None:
+    equity = float(account.get("equity") or 0) or 1.0
+    cash = float(account.get("cash") or 0)
+    cash_pct = round(cash / equity * 100.0, 1)
+    pos_pct = round(100.0 - cash_pct, 1)
+    if trade and trade.get("position_pct") is not None:
+        pos_pct = trade["position_pct"]
+    reserve = allocation.get("cash_reserve_pct")
+    reason = allocation.get("reason_zh") or fallback_reason or ""
+    append_journal(
+        account,
+        {
+            "type": "allocation",
+            "trading_date": trading_date,
+            "action": action,
+            "symbol": symbol,
+            "book": allocation.get("book"),
+            "cash_pct": cash_pct,
+            "position_pct": pos_pct,
+            "cash_reserve_pct": reserve,
+            "risk_pct": allocation.get("risk_pct"),
+            "budget_share": allocation.get("budget_share"),
+            "confidence": allocation.get("confidence"),
+            "reason_zh": reason,
+            "note": (
+                f"为何用 {pos_pct}% 仓位 / 留 {reserve}% 现金：{reason}"
+                if reserve is not None
+                else reason
+            ),
+            "advisory_zh": "模拟分配 · 不构成投资建议",
+        },
+    )
+
+
 def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> None:
     from src.paper.account import append_decision
 
     books = decision.get("books") or []
     if books:
         for row in books:
-            if row.get("action") in ("HOLD",) and len(books) > 1:
-                # Still record HOLD for transparency when dual-book
-                pass
+            allocation = row.get("allocation")
             append_decision(
                 account,
                 {
@@ -50,10 +91,23 @@ def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> N
                     if isinstance(row.get("entry_status"), dict)
                     else row.get("entry_status"),
                     "pnl": (row.get("trade") or {}).get("pnl"),
+                    "allocation": allocation,
                 },
             )
+            if allocation and row.get("action") in ("ENTRY", "SKIP", "WAIT"):
+                _append_allocation_note(
+                    account,
+                    trading_date=decision.get("trading_date"),
+                    action=row.get("action"),
+                    symbol=(row.get("signal") or {}).get("symbol")
+                    or (row.get("trade") or {}).get("symbol"),
+                    allocation=allocation,
+                    trade=row.get("trade"),
+                    fallback_reason=row.get("reason"),
+                )
         return
 
+    allocation = decision.get("allocation")
     append_decision(
         account,
         {
@@ -68,8 +122,20 @@ def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> N
             if isinstance(decision.get("entry_status"), dict)
             else decision.get("entry_status"),
             "pnl": (decision.get("trade") or {}).get("pnl"),
+            "allocation": allocation,
         },
     )
+    if allocation and decision.get("action") in ("ENTRY", "SKIP", "WAIT"):
+        _append_allocation_note(
+            account,
+            trading_date=decision.get("trading_date"),
+            action=decision.get("action"),
+            symbol=(decision.get("signal") or {}).get("symbol")
+            or (decision.get("trade") or {}).get("symbol"),
+            allocation=allocation,
+            trade=decision.get("trade"),
+            fallback_reason=decision.get("reason"),
+        )
 
 
 def record_evening_learning(trading_date: str) -> dict[str, Any]:
