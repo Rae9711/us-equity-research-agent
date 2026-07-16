@@ -22,8 +22,14 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
     signals = load_candidate_signals(date_str)
     portfolio = portfolio_allocation_snapshot(account)
 
-    decisions = list(reversed(account.get("decisions") or []))[:40]
-    trades = list(reversed(account.get("trades") or []))[:40]
+    decisions = [
+        d
+        for d in reversed(account.get("decisions") or [])
+        if not d.get("voided")
+    ][:40]
+    trades = [
+        t for t in reversed(account.get("trades") or []) if not t.get("voided")
+    ][:40]
     journal = list(reversed(account.get("journal") or []))[:30]
     curve = account.get("equity_curve") or []
 
