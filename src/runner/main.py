@@ -162,6 +162,23 @@ def _learning_job() -> None:
         logger.exception("Step 8 learning failed")
 
 
+def _paper_tick_job() -> None:
+    if require_trading_day(job="paper_tick") is None:
+        return
+    logger.info("Job paper_tick — simulated trading tick")
+    try:
+        from src.paper.tick import run_paper_tick
+
+        result = run_paper_tick()
+        logger.info(
+            "Paper tick done: %s — %s",
+            result.get("action"),
+            result.get("reason"),
+        )
+    except Exception:
+        logger.exception("paper_tick failed")
+
+
 def _macro_release_poll_job(slot: str) -> None:
     """L1 · 轮询该 slot 时段的宏观数据（+2/+5/+10 min 分别调用）。"""
     if require_trading_day(job=f"macro_release_poll[{slot}]") is None:
@@ -217,10 +234,15 @@ def build_scheduler() -> tuple[BackgroundScheduler, dict[str, object]]:
         ("7:45", "collect_raw", "mon-fri", 7, 45),
         ("8:00", "morning_research", "mon-fri", 8, 0),
         ("9:30", "open_report", "mon-fri", 9, 30),
+        ("9:45", "paper_tick", "mon-fri", 9, 45),
         ("10:00", "market_update", "mon-fri", 10, 0),
         ("10:15", "trade_decision", "mon-fri", 10, 15),
+        ("10:30", "paper_tick_1030", "mon-fri", 10, 30),
         ("12:00", "midday_review", "mon-fri", 12, 0),
+        ("12:05", "paper_tick_1205", "mon-fri", 12, 5),
         ("14:00", "afternoon_review", "mon-fri", 14, 0),
+        ("14:05", "paper_tick_1405", "mon-fri", 14, 5),
+        ("15:55", "paper_tick_eod", "mon-fri", 15, 55),
         ("16:10", "evening_review", "mon-fri", 16, 10),
         ("20:00", "learning", "mon-fri", 20, 0),
     ]
@@ -235,6 +257,11 @@ def build_scheduler() -> tuple[BackgroundScheduler, dict[str, object]]:
         "afternoon_review": _afternoon_review_job,
         "evening_review": _evening_review_job,
         "learning": _learning_job,
+        "paper_tick": _paper_tick_job,
+        "paper_tick_1030": _paper_tick_job,
+        "paper_tick_1205": _paper_tick_job,
+        "paper_tick_1405": _paper_tick_job,
+        "paper_tick_eod": _paper_tick_job,
     }
 
     for _label, step_id, dow, hour, minute in schedule:

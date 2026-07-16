@@ -240,4 +240,10 @@ def run_step4_trade_decision(trading_date: date | None = None) -> dict[str, Any]
         step_label(4),
         {"step4": payload, "morning": morning},
     )
+    try:
+        from src.paper.tick import maybe_paper_tick_after_step
+
+        maybe_paper_tick_after_step(trading_date)
+    except Exception:
+        logger.exception("paper_tick after Step 4 failed (non-fatal)")
     return payload

@@ -264,6 +264,15 @@ def run_step7_evening(trading_date: date | None = None) -> dict[str, Any]:
         },
     )
 
+    try:
+        from src.paper.tick import maybe_paper_tick_after_step
+        from src.paper.journal import record_evening_learning
+
+        maybe_paper_tick_after_step(trading_date)
+        record_evening_learning(date_str)
+    except Exception:
+        logger.exception("paper_tick / evening learning after Step 7 failed (non-fatal)")
+
     return payload
 
 

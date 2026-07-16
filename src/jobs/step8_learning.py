@@ -159,6 +159,13 @@ def run_step8_learning(trading_date: date | None = None) -> dict[str, Any]:
             },
         },
     )
+    try:
+        from src.paper.journal import record_evening_learning
+
+        paper_note = record_evening_learning(date_str)
+        payload["paper_learning"] = paper_note
+    except Exception:
+        logger.exception("paper evening learning after Step 8 failed (non-fatal)")
     return payload
 
 

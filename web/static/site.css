@@ -1125,3 +1125,63 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .watchlist-title { font-size: 0.88rem; margin: 1rem 0 0.35rem; }
 .watchlist-list { margin: 0; padding-left: 1.2rem; font-size: 0.88rem; }
 .architecture-panel .transparency-block { margin-bottom: 1rem; }
+
+/* —— Paper / simulated trading —— */
+.paper-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.paper-metric-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.paper-metric-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-top: 0.15rem;
+}
+.paper-tick-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.btn-primary {
+  appearance: none;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.92rem;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-primary:hover { background: var(--accent-dark); }
+.paper-tick-result {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+.pnl-pos { color: #166534; }
+.pnl-neg { color: #991b1b; }
+.paper-journal {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+.paper-journal li {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}

@@ -363,4 +363,10 @@ def run_step2_open(
             {"raw": raw, "step2": payload},
             force=force,
         )
+    try:
+        from src.paper.tick import maybe_paper_tick_after_step
+
+        maybe_paper_tick_after_step(trading_date)
+    except Exception:
+        logger.exception("paper_tick after Step 2 failed (non-fatal)")
     return payload

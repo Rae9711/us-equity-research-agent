@@ -44,6 +44,7 @@ from src.web.homepage import (
 )
 from src.web.verify_order import conclusion_sort_key, sort_conclusions
 from src.web.verify_service import VerifyItem, VerifyPayload, save_verifications
+from src.web.paper_page import build_paper_page
 from web.auth import optional_basic_auth
 
 app = FastAPI(title="Daily Trading OS", version="0.1.0")
@@ -596,3 +597,58 @@ def api_stats() -> JSONResponse:
             "by_date": accuracy_by_date(),
         }
     )
+
+
+@app.get("/sim", dependencies=_AUTH)
+def sim_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/paper", status_code=302)
+
+
+@app.get("/paper", response_class=HTMLResponse, dependencies=_AUTH)
+def paper_page(request: Request, date: str | None = None) -> HTMLResponse:
+    trading_date = date or today_et().isoformat()
+    ctx = build_paper_page(trading_date)
+    return templates.TemplateResponse(
+        request,
+        "paper.html",
+        {
+            "active": "paper",
+            "launch_date": launch_date().isoformat(),
+            "tick_result": None,
+            **ctx,
+        },
+    )
+
+
+@app.post("/paper/tick", dependencies=_AUTH)
+async def paper_tick_endpoint(request: Request) -> HTMLResponse:
+    form = await request.form()
+    trading_date = str(form.get("trading_date") or today_et().isoformat())
+    from src.paper.tick import run_paper_tick
+
+    tick_result = run_paper_tick(trading_date, allow_non_trading_day=True)
+    ctx = build_paper_page(trading_date)
+    return templates.TemplateResponse(
+        request,
+        "paper.html",
+        {
+            "active": "paper",
+            "launch_date": launch_date().isoformat(),
+            "tick_result": tick_result,
+            **ctx,
+        },
+    )
+
+
+@app.get("/api/paper", dependencies=_AUTH)
+def api_paper(date: str | None = None) -> JSONResponse:
+    trading_date = date or today_et().isoformat()
+    return JSONResponse(build_paper_page(trading_date))
+
+
+@app.post("/api/paper/tick", dependencies=_AUTH)
+def api_paper_tick(date: str | None = None) -> JSONResponse:
+    from src.paper.tick import run_paper_tick
+
+    trading_date = date or today_et().isoformat()
+    return JSONResponse(run_paper_tick(trading_date, allow_non_trading_day=True))

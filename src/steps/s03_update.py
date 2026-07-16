@@ -298,4 +298,10 @@ def run_step3_market_update(
         },
     )
     save_snapshot(trading_date, step_label(3), {"step3": payload, "context": context})
+    try:
+        from src.paper.tick import maybe_paper_tick_after_step
+
+        maybe_paper_tick_after_step(trading_date)
+    except Exception:
+        logger.exception("paper_tick after Step 3 failed (non-fatal)")
     return payload
