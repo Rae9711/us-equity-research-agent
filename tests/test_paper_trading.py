@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from src.paper.account import default_account, load_account, save_account
+from src.paper.account import default_account, get_position, load_account, save_account
 from src.paper.broker_sim import (
     InsufficientCashError,
     can_afford,
@@ -28,7 +28,7 @@ def data_root(tmp_path, monkeypatch):
     return root
 
 
-def _write_morning(root, trading_date: str, primary: dict) -> None:
+def _write_morning(root, trading_date: str, primary: dict, swing: dict | None = None) -> None:
     day = root / "reports" / trading_date
     day.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -36,6 +36,9 @@ def _write_morning(root, trading_date: str, primary: dict) -> None:
         "best_opportunity": primary,
         "advisory": True,
     }
+    if swing:
+        payload["swing_trade"] = swing
+        payload["best_trades"]["swing"] = swing
     (day / "morning.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -89,7 +92,9 @@ def test_entry_fill_and_target_exit(data_root):
         signal={"source": "morning_primary", "horizon": "Intraday"},
     )
     assert trade["action"] == "ENTRY"
+    assert trade["book"] == "intraday"
     assert acct["position"]["symbol"] == "ARM"
+    assert get_position(acct, "intraday")["symbol"] == "ARM"
     assert acct["cash"] == pytest.approx(10000.0 - 3410.0)
     assert len(acct["trades"]) == 1
 
@@ -102,6 +107,7 @@ def test_entry_fill_and_target_exit(data_root):
     assert exit_trade["action"] == "EXIT"
     assert exit_trade["pnl"] == pytest.approx(130.0)
     assert acct["position"] is None
+    assert get_position(acct, "intraday") is None
     assert acct["realized_pnl"] == pytest.approx(130.0)
     assert acct["cash"] == pytest.approx(10000.0 + 130.0)
 
@@ -144,8 +150,9 @@ def test_decide_entry_when_ready(data_root, monkeypatch):
         force_price=341.0,
     )
     assert decision["action"] == "ENTRY"
+    assert get_position(acct, "intraday")["symbol"] == "ARM"
+    assert get_position(acct, "intraday")["shares"] >= 1
     assert acct["position"]["symbol"] == "ARM"
-    assert acct["position"]["shares"] >= 1
 
 
 def test_decide_skip_when_missed(data_root):
@@ -169,6 +176,7 @@ def test_decide_skip_when_missed(data_root):
     )
     assert decision["action"] == "SKIP"
     assert acct["position"] is None
+    assert get_position(acct, "intraday") is None
 
 
 def test_decide_exit_on_stop(data_root):
@@ -196,6 +204,92 @@ def test_decide_exit_on_stop(data_root):
     assert acct["position"] is None
 
 
+def test_dual_books_eod_flattens_intraday_only(data_root, monkeypatch):
+    acct = default_account()
+    execute_entry(
+        acct,
+        symbol="ARM",
+        direction="LONG",
+        price=341.0,
+        shares=5,
+        stop=335.0,
+        target=354.0,
+        trading_date="2026-07-08",
+        signal={"source": "morning_primary", "horizon": "Intraday"},
+        book="intraday",
+    )
+    execute_entry(
+        acct,
+        symbol="NVDA",
+        direction="LONG",
+        price=120.0,
+        shares=10,
+        stop=110.0,
+        target=140.0,
+        trading_date="2026-07-08",
+        signal={"source": "swing", "horizon": "Swing"},
+        book="swing",
+    )
+    assert get_position(acct, "intraday")["symbol"] == "ARM"
+    assert get_position(acct, "swing")["symbol"] == "NVDA"
+
+    quotes = {"ARM": 341.0, "NVDA": 122.0}
+
+    def _fake_quote(symbol, trading_date, **kwargs):
+        return quotes.get(str(symbol).upper()), "test"
+
+    monkeypatch.setattr(
+        "src.paper.execution_agent.resolve_quote", _fake_quote
+    )
+
+    decision = decide_and_act(
+        acct,
+        "2026-07-08",
+        session_phase="closed",
+    )
+    assert get_position(acct, "intraday") is None
+    assert get_position(acct, "swing")["symbol"] == "NVDA"
+    assert any(
+        b.get("book") == "intraday" and b.get("action") == "EXIT"
+        for b in (decision.get("books") or [])
+    )
+
+
+def test_dual_books_enter_both_when_ready(data_root):
+    primary = {
+        "symbol": "ARM",
+        "direction": "LONG",
+        "entry_price": 100.0,
+        "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
+        "stop_price": 95.0,
+        "target_price": 110.0,
+        "horizon": "Intraday",
+    }
+    swing = {
+        "symbol": "ARM",
+        "direction": "LONG",
+        "entry_price": 100.0,
+        "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
+        "stop_price": 90.0,
+        "target_price": 130.0,
+        "horizon": "Swing",
+    }
+    _write_morning(data_root, "2026-07-08", primary, swing=swing)
+    acct = default_account()
+    decision = decide_and_act(
+        acct,
+        "2026-07-08",
+        session_phase="open",
+        force_price=100.0,
+    )
+    assert get_position(acct, "intraday") is not None
+    assert get_position(acct, "swing") is not None
+    assert decision["action"] == "ENTRY"
+    books = {b["book"]: b["action"] for b in decision.get("books") or []}
+    assert books.get("intraday") == "ENTRY"
+    assert books.get("swing") == "ENTRY"
+
+
 def test_run_paper_tick_persists(data_root):
     primary = {
         "symbol": "ARM",
@@ -217,5 +311,6 @@ def test_run_paper_tick_persists(data_root):
     assert result["action"] == "ENTRY"
     loaded = load_account()
     assert loaded["position"]["symbol"] == "ARM"
+    assert get_position(loaded, "intraday")["symbol"] == "ARM"
     assert loaded["decisions"]
     assert (data_root / "paper" / "account.json").exists()

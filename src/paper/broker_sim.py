@@ -2,13 +2,24 @@
 
 ADVISORY ONLY — 模拟交易 · 不构成投资建议.
 No real broker / no slippage model beyond last price.
+
+Supports dual books via ``book``: ``intraday`` (短线) | ``swing`` (长线).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.paper.account import STARTING_CASH, append_trade, mark_to_market
+from src.paper.account import (
+    BOOK_INTRADAY,
+    BOOKS,
+    STARTING_CASH,
+    append_trade,
+    ensure_positions,
+    get_position,
+    mark_to_market,
+    set_position,
+)
 
 
 class InsufficientCashError(ValueError):
@@ -22,6 +33,15 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _resolve_book(book: str | None, signal: dict[str, Any] | None) -> str:
+    if book and book in BOOKS:
+        return book
+    horizon = str((signal or {}).get("horizon") or "").lower()
+    if "swing" in horizon:
+        return "swing"
+    return BOOK_INTRADAY
 
 
 def size_shares(
@@ -66,10 +86,13 @@ def execute_entry(
     signal: dict[str, Any] | None = None,
     reason: str = "",
     trading_date: str | None = None,
+    book: str | None = None,
 ) -> dict[str, Any]:
-    """Open a position at ``price``. Raises InsufficientCashError."""
-    if account.get("position"):
-        raise ValueError("Already holding a position")
+    """Open a position at ``price`` in the given book. Raises InsufficientCashError."""
+    ensure_positions(account)
+    book_key = _resolve_book(book, signal)
+    if get_position(account, book_key):
+        raise ValueError(f"Already holding a {book_key} position")
     if shares <= 0:
         raise InsufficientCashError("shares must be > 0")
     if price <= 0:
@@ -96,6 +119,9 @@ def execute_entry(
         raise ValueError(f"Unsupported direction: {direction}")
 
     sig = signal or {}
+    horizon = sig.get("horizon") or (
+        "Swing" if book_key == "swing" else "Intraday"
+    )
     position = {
         "symbol": symbol.upper(),
         "direction": direction,
@@ -104,10 +130,11 @@ def execute_entry(
         "stop": _safe_float(stop),
         "target": _safe_float(target),
         "entry_zone": entry_zone,
-        "opened_at": None,  # filled by append_trade ts path
+        "opened_at": None,  # filled below
         "opened_date": trading_date,
         "signal_source": sig.get("source"),
-        "horizon": sig.get("horizon") or "Intraday",
+        "horizon": horizon,
+        "book": book_key,
         "plan_symbol": sig.get("symbol"),
         "expected_return_pct": sig.get("expected_return_pct"),
         "entry_status_at_entry": (sig.get("entry_status") or {}).get("status")
@@ -117,7 +144,7 @@ def execute_entry(
     from src.paper.account import _now_iso
 
     position["opened_at"] = _now_iso()
-    account["position"] = position
+    set_position(account, book_key, position)
 
     trade = {
         "side": "BUY" if direction == "LONG" else "SELL_SHORT",
@@ -131,9 +158,11 @@ def execute_entry(
         "reason": reason,
         "trading_date": trading_date,
         "signal_source": sig.get("source"),
+        "horizon": horizon,
+        "book": book_key,
     }
     append_trade(account, trade)
-    mark_to_market(account, price)
+    mark_to_market(account, price, price_by_symbol={symbol.upper(): price})
     return trade
 
 
@@ -143,10 +172,30 @@ def execute_exit(
     price: float,
     reason: str = "",
     trading_date: str | None = None,
+    book: str | None = None,
 ) -> dict[str, Any]:
-    """Close the open position at ``price``."""
-    pos = account.get("position")
-    if not pos:
+    """Close an open position at ``price``.
+
+    If ``book`` is omitted, closes the legacy primary book (intraday preferred).
+    """
+    ensure_positions(account)
+    if book:
+        pos = get_position(account, book)
+        book_key = book
+    else:
+        # Legacy: close whatever sync_legacy exposes / first open
+        pos = account.get("position")
+        book_key = None
+        if pos:
+            book_key = pos.get("book") or _resolve_book(None, pos)
+            pos = get_position(account, book_key)
+        if not pos:
+            for b in BOOKS:
+                pos = get_position(account, b)
+                if pos:
+                    book_key = b
+                    break
+    if not pos or not book_key:
         raise ValueError("No open position")
     if price <= 0:
         raise ValueError("price must be > 0")
@@ -170,7 +219,7 @@ def execute_exit(
 
     realized = float(account.get("realized_pnl") or 0.0) + pnl
     account["realized_pnl"] = round(realized, 2)
-    account["position"] = None
+    set_position(account, book_key, None)
 
     trade = {
         "side": side,
@@ -186,6 +235,8 @@ def execute_exit(
         "avg_entry": avg,
         "hold_opened_date": pos.get("opened_date"),
         "signal_source": pos.get("signal_source"),
+        "horizon": pos.get("horizon"),
+        "book": book_key,
     }
     append_trade(account, trade)
     mark_to_market(account, None)

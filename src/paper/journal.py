@@ -27,6 +27,33 @@ def _load_json(path) -> dict[str, Any]:
 def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> None:
     from src.paper.account import append_decision
 
+    books = decision.get("books") or []
+    if books:
+        for row in books:
+            if row.get("action") in ("HOLD",) and len(books) > 1:
+                # Still record HOLD for transparency when dual-book
+                pass
+            append_decision(
+                account,
+                {
+                    "trading_date": decision.get("trading_date"),
+                    "action": row.get("action"),
+                    "reason": row.get("reason"),
+                    "book": row.get("book"),
+                    "book_zh": row.get("book_zh"),
+                    "horizon": (row.get("signal") or {}).get("horizon"),
+                    "symbol": (row.get("signal") or {}).get("symbol")
+                    or (row.get("trade") or {}).get("symbol"),
+                    "quote": row.get("quote"),
+                    "quote_source": row.get("quote_source"),
+                    "entry_status": (row.get("entry_status") or {}).get("status")
+                    if isinstance(row.get("entry_status"), dict)
+                    else row.get("entry_status"),
+                    "pnl": (row.get("trade") or {}).get("pnl"),
+                },
+            )
+        return
+
     append_decision(
         account,
         {

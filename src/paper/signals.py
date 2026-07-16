@@ -2,7 +2,10 @@
 
 ADVISORY ONLY — 模拟交易 · 不构成投资建议.
 
-Default: Intraday #1 if actionable, else Swing if present, else skip.
+Dual-book mode (default): Intraday book uses Primary #1; Swing book uses
+``swing_trade`` independently.
+
+Legacy single-book: Intraday #1 if actionable, else Swing fallback.
 """
 
 from __future__ import annotations
@@ -77,10 +80,12 @@ def normalize_slot(slot: dict[str, Any], *, source: str, horizon: str) -> dict[s
         "target_price": target,
         "expected_return_pct": slot.get("expected_return_pct"),
         "win_prob": slot.get("win_prob"),
+        "risk_reward": slot.get("risk_reward") or slot.get("rr"),
         "horizon": horizon or slot.get("horizon") or "Intraday",
         "source": source,
         "trade_action": slot.get("trade_action"),
         "level_anchors": slot.get("level_anchors"),
+        "rank": slot.get("rank"),
         "raw_slot": slot,
     }
 
@@ -138,8 +143,28 @@ def resolve_quote(
     return px, source
 
 
+def _morning_top_trades(morning: dict[str, Any]) -> list[dict[str, Any]]:
+    top = (morning.get("best_trades") or {}).get("top_trades") or morning.get(
+        "top_trades"
+    ) or []
+    if not isinstance(top, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in top:
+        if not isinstance(row, dict):
+            continue
+        sym = (row.get("symbol") or "").upper()
+        direction = (row.get("direction") or "").upper()
+        if direction not in ("LONG", "SHORT") or not sym or sym in seen:
+            continue
+        seen.add(sym)
+        out.append(row)
+    return out
+
+
 def load_candidate_signals(trading_date: str) -> dict[str, Any]:
-    """Load morning + step3 session primary + swing."""
+    """Load morning + step3 session primary + swing + top_trades list."""
     morning = _load_json(morning_json_path(trading_date))
     step3 = _load_json(step_json_path(3, trading_date))
     session = (
@@ -148,18 +173,14 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
         or step3.get("session_update")
         or {}
     )
+    top_trades = _morning_top_trades(morning)
     primary = (morning.get("best_trades") or {}).get("primary") or morning.get(
         "best_opportunity"
     )
     # When primary is NO TRADE / null, fall back to top_trades[0]
     if not primary or (primary.get("direction") or "").upper() not in ("LONG", "SHORT"):
-        top = (morning.get("best_trades") or {}).get("top_trades") or morning.get(
-            "top_trades"
-        ) or []
-        if top and isinstance(top, list):
-            candidate = top[0]
-            if (candidate.get("direction") or "").upper() in ("LONG", "SHORT"):
-                primary = candidate
+        if top_trades:
+            primary = top_trades[0]
     swing = morning.get("swing_trade") or (morning.get("best_trades") or {}).get("swing")
     session_primary = session.get("primary") if isinstance(session, dict) else None
     if session_primary and (session_primary.get("direction") or "").upper() not in (
@@ -172,7 +193,291 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
         "step3": step3,
         "session_primary": session_primary,
         "morning_primary": primary,
+        "top_trades": top_trades,
         "swing": swing,
+    }
+
+
+def _evaluate_slot(
+    norm: dict[str, Any],
+    *,
+    key: str,
+    label: str,
+    trading_date: str,
+    phase: str,
+    prices: dict[str, float],
+    miss_threshold_pct: float,
+    raw: dict[str, Any] | None,
+) -> dict[str, Any]:
+    sym = norm["symbol"]
+    px = prices.get(sym)
+    quote_source = "injected"
+    if px is None:
+        px, quote_source = resolve_quote(sym, trading_date, raw=raw, prefer_live=True)
+    slot = dict(norm.get("raw_slot") or {})
+    slot.update(
+        {
+            "symbol": sym,
+            "direction": norm["direction"],
+            "entry_price": norm["entry_price"],
+            "entry_zone": norm["entry_zone"],
+            "stop_price": norm["stop_price"],
+            "target_price": norm["target_price"],
+            "level_anchors": norm.get("level_anchors"),
+        }
+    )
+    attach_entry_status(
+        slot,
+        current_price=px,
+        session_phase=phase,
+        miss_threshold_pct=miss_threshold_pct,
+    )
+    es = slot.get("entry_status") or {}
+    act = _slot_actionable(es.get("status"))
+    return {
+        "key": key,
+        "label": label,
+        "signal": {**norm, "entry_status": es, "current_price": px},
+        "action": act,
+        "entry_status": es,
+        "quote": px,
+        "quote_source": quote_source,
+    }
+
+
+def _candidate_edge_score(row: dict[str, Any]) -> float:
+    """Higher = better executable setup (not just board rank)."""
+    sig = row.get("signal") or {}
+    wp = _safe_float(sig.get("win_prob")) or 50.0
+    er = _safe_float(sig.get("expected_return_pct")) or 0.0
+    rr = _safe_float(sig.get("risk_reward"))
+    if rr is None:
+        entry = _safe_float(sig.get("entry_price"))
+        stop = _safe_float(sig.get("stop_price"))
+        target = _safe_float(sig.get("target_price"))
+        px = _safe_float(row.get("quote")) or entry
+        if entry and stop and target and abs(entry - stop) > 0:
+            reward = abs(target - (px or entry))
+            rr = reward / abs(entry - stop)
+        else:
+            rr = 1.0
+    status = ((row.get("entry_status") or {}).get("status") or "").upper()
+    status_boost = {"TRIGGERED": 1.15, "READY": 1.1, "ACTIVE": 0.55}.get(status, 0.0)
+    if row.get("action") != "enter":
+        # Wait rows ranked lower for selection but still scorable
+        status_boost *= 0.4
+    # Prefer non-#1 if #1 is weaker: win_prob * ER * rr_weight
+    rr_w = max(0.5, min(1.5, float(rr) / 2.0))
+    return float(wp) * max(er, 0.15) * rr_w * max(status_boost, 0.15)
+
+
+def _pick_from_evaluated(
+    evaluated: list[dict[str, Any]],
+    *,
+    allow_swing_fallback: bool,
+) -> dict[str, Any]:
+    """Pick best *executable* setup — not always board #1 if MISSED / weak R:R."""
+    enterable = [
+        r for r in evaluated if r["key"] != "swing" and r["action"] == "enter"
+    ]
+    if enterable:
+        best = max(enterable, key=_candidate_edge_score)
+        rank_note = ""
+        if best.get("key", "").startswith("top_trade") or best.get("label", "").startswith(
+            "Top"
+        ):
+            rank_note = f"（非盲目跟 #1，按可执行度+胜率/R:R 优选 {best.get('label')}）"
+        return {
+            "action": "enter",
+            "signal": best["signal"],
+            "entry_status": best["entry_status"],
+            "reason": (
+                f"模拟买入：{best['label']} Entry Status="
+                f"{best['entry_status'].get('status')}（价位贴近 Ideal Entry）{rank_note}"
+            ),
+            "quote": best["quote"],
+            "quote_source": best["quote_source"],
+            "candidates": evaluated,
+            "pick_score": round(_candidate_edge_score(best), 2),
+        }
+
+    waitable = [
+        r for r in evaluated if r["key"] != "swing" and r["action"] == "wait"
+    ]
+    if waitable:
+        best = max(waitable, key=_candidate_edge_score)
+        return {
+            "action": "wait",
+            "signal": best["signal"],
+            "entry_status": best["entry_status"],
+            "reason": f"等待回踩：{best['label']} Entry Status=ACTIVE，未追高",
+            "quote": best["quote"],
+            "quote_source": best["quote_source"],
+            "candidates": evaluated,
+        }
+
+    if allow_swing_fallback:
+        for row in evaluated:
+            if row["key"] == "swing" and row["action"] == "enter":
+                return {
+                    "action": "enter",
+                    "signal": row["signal"],
+                    "entry_status": row["entry_status"],
+                    "reason": (
+                        f"Intraday 不可执行，改用 Swing：Entry Status="
+                        f"{row['entry_status'].get('status')}"
+                    ),
+                    "quote": row["quote"],
+                    "quote_source": row["quote_source"],
+                    "candidates": evaluated,
+                }
+        for row in evaluated:
+            if row["key"] == "swing" and row["action"] == "wait":
+                return {
+                    "action": "wait",
+                    "signal": row["signal"],
+                    "entry_status": row["entry_status"],
+                    "reason": "等待 Swing Ideal Entry 回踩",
+                    "quote": row["quote"],
+                    "quote_source": row["quote_source"],
+                    "candidates": evaluated,
+                }
+
+    why = "无可用 Primary / Swing 信号"
+    if evaluated:
+        statuses = ", ".join(
+            f"{r['label']}={((r.get('entry_status') or {}).get('status') or 'N/A')}"
+            for r in evaluated
+        )
+        why = f"信号均不可执行（{statuses}）— MISSED/INVALIDATED/EXPIRED 不追；保留现金"
+    return {
+        "action": "skip",
+        "signal": None,
+        "entry_status": None,
+        "reason": why,
+        "quote": None,
+        "quote_source": None,
+        "candidates": evaluated,
+    }
+
+
+def pick_intraday_signal(
+    trading_date: str,
+    *,
+    current_price_by_symbol: dict[str, float] | None = None,
+    session_phase: str | None = None,
+    miss_threshold_pct: float = 1.0,
+    raw: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pick best executable Intraday among session #1, morning primary, top_trades."""
+    phase = session_phase or infer_session_phase(trading_date)
+    ctx = load_candidate_signals(trading_date)
+    prices = current_price_by_symbol or {}
+    evaluated: list[dict[str, Any]] = []
+    seen_syms: set[str] = set()
+
+    def _add(key: str, raw_slot: dict[str, Any] | None, label: str, horizon: str) -> None:
+        norm = normalize_slot(raw_slot or {}, source=key, horizon=horizon)
+        if not norm:
+            return
+        sym = norm["symbol"]
+        if sym in seen_syms and key.startswith("top_trade"):
+            return
+        seen_syms.add(sym)
+        evaluated.append(
+            _evaluate_slot(
+                norm,
+                key=key,
+                label=label,
+                trading_date=trading_date,
+                phase=phase,
+                prices=prices,
+                miss_threshold_pct=miss_threshold_pct,
+                raw=raw,
+            )
+        )
+
+    _add(
+        "session_primary",
+        ctx.get("session_primary"),
+        "Intraday #1 (Step3)",
+        "Intraday",
+    )
+    _add("morning_primary", ctx.get("morning_primary"), "Morning Primary", "Intraday")
+    for i, row in enumerate(ctx.get("top_trades") or []):
+        rank = row.get("rank") or (i + 1)
+        _add(f"top_trade_{rank}", row, f"Top#{rank} {row.get('symbol')}", "Intraday")
+
+    return _pick_from_evaluated(evaluated, allow_swing_fallback=False)
+
+
+def pick_swing_signal(
+    trading_date: str,
+    *,
+    current_price_by_symbol: dict[str, float] | None = None,
+    session_phase: str | None = None,
+    miss_threshold_pct: float = 1.0,
+    raw: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pick Swing / 长线 signal only."""
+    phase = session_phase or infer_session_phase(trading_date)
+    ctx = load_candidate_signals(trading_date)
+    prices = current_price_by_symbol or {}
+    norm = normalize_slot(ctx.get("swing") or {}, source="swing", horizon="Swing")
+    evaluated: list[dict[str, Any]] = []
+    if norm:
+        evaluated.append(
+            _evaluate_slot(
+                norm,
+                key="swing",
+                label="Swing · 长线",
+                trading_date=trading_date,
+                phase=phase,
+                prices=prices,
+                miss_threshold_pct=miss_threshold_pct,
+                raw=raw,
+            )
+        )
+    # Treat swing rows as the only candidates; reuse enter/wait paths via fallback flag
+    if not evaluated:
+        return {
+            "action": "skip",
+            "signal": None,
+            "entry_status": None,
+            "reason": "无 Swing / 长线信号",
+            "quote": None,
+            "quote_source": None,
+            "candidates": [],
+        }
+    row = evaluated[0]
+    if row["action"] == "enter":
+        return {
+            "action": "enter",
+            "signal": row["signal"],
+            "entry_status": row["entry_status"],
+            "reason": f"长线买入：Swing Entry Status={row['entry_status'].get('status')}",
+            "quote": row["quote"],
+            "quote_source": row["quote_source"],
+            "candidates": evaluated,
+        }
+    if row["action"] == "wait":
+        return {
+            "action": "wait",
+            "signal": row["signal"],
+            "entry_status": row["entry_status"],
+            "reason": "等待长线 Ideal Entry 回踩",
+            "quote": row["quote"],
+            "quote_source": row["quote_source"],
+            "candidates": evaluated,
+        }
+    return {
+        "action": "skip",
+        "signal": row["signal"],
+        "entry_status": row["entry_status"],
+        "reason": f"长线信号不可执行（{(row.get('entry_status') or {}).get('status') or 'N/A'}）",
+        "quote": row["quote"],
+        "quote_source": row["quote_source"],
+        "candidates": evaluated,
     }
 
 
@@ -185,7 +490,7 @@ def pick_signal(
     miss_threshold_pct: float = 1.0,
     raw: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Pick #1 trade for paper tick.
+    """Pick best executable trade for legacy single-book paper tick.
 
     Returns dict with keys: action ('enter'|'wait'|'skip'|'hold_signal'),
     signal (normalized), entry_status, reason, quote, quote_source.
@@ -194,115 +499,42 @@ def pick_signal(
     ctx = load_candidate_signals(trading_date)
     prices = current_price_by_symbol or {}
 
-    candidates: list[tuple[str, dict[str, Any] | None, str]] = [
-        ("session_primary", normalize_slot(ctx.get("session_primary") or {}, source="session_primary", horizon="Intraday"), "Intraday #1 (Step3)"),
-        ("morning_primary", normalize_slot(ctx.get("morning_primary") or {}, source="morning_primary", horizon="Intraday"), "Morning Primary"),
-    ]
-    if prefer_swing_if_no_intraday:
-        candidates.append(
-            ("swing", normalize_slot(ctx.get("swing") or {}, source="swing", horizon="Swing"), "Swing")
-        )
-
     evaluated: list[dict[str, Any]] = []
-    for key, norm, label in candidates:
+    seen: set[str] = set()
+
+    def _add(key: str, raw_slot: dict[str, Any] | None, label: str, horizon: str) -> None:
+        norm = normalize_slot(raw_slot or {}, source=key, horizon=horizon)
         if not norm:
-            continue
-        sym = norm["symbol"]
-        px = prices.get(sym)
-        quote_source = "injected"
-        if px is None:
-            px, quote_source = resolve_quote(sym, trading_date, raw=raw, prefer_live=True)
-        slot = dict(norm.get("raw_slot") or {})
-        slot.update(
-            {
-                "symbol": sym,
-                "direction": norm["direction"],
-                "entry_price": norm["entry_price"],
-                "entry_zone": norm["entry_zone"],
-                "stop_price": norm["stop_price"],
-                "target_price": norm["target_price"],
-                "level_anchors": norm.get("level_anchors"),
-            }
-        )
-        attach_entry_status(
-            slot,
-            current_price=px,
-            session_phase=phase,
-            miss_threshold_pct=miss_threshold_pct,
-        )
-        es = slot.get("entry_status") or {}
-        act = _slot_actionable(es.get("status"))
+            return
+        if norm["symbol"] in seen and key.startswith("top_trade"):
+            return
+        seen.add(norm["symbol"])
         evaluated.append(
-            {
-                "key": key,
-                "label": label,
-                "signal": {**norm, "entry_status": es, "current_price": px},
-                "action": act,
-                "entry_status": es,
-                "quote": px,
-                "quote_source": quote_source,
-            }
+            _evaluate_slot(
+                norm,
+                key=key,
+                label=label,
+                trading_date=trading_date,
+                phase=phase,
+                prices=prices,
+                miss_threshold_pct=miss_threshold_pct,
+                raw=raw,
+            )
         )
 
-    # Prefer first enterable intraday, else wait on first wait, else swing enter, else skip
-    for row in evaluated:
-        if row["key"] != "swing" and row["action"] == "enter":
-            return {
-                "action": "enter",
-                "signal": row["signal"],
-                "entry_status": row["entry_status"],
-                "reason": f"模拟买入：{row['label']} Entry Status={row['entry_status'].get('status')}（价位贴近 Ideal Entry）",
-                "quote": row["quote"],
-                "quote_source": row["quote_source"],
-                "candidates": evaluated,
-            }
-    for row in evaluated:
-        if row["key"] != "swing" and row["action"] == "wait":
-            return {
-                "action": "wait",
-                "signal": row["signal"],
-                "entry_status": row["entry_status"],
-                "reason": f"等待回踩：{row['label']} Entry Status=ACTIVE，未追高",
-                "quote": row["quote"],
-                "quote_source": row["quote_source"],
-                "candidates": evaluated,
-            }
-    for row in evaluated:
-        if row["key"] == "swing" and row["action"] == "enter":
-            return {
-                "action": "enter",
-                "signal": row["signal"],
-                "entry_status": row["entry_status"],
-                "reason": f"Intraday 不可执行，改用 Swing：Entry Status={row['entry_status'].get('status')}",
-                "quote": row["quote"],
-                "quote_source": row["quote_source"],
-                "candidates": evaluated,
-            }
-    for row in evaluated:
-        if row["key"] == "swing" and row["action"] == "wait":
-            return {
-                "action": "wait",
-                "signal": row["signal"],
-                "entry_status": row["entry_status"],
-                "reason": "等待 Swing Ideal Entry 回踩",
-                "quote": row["quote"],
-                "quote_source": row["quote_source"],
-                "candidates": evaluated,
-            }
+    _add(
+        "session_primary",
+        ctx.get("session_primary"),
+        "Intraday #1 (Step3)",
+        "Intraday",
+    )
+    _add("morning_primary", ctx.get("morning_primary"), "Morning Primary", "Intraday")
+    for i, row in enumerate(ctx.get("top_trades") or []):
+        rank = row.get("rank") or (i + 1)
+        _add(f"top_trade_{rank}", row, f"Top#{rank} {row.get('symbol')}", "Intraday")
+    if prefer_swing_if_no_intraday:
+        _add("swing", ctx.get("swing"), "Swing", "Swing")
 
-    why = "无可用 Primary / Swing 信号"
-    if evaluated:
-        statuses = ", ".join(
-            f"{r['label']}={((r.get('entry_status') or {}).get('status') or 'N/A')}"
-            for r in evaluated
-        )
-        why = f"信号均不可执行（{statuses}）— MISSED/INVALIDATED/EXPIRED 不追"
-    return {
-        "action": "skip",
-        "signal": None,
-        "entry_status": None,
-        "reason": why,
-        "quote": None,
-        "quote_source": None,
-        "candidates": evaluated,
-    }
+    return _pick_from_evaluated(
+        evaluated, allow_swing_fallback=prefer_swing_if_no_intraday
+    )

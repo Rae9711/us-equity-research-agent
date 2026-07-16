@@ -1175,6 +1175,34 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 }
 .pnl-pos { color: #166534; }
 .pnl-neg { color: #991b1b; }
+.paper-books-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+.paper-book-card {
+  padding: 0.85rem 1rem;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+.paper-book-swing {
+  border-color: #c4b5fd;
+  background: #faf8ff;
+}
+.paper-book-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.paper-book-tick-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
 .paper-journal {
   list-style: none;
   padding: 0;

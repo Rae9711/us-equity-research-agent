@@ -12,8 +12,10 @@ from typing import Any
 
 from src.paper.account import (
     append_equity_point,
+    ensure_positions,
     load_account,
     mark_to_market,
+    open_positions,
     save_account,
 )
 from src.paper.execution_agent import decide_and_act
@@ -66,6 +68,7 @@ def run_paper_tick(
     raw = _load_raw(date_str)
 
     account = load_account()
+    ensure_positions(account)
     decision = decide_and_act(
         account,
         date_str,
@@ -75,16 +78,26 @@ def run_paper_tick(
     )
     record_tick_decision(account, decision)
 
-    # Refresh mark if still holding
-    pos = account.get("position")
-    if pos and decision.get("quote"):
-        mark_to_market(account, float(decision["quote"]))
-    elif not pos:
+    # Refresh marks from decision quotes
+    px_map: dict[str, float] = {}
+    for row in decision.get("books") or []:
+        sig = row.get("signal") or {}
+        sym = (sig.get("symbol") or (row.get("trade") or {}).get("symbol") or "").upper()
+        if sym and row.get("quote") is not None:
+            px_map[sym] = float(row["quote"])
+    if decision.get("quote") is not None and decision.get("signal"):
+        sym = str((decision.get("signal") or {}).get("symbol") or "").upper()
+        if sym:
+            px_map.setdefault(sym, float(decision["quote"]))
+    if px_map:
+        mark_to_market(account, price_by_symbol=px_map)
+    elif not open_positions(account):
         mark_to_market(account, None)
 
     append_equity_point(account, label=f"tick:{decision.get('action')}")
     save_account(account)
 
+    positions = account.get("positions") or {}
     summary = {
         "ok": True,
         "trading_date": date_str,
@@ -96,6 +109,7 @@ def run_paper_tick(
         "trade": decision.get("trade"),
         "signal": decision.get("signal"),
         "entry_status": decision.get("entry_status"),
+        "books": decision.get("books"),
         "account": {
             "cash": account.get("cash"),
             "equity": account.get("equity"),
@@ -104,6 +118,10 @@ def run_paper_tick(
             "total_pnl": account.get("total_pnl"),
             "total_return_pct": account.get("total_return_pct"),
             "position": account.get("position"),
+            "positions": {
+                "intraday": positions.get("intraday"),
+                "swing": positions.get("swing"),
+            },
         },
         "advisory": True,
         "advisory_zh": "模拟交易 · 不构成投资建议",
