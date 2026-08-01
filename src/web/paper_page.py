@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.paper.account import ensure_positions, load_account, open_positions
+from src.paper.account import ensure_positions, load_account, mark_to_market, open_positions
 from src.paper.allocation import portfolio_allocation_snapshot
 from src.paper.signals import load_candidate_signals
 from src.research.entry_status import infer_session_phase
@@ -18,6 +18,17 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
     date_str = trading_date or today_et().isoformat()
     account = load_account()
     ensure_positions(account)
+    # Refresh marks + sync closed-only cumulative metrics for the UI.
+    px_map: dict[str, float] = {}
+    for _book, pos in open_positions(account):
+        sym = str(pos.get("symbol") or "").upper()
+        try:
+            px = float(pos["last_price"]) if pos.get("last_price") is not None else None
+        except (TypeError, ValueError):
+            px = None
+        if sym and px is not None and px > 0:
+            px_map[sym] = px
+    mark_to_market(account, price_by_symbol=px_map or None)
     phase = infer_session_phase(date_str)
     signals = load_candidate_signals(date_str)
     portfolio = portfolio_allocation_snapshot(account)

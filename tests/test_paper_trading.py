@@ -9,7 +9,13 @@ import json
 
 import pytest
 
-from src.paper.account import default_account, get_position, load_account, save_account
+from src.paper.account import (
+    default_account,
+    get_position,
+    load_account,
+    mark_to_market,
+    save_account,
+)
 from src.paper.broker_sim import (
     InsufficientCashError,
     NonsensePriceError,
@@ -90,6 +96,7 @@ def test_size_shares_and_insufficient_cash(data_root):
 
 def test_entry_fill_and_target_exit(data_root):
     acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0  # isolate fill mechanics
     trade = execute_entry(
         acct,
         symbol="ARM",
@@ -120,11 +127,41 @@ def test_entry_fill_and_target_exit(data_root):
     assert acct["position"] is None
     assert get_position(acct, "intraday") is None
     assert acct["realized_pnl"] == pytest.approx(130.0)
+    assert acct["total_pnl"] == pytest.approx(130.0)
+    assert acct["total_return_pct"] == pytest.approx(1.3)
     assert acct["cash"] == pytest.approx(10000.0 + 130.0)
+
+
+def test_cumulative_pnl_only_after_close(data_root):
+    """Open MTM floats unrealized; total_pnl stays flat until exit."""
+    acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0
+    execute_entry(
+        acct,
+        symbol="ARM",
+        direction="LONG",
+        price=341.0,
+        shares=10,
+        stop=335.0,
+        target=354.0,
+        reason="entry",
+        trading_date="2026-07-08",
+    )
+    mark_to_market(acct, 354.0, price_by_symbol={"ARM": 354.0})
+    assert acct["unrealized_pnl"] == pytest.approx(130.0)
+    assert acct["realized_pnl"] == 0.0
+    assert acct["total_pnl"] == 0.0
+    assert acct["total_return_pct"] == 0.0
+
+    execute_exit(acct, price=354.0, reason="止盈", trading_date="2026-07-08")
+    assert acct["unrealized_pnl"] == 0.0
+    assert acct["total_pnl"] == pytest.approx(130.0)
+    assert acct["total_return_pct"] == pytest.approx(1.3)
 
 
 def test_stop_exit(data_root):
     acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0  # isolate fill mechanics
     execute_entry(
         acct,
         symbol="ARM",
@@ -382,7 +419,7 @@ def test_dual_books_enter_both_when_ready(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 90.0,
+        "stop_price": 93.0,
         "target_price": 130.0,
         "win_prob": 70,
         "expected_return_pct": 12.0,
@@ -404,8 +441,8 @@ def test_dual_books_enter_both_when_ready(data_root):
     books = {b["book"]: b["action"] for b in decision.get("books") or []}
     assert books.get("intraday") == "ENTRY"
     assert books.get("swing") == "ENTRY"
-    # Dual budget: leave cash reserve
-    assert acct["cash"] / acct["equity"] >= 0.18
+    # Dual budget: leave cash reserve (≥ ~10% band)
+    assert acct["cash"] / acct["equity"] >= 0.08
 
 
 def test_allocation_cash_reserve_bounds():
@@ -440,8 +477,10 @@ def test_allocation_cash_reserve_bounds():
     )
     assert risk_hi > risk_lo
     assert cap_hi >= cap_lo
-    assert 0.35 <= risk_lo <= 2.0
-    assert 0.35 <= risk_hi <= 2.0
+    assert 0.35 <= risk_lo <= 3.0
+    assert 0.35 <= risk_hi <= 3.0
+    # Without proven rolling edge, cap stays ≤2% so cold-start isn't oversized.
+    assert risk_hi <= 2.0
 
     hold, reason = should_hold_cash(
         action="enter",
@@ -453,6 +492,91 @@ def test_allocation_cash_reserve_bounds():
     )
     assert hold is True
     assert "保留现金" in reason
+
+    # Broken rolling edge pauses new entries even on a clean setup.
+    pause, pause_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=2.0,
+        remaining_er=4.0,
+        entry_status="READY",
+        confidence=0.8,
+        edge_stats={"n": 7, "profit_factor": 0.33, "expectancy": -32.0},
+    )
+    assert pause is True
+    assert "暂停新开仓" in pause_reason
+
+    # Wide stop rejected.
+    wide, wide_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=2.0,
+        remaining_er=4.0,
+        entry_status="READY",
+        confidence=0.8,
+        stop_pct=9.0,
+        horizon="Intraday",
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert wide is True
+    assert "止损过宽" in wide_reason
+
+    # Hard R:R floor blocks weak asymmetry even with decent win_prob.
+    weak_rr, weak_rr_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=1.2,
+        remaining_er=4.0,
+        entry_status="READY",
+        confidence=0.8,
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert weak_rr is True
+    assert "R:R" in weak_rr_reason
+
+    # Negative expected R holds cash (EV gate, not bare ER≥3%).
+    from src.paper.allocation import expected_r as _ev
+
+    neg_ev = _ev(win_prob=52, rr=1.5)  # 0.52*1.5 - 0.48 = 0.30 — positive
+    assert neg_ev is not None and neg_ev >= 0.15
+    bad_ev, bad_ev_reason = should_hold_cash(
+        action="enter",
+        win_prob=45,
+        rr=1.5,  # 0.45*1.5 - 0.55 = 0.125 < 0.15
+        remaining_er=3.0,
+        entry_status="READY",
+        confidence=0.6,
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert bad_ev is True
+    assert "期望R" in bad_ev_reason or "EV" in bad_ev_reason
+
+    # Soft geometric upside floor still applies.
+    tiny_geo, tiny_geo_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=2.0,
+        remaining_er=0.8,
+        entry_status="READY",
+        confidence=0.8,
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert tiny_geo is True
+    assert "几何上行" in tiny_geo_reason or "软门槛" in tiny_geo_reason
+
+    # Positive EV + hard R:R + soft upside → deploy.
+    ok, _ = should_hold_cash(
+        action="enter",
+        win_prob=60,
+        rr=2.0,  # EV = 0.6*2 - 0.4 = 0.8
+        remaining_er=3.5,
+        entry_status="READY",
+        confidence=0.55,
+        stop_pct=2.0,
+        horizon="Intraday",
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert ok is False
 
 
 def test_allocation_sizing_respects_reserve(data_root):
@@ -477,9 +601,10 @@ def test_allocation_sizing_respects_reserve(data_root):
         entry_status={"status": "READY"},
     )
     assert alloc["hold_cash"] is False
-    assert 20.0 <= alloc["cash_reserve_pct"] <= 40.0
+    assert 10.0 <= alloc["cash_reserve_pct"] <= 20.0
     # Deployable cash leaves room for reserve
-    assert alloc["deployable_cash"] <= acct["cash"] * 0.85
+    assert alloc["deployable_cash"] <= acct["cash"] * 0.95
+    assert alloc["max_position_pct"] >= 25.0  # solo intraday can size up
     assert "现金" in alloc["reason_zh"]
 
 

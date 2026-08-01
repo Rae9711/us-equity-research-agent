@@ -109,9 +109,9 @@ def _bullish_raw() -> dict:
 
 
 def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  # noqa: ARG001
-    section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
-        "sector" if symbol == "SMH" else "stocks"
-    )
+    from src.research.trade_candidates import _SYMBOL_SECTION
+
+    section = _SYMBOL_SECTION.get(symbol.upper(), "stocks")
     q = ((raw.get(section) or {}).get("quotes") or {}).get(symbol) or {}
     if not q:
         return {"ticker": symbol, "error": "no quote"}
@@ -131,14 +131,31 @@ def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  
     }
 
 
-def test_candidate_symbols_includes_semis():
-    assert CANDIDATE_SYMBOLS[0] == "TSLA"
+def test_candidate_symbols_covers_tracked_universe():
+    """Mag7 + liquid semis + equity indexes/ETFs from symbols.yaml (not futures/rates)."""
     assert "NVDA" in CANDIDATE_SYMBOLS
+    assert "MSFT" in CANDIDATE_SYMBOLS
+    assert "AAPL" in CANDIDATE_SYMBOLS
+    assert "AMZN" in CANDIDATE_SYMBOLS
+    assert "META" in CANDIDATE_SYMBOLS
+    assert "GOOGL" in CANDIDATE_SYMBOLS
+    assert "TSLA" in CANDIDATE_SYMBOLS
     assert "AMD" in CANDIDATE_SYMBOLS
     assert "MU" in CANDIDATE_SYMBOLS
     assert "AVGO" in CANDIDATE_SYMBOLS
-    assert "META" in CANDIDATE_SYMBOLS
     assert "ARM" in CANDIDATE_SYMBOLS
+    assert "QQQ" in CANDIDATE_SYMBOLS
+    assert "SPY" in CANDIDATE_SYMBOLS
+    assert "TQQQ" in CANDIDATE_SYMBOLS
+    assert "DIA" in CANDIDATE_SYMBOLS
+    assert "SMH" in CANDIDATE_SYMBOLS
+    assert "XLK" in CANDIDATE_SYMBOLS
+    assert "XLF" in CANDIDATE_SYMBOLS
+    assert "XLE" in CANDIDATE_SYMBOLS
+    # Context-only market keys stay out of the tradeable candidate list.
+    assert "VIX" not in CANDIDATE_SYMBOLS
+    assert "ES" not in CANDIDATE_SYMBOLS
+    assert CANDIDATE_SYMBOLS[0] == "NVDA"  # config/stocks order
 
 
 def test_short_weak_rs_beats_strong_nvda():
@@ -677,9 +694,11 @@ def test_enforce_keeps_valid_long():
         "trade": "BUY",
         "entry_price": 100.0,
         "stop_price": 95.0,
-        "target_price": 105.0,
+        "target_price": 110.0,  # 2R — hard R:R floor applies to planned levels
         "entry_zone": {"low": 99.0, "high": 101.0, "mid": 100.0},
         "expected_return_pct": 5.0,
+        "win_prob": 60.0,
+        "risk_reward": 2.0,
         "why_factors": [],
         "levels_valid": True,
     }
@@ -737,8 +756,8 @@ def test_no_quote_pass_stubs_include_current_price_key():
     KeyError when filling top_trades transparency.
     """
     raw = _bullish_raw()
-    # Leave AMD/MU/AVGO/META/ARM without quotes (typical PIT partial universe).
-    assert "AMD" not in ((raw.get("stocks") or {}).get("quotes") or {})
+    # Leave Mag7 names beyond TSLA/NVDA without quotes (typical PIT partial universe).
+    assert "MSFT" not in ((raw.get("stocks") or {}).get("quotes") or {})
 
     rule_bundle = {
         "bias": "Bullish Bias",
@@ -755,9 +774,9 @@ def test_no_quote_pass_stubs_include_current_price_key():
     }
 
     def _obs_partial(symbol: str, raw_in: dict, prior_raw: dict, trading_day, **kwargs):
-        section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
-            "sector" if symbol == "SMH" else "stocks"
-        )
+        from src.research.trade_candidates import _SYMBOL_SECTION
+
+        section = _SYMBOL_SECTION.get(symbol.upper(), "stocks")
         q = ((raw_in.get(section) or {}).get("quotes") or {}).get(symbol) or {}
         if not q:
             return {"ticker": symbol, "error": "no quote"}
@@ -999,5 +1018,8 @@ def test_swing_attached_when_intraday_no_trade(mock_ctx, _prior, _obs):
     # Preferred liquid + mocked 5d momentum should clear quality floor
     assert swing is not None
     assert swing["horizon"] == "Swing"
-    assert swing["symbol"] in ("TSLA", "NVDA", "META", "QQQ", "AVGO", "AMD", "SMH", "SPY")
+    assert swing["symbol"] in (
+        "TSLA", "NVDA", "META", "MSFT", "AAPL", "AMZN", "GOOGL",
+        "QQQ", "SPY", "SMH", "XLK",
+    )
 

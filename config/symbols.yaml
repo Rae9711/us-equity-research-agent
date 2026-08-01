@@ -23,6 +23,10 @@ stocks:
   - META
   - GOOGL
   - TSLA
+  - AMD
+  - MU
+  - AVGO
+  - ARM
 
 fred:
   DGS10: DGS10
@@ -53,6 +57,10 @@ news:
     - META
     - GOOGL
     - TSLA
+    - AMD
+    - MU
+    - AVGO
+    - ARM
   rss:
     - url: https://feeds.bloomberg.com/markets/news.rss
       name: Bloomberg

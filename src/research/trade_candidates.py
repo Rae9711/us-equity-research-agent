@@ -3,10 +3,15 @@
 Scoring uses today's tradeability (pre-market gap, RS, expected return) not yesterday strength.
 
 ADVISORY ONLY — 不构成投资建议. No auto-trading.
+Paper ambition (not a guarantee): bias toward setups with positive *calibrated*
+expected R so compounding toward ~10%/mo is *plausible* when edge is real.
+``expected_return_pct`` is geometric target distance — not EV. Deploy gate uses
+expected_R = p×R − (1−p)×1 plus a soft geometric-upside floor.
 
 final_score formula (documented):
     rr_weight = clamp(risk_reward / 2, 0.5, 1.5)
     final_score = win_prob * max(expected_return_pct, 0) * rr_weight / 100
+    # ranking companion: expected_r used as the economic Pass/BUY gate
 """
 
 from __future__ import annotations
@@ -15,6 +20,13 @@ import json
 from datetime import date, time
 from typing import Any, Literal
 
+from src.collectors.config import load_symbols
+from src.paper.allocation import (
+    MIN_EXPECTED_R,
+    MIN_GEOMETRIC_UPSIDE_PCT,
+    MIN_RR_TO_DEPLOY,
+    expected_r as calibrated_expected_r,
+)
 from src.research.decision_transparency import (
     add_win_prob_delta,
     build_decision_transparency,
@@ -36,35 +48,63 @@ from src.utils.paths import data_root
 from src.utils.quote_resolve import session_observation
 from src.utils.trading_calendar import prior_trading_day
 
-CANDIDATE_SYMBOLS = [
-    "TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM",
-    "SMH", "QQQ", "SPY", "TQQQ",
-]
+# Futures / rates / FX — tracked for context, not equity trade candidates.
+_NON_EQUITY_MARKET_KEYS = frozenset({
+    "ES", "VIX", "DXY", "TEN_Y", "TEN_Y_FRED",
+})
+
+
+def _build_candidate_universe() -> tuple[list[str], frozenset[str], dict[str, str]]:
+    """Derive tradeable stocks + equity indexes/ETFs from ``config/symbols.yaml``."""
+    cfg = load_symbols()
+    stocks = [str(s).upper() for s in (cfg.get("stocks") or [])]
+    section: dict[str, str] = {s: "stocks" for s in stocks}
+
+    market_syms: list[str] = []
+    for key in cfg.get("market") or {}:
+        sym = str(key).upper()
+        if sym in _NON_EQUITY_MARKET_KEYS:
+            continue
+        market_syms.append(sym)
+        section[sym] = "market"
+
+    sector_syms: list[str] = []
+    for key in cfg.get("sectors") or {}:
+        sym = str(key).upper()
+        sector_syms.append(sym)
+        section[sym] = "sector"
+
+    # Stable order: Mag7+semis (config), then market ETFs, then sector ETFs.
+    ordered = list(dict.fromkeys([*stocks, *market_syms, *sector_syms]))
+    return ordered, frozenset(stocks), section
+
+
+CANDIDATE_SYMBOLS, _STOCK_SYMBOLS, _SYMBOL_SECTION = _build_candidate_universe()
 ADVISORY_TAG = "ADVISORY — 不构成投资建议"
 FINAL_SCORE_THRESHOLD = 2.5
 EXTENDED_GAP_PCT = 4.0
-MIN_UPSIDE_PCT = 1.0
+# Soft geometric upside floor (distance to target). Primary gate is expected_R.
+MIN_UPSIDE_PCT = MIN_GEOMETRIC_UPSIDE_PCT
 
-_STOCK_SYMBOLS = frozenset({"TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM"})
+# Known semi names (for RS vs SMH / edge tags) — may include names outside the
+# live candidate list when unit tests score them directly.
 _SEMI_SYMBOLS = frozenset({"NVDA", "AMD", "MU", "AVGO", "ARM", "SMH"})
-# Liquid names preferred for multi-day / swing positions (not 0DTE).
-_SWING_PREFERRED = ("NVDA", "META", "QQQ", "AVGO", "AMD", "TSLA", "SMH", "SPY")
+# Liquid Mag7 + index ETFs preferred for multi-day / swing positions (not 0DTE).
+_SWING_PREFERRED = (
+    "NVDA", "META", "MSFT", "AAPL", "AMZN", "GOOGL", "TSLA",
+    "QQQ", "SPY", "SMH", "XLK",
+)
 _SWING_MIN_QUALITY = 2.0  # independent of intraday BUY/Small threshold
 
-_SYMBOL_SECTION: dict[str, str] = {
-    "QQQ": "market",
-    "SPY": "market",
-    "TQQQ": "market",
-    "SMH": "sector",
-    "NVDA": "stocks",
-    "TSLA": "stocks",
-    "AMD": "stocks",
-    "MU": "stocks",
-    "AVGO": "stocks",
-    "META": "stocks",
-    "ARM": "stocks",
-}
 
+def _is_equity_etf(symbol: str) -> bool:
+    """True for market/sector ETFs from symbols.yaml (not single-name stocks)."""
+    return _SYMBOL_SECTION.get(symbol.upper()) in ("market", "sector")
+
+
+def _is_stock_instrument(symbol: str) -> bool:
+    """Single-name equity (Mag7 or ad-hoc scored ticker), not an index/sector ETF."""
+    return not _is_equity_etf(symbol)
 
 def _has_market_data(obs: dict[str, Any], q: dict[str, Any]) -> bool:
     if obs.get("error") and not q:
@@ -252,14 +292,14 @@ def _instrument(symbol: str, direction: str, p9: dict[str, Any]) -> str:
             return f"{symbol} 0DTE Call"
         if buy_options and buy_call:
             return f"{symbol} Call"
-        return "Stock" if symbol in _STOCK_SYMBOLS else "ETF"
+        return "Stock" if _is_stock_instrument(symbol) else "ETF"
     if direction == "SHORT":
         if zero_dte and buy_put:
             return f"{symbol} 0DTE Put"
         if buy_options and buy_put:
             return f"{symbol} Put"
         # Stock shorts are not 0DTE options — label underlying correctly
-        return "Stock" if symbol in _STOCK_SYMBOLS else "ETF"
+        return "Stock" if _is_stock_instrument(symbol) else "ETF"
     return "—"
 
 
@@ -570,10 +610,13 @@ def _apply_price_based_return(
 
 
 def _enforce_level_invariants(slot: dict[str, Any]) -> dict[str, Any]:
-    """Reject slots whose entry/stop/target geometry or price ER is inconsistent.
+    """Reject slots whose entry/stop/target geometry or EV is inconsistent.
 
     LONG: stop < entry ≤ target; SHORT: target ≤ entry < stop.
-    Actionable BUY/Small requires ER ≥ MIN_UPSIDE_PCT after price reconciliation.
+    Actionable BUY/Small requires calibrated expected_R ≥ floor and soft
+    geometric upside. Hard R:R is enforced at *paper entry* (allocation), not
+    as a Pass knife on research ranking — so weak heuristic RR still surfaces
+    for inspection while live sizing refuses bad asymmetry.
     """
     direction = str(slot.get("direction") or "")
     entry_px = _safe_float(slot.get("entry_price"))
@@ -595,13 +638,25 @@ def _enforce_level_invariants(slot: dict[str, Any]) -> dict[str, Any]:
     slot["levels_valid"] = bool(levels_ok)
 
     er = _safe_float(slot.get("expected_return_pct"))
+    wp = _safe_float(slot.get("win_prob"))
+    rr = _safe_float(slot.get("risk_reward"))
+    if rr is None and entry_px and stop_px and target_px and abs(entry_px - stop_px) > 0:
+        rr = abs(target_px - entry_px) / abs(entry_px - stop_px)
+        slot["risk_reward"] = round(rr, 2)
+    ev = calibrated_expected_r(win_prob=wp, rr=rr)
+    slot["expected_r"] = ev
+    if rr is not None and rr < MIN_RR_TO_DEPLOY:
+        slot["rr_below_hard_min"] = True
+
     reasons: list[str] = []
     if not levels_ok:
         reasons.append("Levels invalid: entry/stop/target geometry")
     if er is not None and er < 0:
         reasons.append(f"Price ER {er:+.2f}% < 0")
+    if ev is not None and ev < MIN_EXPECTED_R:
+        reasons.append(f"Expected R {ev:.2f} < {MIN_EXPECTED_R:.2f} (EV gate)")
     if er is not None and er < MIN_UPSIDE_PCT:
-        reasons.append(f"Price ER {er:.2f}% < {MIN_UPSIDE_PCT}%")
+        reasons.append(f"Geometric upside {er:.2f}% < soft {MIN_UPSIDE_PCT}%")
 
     actionable = slot.get("trade_action") in ("BUY", "Small")
     if actionable and reasons:
@@ -618,10 +673,17 @@ def _enforce_level_invariants(slot: dict[str, Any]) -> dict[str, Any]:
 
 
 def _slot_is_actionable(slot: dict[str, Any]) -> bool:
+    er = _safe_float(slot.get("expected_return_pct")) or 0
+    rr = _safe_float(slot.get("risk_reward"))
+    wp = _safe_float(slot.get("win_prob"))
+    ev = slot.get("expected_r")
+    if ev is None:
+        ev = calibrated_expected_r(win_prob=wp, rr=rr)
     return (
         slot.get("trade_action") in ("BUY", "Small")
         and slot.get("levels_valid", True)
-        and (_safe_float(slot.get("expected_return_pct")) or 0) >= MIN_UPSIDE_PCT
+        and er >= MIN_UPSIDE_PCT
+        and (ev is None or ev >= MIN_EXPECTED_R)
     )
 
 
@@ -907,15 +969,23 @@ def _score_candidate_v2(
     )
     score_formula = _score_formula_display(win_prob, expected_return_pct, risk_reward)
 
-    if expected_return_pct < MIN_UPSIDE_PCT:
+    ev_r = calibrated_expected_r(win_prob=win_prob, rr=risk_reward)
+    # Scoring-stage gate uses calibrated EV + soft geometric upside.
+    # Hard R:R floor applies later on *planned* entry/stop/target levels
+    # (see _enforce_level_invariants / paper allocation) — not on expected-range RR.
+    if ev_r is not None and ev_r < MIN_EXPECTED_R:
         trade_action = "Pass"
-        why_factors.append(f"上行空间 <{MIN_UPSIDE_PCT}%")
-    elif final_score >= 8.0 and expected_return_pct >= 1.5:
+        why_factors.append(f"期望R {ev_r:.2f} < {MIN_EXPECTED_R:.2f}（EV门禁）")
+    elif expected_return_pct < MIN_UPSIDE_PCT:
+        trade_action = "Pass"
+        why_factors.append(f"几何上行 <{MIN_UPSIDE_PCT}%（软门槛）")
+    elif final_score >= 8.0:
         trade_action = "BUY"
-    elif final_score >= FINAL_SCORE_THRESHOLD or expected_return_pct >= 1.2:
+    elif final_score >= FINAL_SCORE_THRESHOLD:
         trade_action = "Small"
     else:
-        trade_action = "Pass"
+        # EV + soft upside cleared; weak score still tradeable as Small.
+        trade_action = "Small"
 
     return {
         "symbol": symbol,
@@ -930,6 +1000,7 @@ def _score_candidate_v2(
         "downside_risk_pct": round(downside_risk_pct, 2),
         "risk_reward": risk_reward,
         "rr_display": rr_display,
+        "expected_r": ev_r,
         "final_score": final_score,
         "trade_action": trade_action,
         "trade": trade_action,
@@ -1716,7 +1787,7 @@ def compute_swing_opportunity(
     if not levels.get("levels_valid"):
         return None
 
-    instrument = "Stock" if sym in _STOCK_SYMBOLS else "ETF"
+    instrument = "Stock" if _is_stock_instrument(sym) else "ETF"
     why: list[str] = []
     if sym in _SWING_PREFERRED:
         why.append(f"高流动性波段标的 {sym}")

@@ -138,8 +138,98 @@ def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> N
         )
 
 
+def _closed_trade_pnls(account: dict[str, Any], limit: int = 30) -> list[float]:
+    """Realised PnL per closing action (full EXIT + partial SCALE_OUT), newest last."""
+    pnls: list[float] = []
+    for t in account.get("trades") or []:
+        if t.get("voided"):
+            continue
+        if t.get("action") in ("EXIT", "SCALE_OUT") and t.get("pnl") is not None:
+            try:
+                pnls.append(float(t["pnl"]))
+            except (TypeError, ValueError):
+                continue
+    return pnls[-limit:]
+
+
+def rolling_expectancy(pnls: list[float]) -> dict[str, Any]:
+    """Win rate, avg win/loss, profit factor and per-trade expectancy ($)."""
+    n = len(pnls)
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    gross_win = sum(wins)
+    gross_loss = abs(sum(losses))
+    win_rate = (len(wins) / n) if n else 0.0
+    avg_win = (gross_win / len(wins)) if wins else 0.0
+    avg_loss = (gross_loss / len(losses)) if losses else 0.0
+    profit_factor = (gross_win / gross_loss) if gross_loss > 0 else (99.0 if gross_win > 0 else 0.0)
+    expectancy = (sum(pnls) / n) if n else 0.0
+    return {
+        "n": n,
+        "win_rate": round(win_rate, 3),
+        "avg_win": round(avg_win, 2),
+        "avg_loss": round(avg_loss, 2),
+        "profit_factor": round(profit_factor, 2),
+        "expectancy": round(expectancy, 2),
+    }
+
+
+def adaptive_risk_pct(
+    current: float,
+    stats: dict[str, Any],
+    *,
+    min_trades: int = 5,
+    floor: float = 0.35,
+    cap: float = 3.0,
+    base: float = 1.5,
+) -> tuple[float, str | None]:
+    """Map realised expectancy → next risk_pct within [floor, cap].
+
+    Ambition math (advisory, **not a guarantee**):
+      monthly ≈ n_trades × E[R] × risk_pct
+    When rolling edge is positive, raise risk toward ``cap`` so high-EV setups
+    can deploy into the ~80% sleeve. When negative, collapse to ``floor``
+    (edge-pause companion). Cold start nudges gently toward ``base``.
+    """
+    n = int(stats.get("n") or 0)
+    if n < min_trades:
+        nudged = round(current + (base - current) * 0.25, 2)
+        if abs(nudged - current) < 0.01:
+            return current, None
+        return nudged, f"样本不足({n}<{min_trades})，风险回归基准 {nudged}%"
+
+    pf = float(stats.get("profit_factor") or 0.0)
+    exp = float(stats.get("expectancy") or 0.0)
+    wr = float(stats.get("win_rate") or 0.0)
+    avg_win = float(stats.get("avg_win") or 0.0)
+    avg_loss = abs(float(stats.get("avg_loss") or 0.0))
+    # Approximate realised E[R] from $ expectancy / avg |loss| when available.
+    realised_er = (exp / avg_loss) if avg_loss > 0 else 0.0
+
+    # Positive, robust edge → scale up toward monthly-ambition risk; broken → floor.
+    if exp > 0 and pf >= 1.2 and wr >= 0.4:
+        # More headroom when payoff asymmetry is healthy (avg_win ≥ avg_loss).
+        asymmetry_bonus = 0.35 if avg_win >= avg_loss else 0.0
+        er_bonus = min(0.6, max(0.0, realised_er) * 0.5)
+        target = base + min(cap - base, (pf - 1.2) * 0.8 + asymmetry_bonus + er_bonus)
+    elif exp <= 0 or pf < 0.9:
+        target = floor  # bleed → minimum risk until edge recovers
+    else:
+        target = base
+    target = max(floor, min(cap, target))
+    # Smooth toward the target so one window doesn't whipsaw sizing.
+    nxt = round(current + (target - current) * 0.5, 2)
+    nxt = max(floor, min(cap, nxt))
+    if abs(nxt - current) < 0.01:
+        return current, None
+    return nxt, (
+        f"滚动{n}笔 PF={pf:.2f} 期望={exp:+.2f} 胜率={wr:.0%} → risk_pct {current}→{nxt}%"
+        f"（月≈n×E[R]×risk%，目标约10%非保证）"
+    )
+
+
 def record_evening_learning(trading_date: str) -> dict[str, Any]:
-    """After Step 7/8: compare paper outcomes vs morning plan; stub param tweak."""
+    """After Step 7/8: compare paper outcomes vs plan; adapt risk from expectancy."""
     account = load_account()
     morning = _load_json(morning_json_path(trading_date))
     step7 = _load_json(step_json_path(7, trading_date))
@@ -156,7 +246,7 @@ def record_evening_learning(trading_date: str) -> dict[str, Any]:
         for t in (account.get("trades") or [])
         if t.get("trading_date") == trading_date
     ]
-    exits = [t for t in day_trades if t.get("action") == "EXIT"]
+    exits = [t for t in day_trades if t.get("action") in ("EXIT", "SCALE_OUT")]
     entries = [t for t in day_trades if t.get("action") == "ENTRY"]
 
     day_pnl = sum(float(t.get("pnl") or 0) for t in exits)
@@ -182,6 +272,9 @@ def record_evening_learning(trading_date: str) -> dict[str, Any]:
     except Exception:
         pass
 
+    # Rolling realised expectancy across recent closed trades (evidence).
+    stats = rolling_expectancy(_closed_trade_pnls(account))
+
     note = {
         "type": "evening_review",
         "trading_date": trading_date,
@@ -192,21 +285,34 @@ def record_evening_learning(trading_date: str) -> dict[str, Any]:
         "win": win,
         "entries": len(entries),
         "exits": len(exits),
+        "rolling_stats": stats,
         "lesson": (lesson or "")[:400] if lesson else None,
         "surprise": (surprise or "")[:400] if surprise else None,
         "step8_one_liner": (step8.get("conclusion") or {}).get("one_liner"),
         "advisory_zh": "模拟复盘 · 不构成投资建议",
     }
 
-    # Stub calibration: nudge risk_pct slightly after losses / wins
+    # Evidence-based sizing: scale risk_pct from rolling expectancy, not per-day noise.
+    # Cap rises toward ~10%/mo ambition only when edge is proven (see adaptive_risk_pct).
     params = account.setdefault("params", {})
-    risk = float(params.get("risk_pct") or 1.0)
-    if win is True and risk < 1.5:
-        params["risk_pct"] = round(min(1.5, risk + 0.05), 2)
-        note["param_adjust"] = f"risk_pct {risk} → {params['risk_pct']} (win)"
-    elif win is False and risk > 0.5:
-        params["risk_pct"] = round(max(0.5, risk - 0.05), 2)
-        note["param_adjust"] = f"risk_pct {risk} → {params['risk_pct']} (loss)"
+    if bool(params.get("adaptive_risk", True)):
+        risk = float(params.get("risk_pct") or 1.5)
+        floor = float(params.get("adaptive_risk_floor") or 0.35)
+        cap = float(params.get("adaptive_risk_cap") or 3.0)
+        from src.paper.account import DEFAULT_PARAMS
+
+        adapt_base = float(DEFAULT_PARAMS.get("risk_pct") or 1.5)
+        new_risk, adj_note = adaptive_risk_pct(
+            risk, stats, floor=floor, cap=cap, base=adapt_base
+        )
+        if adj_note:
+            params["risk_pct"] = new_risk
+            note["param_adjust"] = adj_note
+        account["learning_stats"] = {
+            **stats,
+            "risk_pct": params.get("risk_pct"),
+            "updated_for": trading_date,
+        }
 
     append_journal(account, note)
     save_account(account)

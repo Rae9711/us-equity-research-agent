@@ -21,6 +21,7 @@ from src.paper.account import (
     open_positions,
 )
 from src.paper.allocation import allocate_for_entry
+from src.paper.exits import plan_eod_exit, plan_exit, runner_target, update_water_marks
 from src.paper.broker_sim import (
     InsufficientCashError,
     NonsensePriceError,
@@ -35,12 +36,14 @@ from src.paper.price_guard import (
     is_sane_fill_price,
 )
 from src.paper.signals import (
+    bar_path_prices,
     load_candidate_signals,
     normalize_slot,
     pick_intraday_signal,
     pick_signal,
     pick_swing_signal,
     resolve_quote,
+    resolve_session_bar,
 )
 from src.research.entry_status import infer_session_phase
 
@@ -118,8 +121,15 @@ def _manage_position(
     direction = (pos.get("direction") or "LONG").upper()
     if price_map and sym in price_map:
         px, qsrc = price_map[sym], "forced"
+        bar = {"high": px, "low": px, "last": px}
     else:
         px, qsrc = resolve_quote(sym, trading_date, raw=raw, prefer_live=True)
+        bar = resolve_session_bar(sym, trading_date, raw=raw) if bool(
+            params.get("use_bar_path_exits", True)
+        ) else {"high": px, "low": px, "last": px}
+        if px is None and bar.get("last") is not None:
+            px = float(bar["last"])
+            qsrc = "raw_bar"
 
     base: dict[str, Any] = {
         "book": book,
@@ -154,55 +164,130 @@ def _manage_position(
         base["quote_rejected"] = True
         return base
 
-    stop = _safe_float(pos.get("stop"))
     target = _safe_float(pos.get("target"))
     horizon = (pos.get("horizon") or ("Swing" if book == BOOK_SWING else "Intraday")).lower()
+    manage = bool(params.get("exit_management", True))
 
-    if _stop_hit(direction, px, stop):
-        trade = execute_exit(
-            account,
-            price=px,
-            reason=f"{label}止损触发 @ {px} (stop={stop})",
-            trading_date=trading_date,
-            book=book,
-        )
-        base["action"] = "EXIT"
-        base["reason"] = trade["reason"]
-        base["trade"] = trade
-        return base
+    # Walk a conservative high/low path so stops/targets between ticks are not missed.
+    path = bar_path_prices(
+        direction=direction,
+        last=float(px),
+        high=_safe_float(bar.get("high")),
+        low=_safe_float(bar.get("low")),
+    )
+    for tick_px in path:
+        pos = get_position(account, book)
+        if not pos:
+            break
+        update_water_marks(pos, tick_px)
 
-    if _target_hit(direction, px, target):
-        trade = execute_exit(
-            account,
-            price=px,
-            reason=f"{label}止盈触发 @ {px} (target={target})",
-            trading_date=trading_date,
-            book=book,
-        )
-        base["action"] = "EXIT"
-        base["reason"] = trade["reason"]
-        base["trade"] = trade
-        return base
+        if manage:
+            plan = plan_exit(pos, tick_px, params)
+            if plan.get("action") == "scale_out":
+                if plan.get("new_stop") is not None:
+                    pos["stop"] = plan["new_stop"]
+                trade = execute_exit(
+                    account,
+                    price=tick_px,
+                    reason=f"{label}{plan.get('reason') or '分批止盈'} @ {tick_px}",
+                    trading_date=trading_date,
+                    book=book,
+                    shares=plan.get("shares"),
+                )
+                base["action"] = "SCALE_OUT"
+                base["reason"] = trade["reason"]
+                base["trade"] = trade
+                base["quote"] = tick_px
+                return base
+            if plan.get("new_stop") is not None:
+                pos["stop"] = plan["new_stop"]
+                if plan.get("stop_note"):
+                    base["stop_note"] = plan["stop_note"]
 
-    force_eod = bool(params.get("force_exit_intraday_at_close", True))
+        stop = _safe_float(pos.get("stop"))
+        check_target = target
+        if manage and pos.get("scaled_out"):
+            rt = runner_target(pos, params)
+            if rt is not None:
+                check_target = rt
+
+        if _stop_hit(direction, tick_px, stop):
+            trade = execute_exit(
+                account,
+                price=tick_px,
+                reason=f"{label}止损触发 @ {tick_px} (stop={stop})",
+                trading_date=trading_date,
+                book=book,
+            )
+            base["action"] = "EXIT"
+            base["reason"] = trade["reason"]
+            base["trade"] = trade
+            base["quote"] = tick_px
+            return base
+
+        if _target_hit(direction, tick_px, check_target):
+            trade = execute_exit(
+                account,
+                price=tick_px,
+                reason=f"{label}止盈触发 @ {tick_px} (target={check_target})",
+                trading_date=trading_date,
+                book=book,
+            )
+            base["action"] = "EXIT"
+            base["reason"] = trade["reason"]
+            base["trade"] = trade
+            base["quote"] = tick_px
+            return base
+
+    # Soft EOD for intraday book: don't blindly cut winners.
     is_swing = book == BOOK_SWING or "swing" in horizon
-    if force_eod and not is_swing and phase == "closed":
-        trade = execute_exit(
-            account,
-            price=px,
-            reason=f"短线仓位收盘平仓 @ {px}",
-            trading_date=trading_date,
-            book=book,
-        )
-        base["action"] = "EXIT"
-        base["reason"] = trade["reason"]
-        base["trade"] = trade
-        return base
+    if not is_swing and phase == "closed":
+        pos = get_position(account, book)
+        if pos:
+            eod = plan_eod_exit(pos, float(px), params)
+            if eod.get("new_stop") is not None:
+                pos["stop"] = eod["new_stop"]
+            if eod.get("action") == "scale_out":
+                trade = execute_exit(
+                    account,
+                    price=float(px),
+                    reason=f"{label}{eod.get('reason') or '收盘减仓'} @ {px}",
+                    trading_date=trading_date,
+                    book=book,
+                    shares=eod.get("shares"),
+                )
+                if eod.get("promote_overnight"):
+                    pos2 = get_position(account, book)
+                    if pos2:
+                        pos2["eod_runner"] = True
+                base["action"] = "SCALE_OUT"
+                base["reason"] = trade["reason"]
+                base["trade"] = trade
+                return base
+            if eod.get("action") == "exit":
+                trade = execute_exit(
+                    account,
+                    price=float(px),
+                    reason=eod.get("reason") or f"短线仓位收盘平仓 @ {px}",
+                    trading_date=trading_date,
+                    book=book,
+                )
+                base["action"] = "EXIT"
+                base["reason"] = trade["reason"]
+                base["trade"] = trade
+                return base
+            if eod.get("promote_overnight"):
+                pos["eod_runner"] = True
+                base["reason"] = eod.get("reason") or (
+                    f"{label}持仓 {sym} 收盘保留过夜"
+                )
+                mark_to_market(account, price_by_symbol={sym: float(px)})
+                return base
 
-    mark_to_market(account, price_by_symbol={sym: px})
+    mark_to_market(account, price_by_symbol={sym: float(px)})
     base["reason"] = (
-        f"{label}持仓 {sym} {direction} {pos.get('shares')}股 @ {pos.get('avg_entry')}；"
-        f"现价 {px}，未触止损/止盈"
+        f"{label}持仓 {sym} {direction} {pos.get('shares') if pos else '?'}股"
+        f" @ {(pos or {}).get('avg_entry')}；现价 {px}，未触止损/止盈"
     )
     return base
 
@@ -347,7 +432,7 @@ def _try_entry(
 
 
 def _aggregate(books: list[dict[str, Any]], trading_date: str, phase: str) -> dict[str, Any]:
-    priority = {"EXIT": 0, "ENTRY": 1, "WAIT": 2, "HOLD": 3, "SKIP": 4}
+    priority = {"EXIT": 0, "SCALE_OUT": 1, "ENTRY": 2, "WAIT": 3, "HOLD": 4, "SKIP": 5}
     best = None
     for row in books:
         if best is None or priority.get(row["action"], 9) < priority.get(best["action"], 9):
