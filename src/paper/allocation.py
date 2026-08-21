@@ -4,7 +4,7 @@ ADVISORY ONLY — 模拟交易 · 不构成投资建议.
 
 Ambition (advisory, **not a guarantee**): pursue setups whose *calibrated*
 expected R is positive so the book can *plausibly* compound toward ~10%/month
-when edge is real — while keeping stop / correlation / edge-pause controls.
+when edge is real — while keeping stop / correlation / min-risk-on-drawdown controls.
 
 Separate (quant-research discipline):
   - FORECAST: win_prob (model/heuristic)
@@ -15,8 +15,9 @@ Separate (quant-research discipline):
 Sizing math (comment for the ~10%/mo ambition):
   monthly ≈ n_trades × E[R] × risk_pct
   e.g. 8 trades × 0.40 R expectancy × 3.0% risk ≈ 9.6% — *if* edge is real.
-  Raise effective risk only when rolling expectancy is positive; otherwise pause /
-  min-risk. ``expected_return_pct`` is *target distance*, not EV — do not gate on it alone.
+  Raise effective risk only when rolling expectancy is positive; otherwise size
+  at min-risk (keep taking qualifying setups — a hard pause can never recover).
+  ``expected_return_pct`` is *target distance*, not EV — do not gate on it alone.
 """
 
 from __future__ import annotations
@@ -46,21 +47,22 @@ INTRADAY_SATELLITE_SHARE = 0.40
 
 # --- Economic gates (EV / expected R is primary; geometric upside is soft) ---
 # expected_R = p × reward_R − (1−p) × 1.0   (reward_R = R:R from levels)
-MIN_EXPECTED_R = 0.15
+MIN_EXPECTED_R = 0.20
 # Soft floor on distance-to-target (%). NOT the primary EV gate.
 MIN_GEOMETRIC_UPSIDE_PCT = 1.5
 # Enforce payoff asymmetry before entry (avg loss ≫ avg win fix starts here).
 MIN_RR_TO_DEPLOY = 1.5
-MIN_WIN_PROB_TO_DEPLOY = 52.0
+MIN_WIN_PROB_TO_DEPLOY = 58.0
 # Softened companions when expected_R already clears.
-SOFT_WIN_PROB_WHEN_EV_OK = 50.0
+SOFT_WIN_PROB_WHEN_EV_OK = 52.0
 SOFT_RR_WHEN_EV_OK = 1.35
-# Skip new risk when recent closed expectancy is broken.
+# Broken rolling edge → min-risk probe, not a hard pause (no trades ⇒ edge
+# cannot recover). Daily loss circuit breaker still stops the session.
 EDGE_PAUSE_MIN_TRADES = 5
 EDGE_PAUSE_MAX_PF = 0.9
 # Reject setups whose stop is so wide that one loss dominates the day.
-MAX_STOP_PCT_INTRADAY = 5.0
-MAX_STOP_PCT_SWING = 8.0
+MAX_STOP_PCT_INTRADAY = 3.5
+MAX_STOP_PCT_SWING = 6.0
 
 
 def _safe_float(value: Any) -> float | None:
@@ -207,12 +209,14 @@ def risk_and_cap_pct(
     sole_book: bool = True,
     expected_r_val: float | None = None,
     edge_positive: bool = False,
+    edge_broken: bool = False,
 ) -> tuple[float, float, list[str]]:
     """Return (risk_pct, max_position_pct, rationale bullets).
 
     When ``edge_positive`` (rolling expectancy > 0), allow risk toward MAX so
     high-EV setups can actually use the ~80% deployable sleeve (not stuck at
-    1% risk → ~30% notional forever).
+    1% risk → ~30% notional forever). When ``edge_broken``, keep trading at
+    ``MIN_RISK_PCT`` so the book still collects outcomes.
     """
     reasons: list[str] = []
     wp = float(win_prob or 50.0)
@@ -269,13 +273,18 @@ def risk_and_cap_pct(
             risk *= 1.10
             reasons.append(f"几何上行 {remaining_er:.1f}% 充足")
 
-    if edge_positive:
-        risk *= 1.10
-        reasons.append("滚动期望为正 → 提高风险预算（朝月10%目标，非保证）")
-
-    # Confidence blend
-    risk *= 0.75 + 0.5 * confidence
-    risk = _clamp(risk, MIN_RISK_PCT, risk_cap)
+    if edge_broken:
+        risk = MIN_RISK_PCT
+        reasons.append(
+            f"滚动期望为负/PF偏低 → 轻仓试错（风险 {MIN_RISK_PCT:g}%），不停单"
+        )
+    else:
+        if edge_positive:
+            risk *= 1.10
+            reasons.append("滚动期望为正 → 提高风险预算（朝月10%目标，非保证）")
+        # Confidence blend
+        risk *= 0.75 + 0.5 * confidence
+        risk = _clamp(risk, MIN_RISK_PCT, risk_cap)
 
     if base_max_position_pct is not None:
         cap = min(float(base_max_position_pct), float(horizon_cap))
@@ -295,6 +304,61 @@ def risk_and_cap_pct(
     return round(risk, 2), round(cap, 1), reasons
 
 
+def daily_realized_pnl(account: dict[str, Any], trading_date: str) -> float:
+    """Sum EXIT/SCALE_OUT pnl for ``trading_date``."""
+    total = 0.0
+    for t in account.get("trades") or []:
+        if t.get("voided"):
+            continue
+        if t.get("trading_date") != trading_date:
+            continue
+        if t.get("action") not in ("EXIT", "SCALE_OUT"):
+            continue
+        try:
+            total += float(t.get("pnl") or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
+def daily_loss_breach(account: dict[str, Any], trading_date: str) -> tuple[bool, str]:
+    """True when today's realized loss hits ``max_daily_loss_pct`` of starting equity."""
+    params = account.get("params") or {}
+    cap = float(params.get("max_daily_loss_pct") or 0.0)
+    if cap <= 0:
+        return False, ""
+    starting = float(account.get("starting_cash") or STARTING_CASH)
+    if starting <= 0:
+        return False, ""
+    day_pnl = daily_realized_pnl(account, trading_date)
+    loss_pct = (-day_pnl / starting) * 100.0 if day_pnl < 0 else 0.0
+    if loss_pct >= cap:
+        return True, (
+            f"保留现金：当日已亏 {loss_pct:.2f}% ≥ 日亏熔断 {cap:.1f}% "
+            f"（日盈亏 ${day_pnl:+.2f}），暂停新开仓"
+        )
+    return False, ""
+
+
+def rolling_edge_broken(stats: dict[str, Any] | None) -> bool:
+    """True when recent closed trades show negative expectancy or weak PF."""
+    row = stats or {}
+    n = int(row.get("n") or 0)
+    pf = float(row.get("profit_factor") or 0.0)
+    exp = float(row.get("expectancy") or 0.0)
+    return n >= EDGE_PAUSE_MIN_TRADES and (pf < EDGE_PAUSE_MAX_PF or exp < 0)
+
+
+def rolling_edge_probe_note(stats: dict[str, Any] | None) -> str:
+    row = stats or {}
+    n = int(row.get("n") or 0)
+    pf = float(row.get("profit_factor") or 0.0)
+    return (
+        f"轻仓试错：近{n}笔期望为负/PF={pf:.2f}<{EDGE_PAUSE_MAX_PF:.1f}"
+        f"，风险压到 {MIN_RISK_PCT:g}%，不停单"
+    )
+
+
 def should_hold_cash(
     *,
     action: str,
@@ -312,22 +376,14 @@ def should_hold_cash(
 
     Primary economic gate = calibrated expected_R (and hard min R:R).
     Geometric upside (remaining_er / expected_return_pct) is a soft companion only.
+    Broken rolling edge is *not* a hold — it sizes down in ``risk_and_cap_pct``.
+    ``edge_stats`` is accepted for call-site compatibility and ignored here.
     """
     if action in ("wait", "skip"):
         return False, ""
     st = (entry_status or "").upper()
     if st not in ("READY", "TRIGGERED"):
         return False, ""
-
-    # Broken recent edge → sit in cash until expectancy recovers.
-    stats = edge_stats or {}
-    n = int(stats.get("n") or 0)
-    pf = float(stats.get("profit_factor") or 0.0)
-    exp = float(stats.get("expectancy") or 0.0)
-    if n >= EDGE_PAUSE_MIN_TRADES and (pf < EDGE_PAUSE_MAX_PF or exp < 0):
-        return True, (
-            f"保留现金：近{n}笔期望为负/PF={pf:.2f}<{EDGE_PAUSE_MAX_PF:.1f}，暂停新开仓"
-        )
 
     # Hard R:R — payoff asymmetry must be in the plan before risking capital.
     if rr is not None and rr < MIN_RR_TO_DEPLOY:
@@ -399,6 +455,7 @@ def allocate_for_entry(
     quote: float,
     entry_status: dict[str, Any] | str | None = None,
     peer_entering: bool = False,
+    trading_date: str | None = None,
 ) -> dict[str, Any]:
     """Compute allocation decision for one potential entry.
 
@@ -465,8 +522,10 @@ def allocate_for_entry(
     from src.paper.journal import _closed_trade_pnls, rolling_expectancy
 
     edge_stats = rolling_expectancy(_closed_trade_pnls(account))
+    edge_broken = rolling_edge_broken(edge_stats)
     edge_positive = (
-        int(edge_stats.get("n") or 0) >= EDGE_PAUSE_MIN_TRADES
+        not edge_broken
+        and int(edge_stats.get("n") or 0) >= EDGE_PAUSE_MIN_TRADES
         and float(edge_stats.get("expectancy") or 0) > 0
         and float(edge_stats.get("profit_factor") or 0) >= 1.1
     )
@@ -484,6 +543,12 @@ def allocate_for_entry(
         expected_r_val=ev_r,
     )
 
+    # Daily loss circuit breaker (after other EV gates so reason is specific).
+    if not hold and trading_date:
+        day_hit, day_reason = daily_loss_breach(account, trading_date)
+        if day_hit:
+            hold, hold_reason = True, day_reason
+
     base_risk = float(params.get("risk_pct") or BASE_RISK_PCT)
     base_cap = _safe_float(params.get("max_position_pct"))
     other_book = BOOK_SWING if book == BOOK_INTRADAY else BOOK_INTRADAY
@@ -500,6 +565,7 @@ def allocate_for_entry(
         sole_book=sole_book,
         expected_r_val=ev_r,
         edge_positive=edge_positive,
+        edge_broken=edge_broken,
     )
 
     share = book_budget_share(
@@ -552,6 +618,8 @@ def allocate_for_entry(
             f"（{book_zh}预算 {share:.0%}·信心 {conf:.0%}·{ev_txt}）："
             + "；".join(size_reasons[:4])
         )
+        if edge_broken:
+            reason_zh = f"{rolling_edge_probe_note(edge_stats)} · {reason_zh}"
         if corr_note:
             reason_zh = f"{reason_zh}；{corr_note}"
 
@@ -569,6 +637,7 @@ def allocate_for_entry(
         "expected_r": ev_r,
         "remaining_er_pct": rem_er,
         "edge_positive": edge_positive,
+        "edge_broken": edge_broken,
         "corr_scale": round(corr_scale, 2),
         "corr_note": corr_note,
         "entry_status": status,

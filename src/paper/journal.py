@@ -189,7 +189,7 @@ def adaptive_risk_pct(
       monthly ≈ n_trades × E[R] × risk_pct
     When rolling edge is positive, raise risk toward ``cap`` so high-EV setups
     can deploy into the ~80% sleeve. When negative, collapse to ``floor``
-    (edge-pause companion). Cold start nudges gently toward ``base``.
+    (min-risk companion). Cold start nudges gently toward ``base``.
     """
     n = int(stats.get("n") or 0)
     if n < min_trades:

@@ -347,7 +347,8 @@ def test_decide_exit_on_stop(data_root):
         force_price=334.0,
     )
     assert decision["action"] == "EXIT"
-    assert "止损" in (decision["reason"] or "")
+    reason = decision["reason"] or ""
+    assert ("止损" in reason) or ("熔断" in reason)
     assert acct["position"] is None
 
 
@@ -408,7 +409,7 @@ def test_dual_books_enter_both_when_ready(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 95.0,
+        "stop_price": 97.0,
         "target_price": 110.0,
         "win_prob": 65,
         "expected_return_pct": 8.0,
@@ -419,7 +420,7 @@ def test_dual_books_enter_both_when_ready(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 93.0,
+        "stop_price": 95.0,
         "target_price": 130.0,
         "win_prob": 70,
         "expected_return_pct": 12.0,
@@ -493,7 +494,7 @@ def test_allocation_cash_reserve_bounds():
     assert hold is True
     assert "保留现金" in reason
 
-    # Broken rolling edge pauses new entries even on a clean setup.
+    # Broken rolling edge no longer freezes the book — setup still deploys.
     pause, pause_reason = should_hold_cash(
         action="enter",
         win_prob=70,
@@ -503,8 +504,8 @@ def test_allocation_cash_reserve_bounds():
         confidence=0.8,
         edge_stats={"n": 7, "profit_factor": 0.33, "expectancy": -32.0},
     )
-    assert pause is True
-    assert "暂停新开仓" in pause_reason
+    assert pause is False
+    assert pause_reason == ""
 
     # Wide stop rejected.
     wide, wide_reason = should_hold_cash(
@@ -590,7 +591,7 @@ def test_allocation_sizing_respects_reserve(data_root):
             "symbol": "ARM",
             "direction": "LONG",
             "entry_price": 100.0,
-            "stop_price": 95.0,
+            "stop_price": 97.0,
             "target_price": 110.0,
             "win_prob": 66,
             "expected_return_pct": 5.0,
@@ -606,6 +607,51 @@ def test_allocation_sizing_respects_reserve(data_root):
     assert alloc["deployable_cash"] <= acct["cash"] * 0.95
     assert alloc["max_position_pct"] >= 25.0  # solo intraday can size up
     assert "现金" in alloc["reason_zh"]
+
+
+def test_broken_rolling_edge_probes_at_min_risk(data_root):
+    """Drawdown must not freeze entries; size down so the book still trades."""
+    from src.paper.allocation import MIN_RISK_PCT, allocate_for_entry, risk_and_cap_pct
+
+    risk, _, reasons = risk_and_cap_pct(
+        confidence=0.8,
+        win_prob=70,
+        rr=2.0,
+        remaining_er=4.0,
+        horizon="Intraday",
+        edge_broken=True,
+    )
+    assert risk == MIN_RISK_PCT
+    assert any("轻仓试错" in r for r in reasons)
+
+    acct = default_account()
+    acct["trades"] = [
+        {"action": "EXIT", "pnl": -40.0, "voided": False} for _ in range(6)
+    ] + [
+        {"action": "EXIT", "pnl": 10.0, "voided": False} for _ in range(2)
+    ]
+    alloc = allocate_for_entry(
+        acct,
+        book="intraday",
+        signal={
+            "symbol": "MU",
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_price": 97.0,
+            "target_price": 110.0,
+            "win_prob": 66,
+            "expected_return_pct": 5.0,
+            "horizon": "Intraday",
+            "entry_status": {"status": "READY"},
+        },
+        quote=100.0,
+        entry_status={"status": "READY"},
+    )
+    assert alloc["hold_cash"] is False
+    assert alloc["edge_broken"] is True
+    assert alloc["risk_pct"] == MIN_RISK_PCT
+    assert "轻仓试错" in alloc["reason_zh"]
+    assert "不停单" in alloc["reason_zh"]
 
 
 def test_hold_cash_weak_setup(data_root):
@@ -694,7 +740,7 @@ def test_allocation_persisted_in_journal(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 95.0,
+        "stop_price": 97.0,
         "target_price": 112.0,
         "win_prob": 68,
         "expected_return_pct": 8.0,
