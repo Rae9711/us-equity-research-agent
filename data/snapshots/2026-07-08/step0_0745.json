@@ -1,0 +1,603 @@
+{
+  "label": "step0_0745",
+  "trading_date": "2026-07-08",
+  "decision_as_of": "2026-07-08T07:45:00-04:00",
+  "saved_at": "2026-07-08T17:13:46.907328-04:00",
+  "data": {
+    "collected_at": "2026-07-08T17:13:39.335880-04:00",
+    "data_as_of": "2026-07-08T17:13:39.335880-04:00",
+    "trading_date": "2026-07-08",
+    "prior_trading_day": "2026-07-07",
+    "checklist": {
+      "macro": {
+        "fed": false,
+        "pce": false,
+        "cpi": false,
+        "nfp_payrolls": false,
+        "unemployment_rate": false,
+        "avg_hourly_earnings": false,
+        "initial_claims": false,
+        "economic_calendar": false,
+        "nonfarm_countdown": true,
+        "nfp_release_day": false
+      },
+      "market": {
+        "SPY": true,
+        "QQQ": true,
+        "DIA": true,
+        "ES_futures": true,
+        "TQQQ": true,
+        "VIX": true,
+        "DXY": true,
+        "10Y": true
+      },
+      "sector": {
+        "XLK": true,
+        "SMH": true,
+        "XLF": true,
+        "XLE": true
+      },
+      "stocks": {
+        "NVDA": true,
+        "MSFT": true,
+        "AAPL": true,
+        "AMZN": true,
+        "META": true,
+        "GOOGL": true,
+        "TSLA": true
+      },
+      "news": {
+        "polygon_news": false,
+        "bloomberg": true,
+        "wsj": true
+      },
+      "options": {
+        "qqq_option_chain": true,
+        "iv": true,
+        "put_call_ratio": true,
+        "open_interest": true
+      }
+    },
+    "market": {
+      "quotes": {
+        "SPY": {
+          "ticker": "SPY",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 743.16,
+          "high": 746.14,
+          "low": 739.51,
+          "close": 745.4,
+          "volume": 42671305,
+          "data_as_of": "2026-07-08T17:13:39.338617-04:00",
+          "prior_close": 747.71,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -0.31
+        },
+        "QQQ": {
+          "ticker": "QQQ",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 704.94,
+          "high": 712.2599,
+          "low": 700.91,
+          "close": 711.44,
+          "volume": 32607725,
+          "data_as_of": "2026-07-08T17:13:40.616262-04:00",
+          "prior_close": 709.43,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 0.28
+        },
+        "TQQQ": {
+          "ticker": "TQQQ",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 70.795,
+          "high": 73.015,
+          "low": 69.57,
+          "close": 72.72,
+          "volume": 69269183,
+          "data_as_of": "2026-07-08T17:13:40.921815-04:00",
+          "prior_close": 72.23,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 0.68
+        },
+        "DIA": {
+          "ticker": "DIA",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 523.34,
+          "high": 524.45,
+          "low": 520.03,
+          "close": 522.77,
+          "volume": 3528463,
+          "data_as_of": "2026-07-08T17:13:41.137323-04:00",
+          "prior_close": 528.45,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -1.07
+        },
+        "ES=F": {
+          "ticker": "ES=F",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 7545.0,
+          "high": 7563.0,
+          "low": 7468.5,
+          "close": 7515.5,
+          "volume": 1431782,
+          "data_as_of": "2026-07-08T17:13:41.476920-04:00",
+          "prior_close": 7551.25,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -0.47
+        },
+        "^VIX": {
+          "ticker": "^VIX",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 16.55,
+          "high": 18.91,
+          "low": 16.35,
+          "close": 16.9,
+          "volume": 0,
+          "data_as_of": "2026-07-08T17:13:41.753971-04:00",
+          "prior_close": 16.13,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 4.77
+        },
+        "DX-Y.NYB": {
+          "ticker": "DX-Y.NYB",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 101.158,
+          "high": 101.275,
+          "low": 100.946,
+          "close": 101.043,
+          "volume": 0,
+          "data_as_of": "2026-07-08T17:13:41.962523-04:00",
+          "prior_close": 101.14,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -0.1
+        },
+        "^TNX": {
+          "ticker": "^TNX",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 4.561,
+          "high": 4.597,
+          "low": 4.557,
+          "close": 4.569,
+          "volume": 0,
+          "data_as_of": "2026-07-08T17:13:42.157254-04:00",
+          "prior_close": 4.529,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 0.88
+        }
+      },
+      "errors": [],
+      "treasury_10y_fred": null,
+      "checklist": {
+        "SPY": true,
+        "QQQ": true,
+        "DIA": true,
+        "ES_futures": true,
+        "TQQQ": true,
+        "VIX": true,
+        "DXY": true,
+        "10Y": true
+      },
+      "ok": true
+    },
+    "macro": {
+      "series": {},
+      "checklist": {
+        "fed": false,
+        "pce": false,
+        "cpi": false,
+        "nfp_payrolls": false,
+        "unemployment_rate": false,
+        "avg_hourly_earnings": false,
+        "initial_claims": false,
+        "economic_calendar": false,
+        "nonfarm_countdown": true,
+        "nfp_release_day": false
+      },
+      "economic_calendar": [],
+      "nonfarm_days_until": 30,
+      "nfp_release_today": false,
+      "employment_situation_date": "2026-08-07",
+      "errors": [
+        "DGS10",
+        "DGS2",
+        "FEDFUNDS",
+        "CPIAUCSL",
+        "PCEPI",
+        "PAYEMS",
+        "UNRATE",
+        "AHETPI",
+        "ICSA"
+      ],
+      "ok": false
+    },
+    "sector": {
+      "quotes": {
+        "XLK": {
+          "ticker": "XLK",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 177.48,
+          "high": 181.63,
+          "low": 177.15,
+          "close": 181.4,
+          "volume": 9961030,
+          "data_as_of": "2026-07-08T17:13:42.597727-04:00",
+          "prior_close": 179.18,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 1.24
+        },
+        "SMH": {
+          "ticker": "SMH",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 575.57,
+          "high": 594.824,
+          "low": 575.04,
+          "close": 593.0,
+          "volume": 9357377,
+          "data_as_of": "2026-07-08T17:13:42.829917-04:00",
+          "prior_close": 581.45,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 1.99
+        },
+        "XLF": {
+          "ticker": "XLF",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 55.79,
+          "high": 55.8,
+          "low": 54.95,
+          "close": 54.97,
+          "volume": 41411671,
+          "data_as_of": "2026-07-08T17:13:43.148359-04:00",
+          "prior_close": 56.05,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -1.93
+        },
+        "XLE": {
+          "ticker": "XLE",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 55.455,
+          "high": 56.035,
+          "low": 54.865,
+          "close": 55.6,
+          "volume": 38065567,
+          "data_as_of": "2026-07-08T17:13:43.393234-04:00",
+          "prior_close": 54.64,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 1.76
+        }
+      },
+      "errors": [],
+      "checklist": {
+        "XLK": true,
+        "SMH": true,
+        "XLF": true,
+        "XLE": true
+      },
+      "ok": true
+    },
+    "stocks": {
+      "quotes": {
+        "NVDA": {
+          "ticker": "NVDA",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 195.13,
+          "high": 205.15,
+          "low": 195.105,
+          "close": 204.12,
+          "volume": 145806099,
+          "data_as_of": "2026-07-08T17:13:43.633051-04:00",
+          "prior_close": 196.93,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 3.65
+        },
+        "MSFT": {
+          "ticker": "MSFT",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 384.075,
+          "high": 385.29,
+          "low": 381.33,
+          "close": 383.34,
+          "volume": 24832517,
+          "data_as_of": "2026-07-08T17:13:43.868233-04:00",
+          "prior_close": 388.84,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -1.41
+        },
+        "AAPL": {
+          "ticker": "AAPL",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 311.66,
+          "high": 314.81,
+          "low": 307.0515,
+          "close": 313.39,
+          "volume": 38466049,
+          "data_as_of": "2026-07-08T17:13:44.099255-04:00",
+          "prior_close": 310.66,
+          "prior_close_date": "2026-07-07",
+          "change_pct": 0.88
+        },
+        "AMZN": {
+          "ticker": "AMZN",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 244.14,
+          "high": 244.8,
+          "low": 240.52,
+          "close": 243.62,
+          "volume": 27799758,
+          "data_as_of": "2026-07-08T17:13:44.378329-04:00",
+          "prior_close": 245.98,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -0.96
+        },
+        "META": {
+          "ticker": "META",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 614.385,
+          "high": 616.0,
+          "low": 598.0105,
+          "close": 603.12,
+          "volume": 13311707,
+          "data_as_of": "2026-07-08T17:13:44.583858-04:00",
+          "prior_close": 615.58,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -2.02
+        },
+        "GOOGL": {
+          "ticker": "GOOGL",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 365.0525,
+          "high": 367.82,
+          "low": 358.02,
+          "close": 361.92,
+          "volume": 21880821,
+          "data_as_of": "2026-07-08T17:13:44.787844-04:00",
+          "prior_close": 367.03,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -1.39
+        },
+        "TSLA": {
+          "ticker": "TSLA",
+          "date": "2026-07-08",
+          "quote_session_date": "2026-07-08",
+          "session_type": "regular",
+          "open": 399.375,
+          "high": 399.63,
+          "low": 390.51,
+          "close": 394.06,
+          "volume": 33241905,
+          "data_as_of": "2026-07-08T17:13:44.999417-04:00",
+          "prior_close": 402.9,
+          "prior_close_date": "2026-07-07",
+          "change_pct": -2.19
+        }
+      },
+      "errors": [],
+      "checklist": {
+        "NVDA": true,
+        "MSFT": true,
+        "AAPL": true,
+        "AMZN": true,
+        "META": true,
+        "GOOGL": true,
+        "TSLA": true
+      },
+      "ok": true
+    },
+    "news": {
+      "primary": "polygon",
+      "published_gte": "2026-07-07T20:00:00Z",
+      "polygon": [],
+      "rss": [
+        {
+          "source": "Bloomberg",
+          "title": "【今朝の5本】仕事を始める前に読んでおきたい厳選ニュース",
+          "published": "Wed, 08 Jul 2026 21:06:49 GMT",
+          "link": "https://www.bloomberg.com/jp/news/newsletters/2026-07-08/THVJZDKGZAJE00"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+          "published": "Tue, 07 Jul 2026 22:01:08 GMT",
+          "link": "https://www.bloomberg.com/news/articles/2026-07-07/latest-oil-market-news-and-analysis-for-july-8"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "Trader Joe's, Lowe's Embrace Mini Mania To Boost Sales",
+          "published": "Wed, 08 Jul 2026 21:00:07 GMT",
+          "link": "https://www.bloomberg.com/news/videos/2026-07-08/trader-joe-s-lowe-s-embrace-mini-mania-to-boost-sales"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+          "published": "Wed, 08 Jul 2026 21:00:00 GMT",
+          "link": "https://www.bloomberg.com/news/articles/2026-07-08/graincorp-pushes-for-australia-biofuel-mandates-after-iran-war"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+          "published": "Wed, 08 Jul 2026 09:00:45 GMT",
+          "link": "https://www.bloomberg.com/news/articles/2026-07-08/emerging-market-stocks-drop-as-iran-escalation-adds-to-ai-risks"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "Media M&A in Focus at Sun Valley",
+          "published": "Wed, 08 Jul 2026 20:38:06 GMT",
+          "link": "https://www.bloomberg.com/news/videos/2026-07-08/media-m-a-in-focus-at-sun-valley-video"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+          "published": "Tue, 07 Jul 2026 22:10:50 GMT",
+          "link": "https://www.bloomberg.com/news/articles/2026-07-07/oil-jumps-on-iran-attack-asian-stocks-set-to-drop-markets-wrap"
+        },
+        {
+          "source": "Bloomberg",
+          "title": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+          "published": "Wed, 08 Jul 2026 10:07:12 GMT",
+          "link": "https://www.bloomberg.com/news/articles/2026-07-08/us-stock-futures-slide-after-trump-says-iran-ceasefire-is-over"
+        },
+        {
+          "source": "WSJ",
+          "title": "Stocks Sink in Broad AI Rout Sparked by China's DeepSeek",
+          "published": "Mon, 27 Jan 2025 14:26:00 -0500",
+          "link": "https://www.wsj.com/articles/nikkei-may-rise-as-weak-yen-raises-earnings-hopes-776a8056?mod=rss_markets_main"
+        },
+        {
+          "source": "WSJ",
+          "title": "Comex Gold, Silver Settle Lower",
+          "published": "Mon, 27 Jan 2025 14:01:00 -0500",
+          "link": "https://www.wsj.com/articles/gold-edges-lower-feds-rate-decision-in-focus-09dbfceb?mod=rss_markets_main"
+        },
+        {
+          "source": "WSJ",
+          "title": "DeepSeek Won't Sink U.S. AI Titans",
+          "published": "Mon, 27 Jan 2025 13:12:00 -0500",
+          "link": "https://www.wsj.com/articles/deepseek-us-ai-stocks-nvidia-broadcom-6cdfae81?mod=rss_markets_main"
+        },
+        {
+          "source": "WSJ",
+          "title": "Financial Services Roundup: Market Talk",
+          "published": "Mon, 27 Jan 2025 12:27:00 -0500",
+          "link": "https://www.wsj.com/articles/financial-services-roundup-market-talk-94f52cba?mod=rss_markets_main"
+        },
+        {
+          "source": "WSJ",
+          "title": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+          "published": "Mon, 27 Jan 2025 12:20:00 -0500",
+          "link": "https://www.wsj.com/articles/arabica-coffee-prices-hit-new-high-on-u-s-colombia-tariff-spat-582446fe?mod=rss_markets_main"
+        },
+        {
+          "source": "WSJ",
+          "title": "Swiss franc, Japanese yen Rise as DeepSeek News Boosts Safe Havens",
+          "published": "Mon, 27 Jan 2025 09:55:00 -0500",
+          "link": "https://www.wsj.com/articles/safe-haven-currencies-strengthen-amid-fears-over-global-tariffs-9964e17a?mod=rss_markets_main"
+        },
+        {
+          "source": "WSJ",
+          "title": "Natural Gas Falls on Shifting Weather Forecasts",
+          "published": "Mon, 27 Jan 2025 09:05:00 -0500",
+          "link": "https://www.wsj.com/articles/u-s-natural-gas-futures-fall-on-shifting-weather-forecasts-1ef3e457?mod=rss_markets_main"
+        }
+      ],
+      "checklist": {
+        "polygon_news": false,
+        "bloomberg": true,
+        "wsj": true
+      },
+      "errors": [],
+      "ok": false
+    },
+    "options": {
+      "source": "yfinance",
+      "underlying": "QQQ",
+      "contracts_count": 237,
+      "put_call_ratio": 1.476,
+      "avg_implied_volatility": 0.5298,
+      "total_call_oi": 123698,
+      "total_put_oi": 182533,
+      "expiration": "2026-07-08",
+      "checklist": {
+        "qqq_option_chain": true,
+        "iv": true,
+        "put_call_ratio": true,
+        "open_interest": true
+      },
+      "errors": [],
+      "ok": true
+    },
+    "freshness": {
+      "ok": true,
+      "reasons": [],
+      "warnings": [],
+      "attention": [],
+      "macro_reference": [],
+      "field_sessions": {
+        "market.SPY": "2026-07-08 (regular)",
+        "market.QQQ": "2026-07-08 (regular)",
+        "market.TQQQ": "2026-07-08 (regular)",
+        "market.DIA": "2026-07-08 (regular)",
+        "market.ES=F": "2026-07-08 (regular)",
+        "market.^VIX": "2026-07-08 (regular)",
+        "market.DX-Y.NYB": "2026-07-08 (regular)",
+        "market.^TNX": "2026-07-08 (regular)",
+        "sector.XLK": "2026-07-08 (regular)",
+        "sector.SMH": "2026-07-08 (regular)",
+        "sector.XLF": "2026-07-08 (regular)",
+        "sector.XLE": "2026-07-08 (regular)",
+        "stocks.NVDA": "2026-07-08 (regular)",
+        "stocks.MSFT": "2026-07-08 (regular)",
+        "stocks.AAPL": "2026-07-08 (regular)",
+        "stocks.AMZN": "2026-07-08 (regular)",
+        "stocks.META": "2026-07-08 (regular)",
+        "stocks.GOOGL": "2026-07-08 (regular)",
+        "stocks.TSLA": "2026-07-08 (regular)"
+      },
+      "trading_date": "2026-07-08",
+      "prior_trading_day": "2026-07-07",
+      "collected_date": "2026-07-08"
+    },
+    "quote_session_dates": {
+      "SPY": "2026-07-08 (regular)",
+      "QQQ": "2026-07-08 (regular)",
+      "TQQQ": "2026-07-08 (regular)",
+      "DIA": "2026-07-08 (regular)",
+      "ES=F": "2026-07-08 (regular)",
+      "^VIX": "2026-07-08 (regular)",
+      "DX-Y.NYB": "2026-07-08 (regular)",
+      "^TNX": "2026-07-08 (regular)"
+    },
+    "data_ready": false,
+    "missing": [
+      "macro.fed",
+      "macro.pce",
+      "macro.cpi",
+      "macro.nfp_payrolls",
+      "macro.unemployment_rate",
+      "macro.avg_hourly_earnings",
+      "macro.initial_claims",
+      "macro.economic_calendar",
+      "news.polygon_news"
+    ],
+    "conclusion": {
+      "part_id": "Step0",
+      "judgment": "数据就绪：NO",
+      "confidence": null,
+      "one_liner": "缺失项：macro.fed, macro.pce, macro.cpi, macro.nfp_payrolls, macro.unemployment_rate, macro.avg_hourly_earnings, macro.initial_claims, macro.economic_calendar…"
+    }
+  }
+}

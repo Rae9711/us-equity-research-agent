@@ -1,0 +1,3605 @@
+{
+  "label": "step1_0800",
+  "trading_date": "2026-07-08",
+  "decision_as_of": "2026-07-08T08:00:00-04:00",
+  "saved_at": "2026-07-08T17:13:55.941541-04:00",
+  "data": {
+    "raw": {
+      "collected_at": "2026-07-08T17:13:39.335880-04:00",
+      "data_as_of": "2026-07-08T17:13:39.335880-04:00",
+      "trading_date": "2026-07-08",
+      "prior_trading_day": "2026-07-07",
+      "checklist": {
+        "macro": {
+          "fed": false,
+          "pce": false,
+          "cpi": false,
+          "nfp_payrolls": false,
+          "unemployment_rate": false,
+          "avg_hourly_earnings": false,
+          "initial_claims": false,
+          "economic_calendar": false,
+          "nonfarm_countdown": true,
+          "nfp_release_day": false
+        },
+        "market": {
+          "SPY": true,
+          "QQQ": true,
+          "DIA": true,
+          "ES_futures": true,
+          "TQQQ": true,
+          "VIX": true,
+          "DXY": true,
+          "10Y": true
+        },
+        "sector": {
+          "XLK": true,
+          "SMH": true,
+          "XLF": true,
+          "XLE": true
+        },
+        "stocks": {
+          "NVDA": true,
+          "MSFT": true,
+          "AAPL": true,
+          "AMZN": true,
+          "META": true,
+          "GOOGL": true,
+          "TSLA": true
+        },
+        "news": {
+          "polygon_news": false,
+          "bloomberg": true,
+          "wsj": true
+        },
+        "options": {
+          "qqq_option_chain": true,
+          "iv": true,
+          "put_call_ratio": true,
+          "open_interest": true
+        }
+      },
+      "market": {
+        "quotes": {
+          "SPY": {
+            "ticker": "SPY",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 743.16,
+            "high": 746.14,
+            "low": 739.51,
+            "close": 745.4,
+            "volume": 42671305,
+            "data_as_of": "2026-07-08T17:13:39.338617-04:00",
+            "prior_close": 747.71,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -0.31
+          },
+          "QQQ": {
+            "ticker": "QQQ",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 704.94,
+            "high": 712.2599,
+            "low": 700.91,
+            "close": 711.44,
+            "volume": 32607725,
+            "data_as_of": "2026-07-08T17:13:40.616262-04:00",
+            "prior_close": 709.43,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 0.28
+          },
+          "TQQQ": {
+            "ticker": "TQQQ",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 70.795,
+            "high": 73.015,
+            "low": 69.57,
+            "close": 72.72,
+            "volume": 69269183,
+            "data_as_of": "2026-07-08T17:13:40.921815-04:00",
+            "prior_close": 72.23,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 0.68
+          },
+          "DIA": {
+            "ticker": "DIA",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 523.34,
+            "high": 524.45,
+            "low": 520.03,
+            "close": 522.77,
+            "volume": 3528463,
+            "data_as_of": "2026-07-08T17:13:41.137323-04:00",
+            "prior_close": 528.45,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -1.07
+          },
+          "ES=F": {
+            "ticker": "ES=F",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 7545.0,
+            "high": 7563.0,
+            "low": 7468.5,
+            "close": 7515.5,
+            "volume": 1431782,
+            "data_as_of": "2026-07-08T17:13:41.476920-04:00",
+            "prior_close": 7551.25,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -0.47
+          },
+          "^VIX": {
+            "ticker": "^VIX",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 16.55,
+            "high": 18.91,
+            "low": 16.35,
+            "close": 16.9,
+            "volume": 0,
+            "data_as_of": "2026-07-08T17:13:41.753971-04:00",
+            "prior_close": 16.13,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 4.77
+          },
+          "DX-Y.NYB": {
+            "ticker": "DX-Y.NYB",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 101.158,
+            "high": 101.275,
+            "low": 100.946,
+            "close": 101.043,
+            "volume": 0,
+            "data_as_of": "2026-07-08T17:13:41.962523-04:00",
+            "prior_close": 101.14,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -0.1
+          },
+          "^TNX": {
+            "ticker": "^TNX",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 4.561,
+            "high": 4.597,
+            "low": 4.557,
+            "close": 4.569,
+            "volume": 0,
+            "data_as_of": "2026-07-08T17:13:42.157254-04:00",
+            "prior_close": 4.529,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 0.88
+          }
+        },
+        "errors": [],
+        "treasury_10y_fred": null,
+        "checklist": {
+          "SPY": true,
+          "QQQ": true,
+          "DIA": true,
+          "ES_futures": true,
+          "TQQQ": true,
+          "VIX": true,
+          "DXY": true,
+          "10Y": true
+        },
+        "ok": true
+      },
+      "macro": {
+        "series": {},
+        "checklist": {
+          "fed": false,
+          "pce": false,
+          "cpi": false,
+          "nfp_payrolls": false,
+          "unemployment_rate": false,
+          "avg_hourly_earnings": false,
+          "initial_claims": false,
+          "economic_calendar": false,
+          "nonfarm_countdown": true,
+          "nfp_release_day": false
+        },
+        "economic_calendar": [],
+        "nonfarm_days_until": 30,
+        "nfp_release_today": false,
+        "employment_situation_date": "2026-08-07",
+        "errors": [
+          "DGS10",
+          "DGS2",
+          "FEDFUNDS",
+          "CPIAUCSL",
+          "PCEPI",
+          "PAYEMS",
+          "UNRATE",
+          "AHETPI",
+          "ICSA"
+        ],
+        "ok": false
+      },
+      "sector": {
+        "quotes": {
+          "XLK": {
+            "ticker": "XLK",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 177.48,
+            "high": 181.63,
+            "low": 177.15,
+            "close": 181.4,
+            "volume": 9961030,
+            "data_as_of": "2026-07-08T17:13:42.597727-04:00",
+            "prior_close": 179.18,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 1.24
+          },
+          "SMH": {
+            "ticker": "SMH",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 575.57,
+            "high": 594.824,
+            "low": 575.04,
+            "close": 593.0,
+            "volume": 9357377,
+            "data_as_of": "2026-07-08T17:13:42.829917-04:00",
+            "prior_close": 581.45,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 1.99
+          },
+          "XLF": {
+            "ticker": "XLF",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 55.79,
+            "high": 55.8,
+            "low": 54.95,
+            "close": 54.97,
+            "volume": 41411671,
+            "data_as_of": "2026-07-08T17:13:43.148359-04:00",
+            "prior_close": 56.05,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -1.93
+          },
+          "XLE": {
+            "ticker": "XLE",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 55.455,
+            "high": 56.035,
+            "low": 54.865,
+            "close": 55.6,
+            "volume": 38065567,
+            "data_as_of": "2026-07-08T17:13:43.393234-04:00",
+            "prior_close": 54.64,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 1.76
+          }
+        },
+        "errors": [],
+        "checklist": {
+          "XLK": true,
+          "SMH": true,
+          "XLF": true,
+          "XLE": true
+        },
+        "ok": true
+      },
+      "stocks": {
+        "quotes": {
+          "NVDA": {
+            "ticker": "NVDA",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 195.13,
+            "high": 205.15,
+            "low": 195.105,
+            "close": 204.12,
+            "volume": 145806099,
+            "data_as_of": "2026-07-08T17:13:43.633051-04:00",
+            "prior_close": 196.93,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 3.65
+          },
+          "MSFT": {
+            "ticker": "MSFT",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 384.075,
+            "high": 385.29,
+            "low": 381.33,
+            "close": 383.34,
+            "volume": 24832517,
+            "data_as_of": "2026-07-08T17:13:43.868233-04:00",
+            "prior_close": 388.84,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -1.41
+          },
+          "AAPL": {
+            "ticker": "AAPL",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 311.66,
+            "high": 314.81,
+            "low": 307.0515,
+            "close": 313.39,
+            "volume": 38466049,
+            "data_as_of": "2026-07-08T17:13:44.099255-04:00",
+            "prior_close": 310.66,
+            "prior_close_date": "2026-07-07",
+            "change_pct": 0.88
+          },
+          "AMZN": {
+            "ticker": "AMZN",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 244.14,
+            "high": 244.8,
+            "low": 240.52,
+            "close": 243.62,
+            "volume": 27799758,
+            "data_as_of": "2026-07-08T17:13:44.378329-04:00",
+            "prior_close": 245.98,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -0.96
+          },
+          "META": {
+            "ticker": "META",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 614.385,
+            "high": 616.0,
+            "low": 598.0105,
+            "close": 603.12,
+            "volume": 13311707,
+            "data_as_of": "2026-07-08T17:13:44.583858-04:00",
+            "prior_close": 615.58,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -2.02
+          },
+          "GOOGL": {
+            "ticker": "GOOGL",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 365.0525,
+            "high": 367.82,
+            "low": 358.02,
+            "close": 361.92,
+            "volume": 21880821,
+            "data_as_of": "2026-07-08T17:13:44.787844-04:00",
+            "prior_close": 367.03,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -1.39
+          },
+          "TSLA": {
+            "ticker": "TSLA",
+            "date": "2026-07-08",
+            "quote_session_date": "2026-07-08",
+            "session_type": "regular",
+            "open": 399.375,
+            "high": 399.63,
+            "low": 390.51,
+            "close": 394.06,
+            "volume": 33241905,
+            "data_as_of": "2026-07-08T17:13:44.999417-04:00",
+            "prior_close": 402.9,
+            "prior_close_date": "2026-07-07",
+            "change_pct": -2.19
+          }
+        },
+        "errors": [],
+        "checklist": {
+          "NVDA": true,
+          "MSFT": true,
+          "AAPL": true,
+          "AMZN": true,
+          "META": true,
+          "GOOGL": true,
+          "TSLA": true
+        },
+        "ok": true
+      },
+      "news": {
+        "primary": "polygon",
+        "published_gte": "2026-07-07T20:00:00Z",
+        "polygon": [],
+        "rss": [
+          {
+            "source": "Bloomberg",
+            "title": "【今朝の5本】仕事を始める前に読んでおきたい厳選ニュース",
+            "published": "Wed, 08 Jul 2026 21:06:49 GMT",
+            "link": "https://www.bloomberg.com/jp/news/newsletters/2026-07-08/THVJZDKGZAJE00"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "published": "Tue, 07 Jul 2026 22:01:08 GMT",
+            "link": "https://www.bloomberg.com/news/articles/2026-07-07/latest-oil-market-news-and-analysis-for-july-8"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "Trader Joe's, Lowe's Embrace Mini Mania To Boost Sales",
+            "published": "Wed, 08 Jul 2026 21:00:07 GMT",
+            "link": "https://www.bloomberg.com/news/videos/2026-07-08/trader-joe-s-lowe-s-embrace-mini-mania-to-boost-sales"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+            "published": "Wed, 08 Jul 2026 21:00:00 GMT",
+            "link": "https://www.bloomberg.com/news/articles/2026-07-08/graincorp-pushes-for-australia-biofuel-mandates-after-iran-war"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+            "published": "Wed, 08 Jul 2026 09:00:45 GMT",
+            "link": "https://www.bloomberg.com/news/articles/2026-07-08/emerging-market-stocks-drop-as-iran-escalation-adds-to-ai-risks"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "Media M&A in Focus at Sun Valley",
+            "published": "Wed, 08 Jul 2026 20:38:06 GMT",
+            "link": "https://www.bloomberg.com/news/videos/2026-07-08/media-m-a-in-focus-at-sun-valley-video"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+            "published": "Tue, 07 Jul 2026 22:10:50 GMT",
+            "link": "https://www.bloomberg.com/news/articles/2026-07-07/oil-jumps-on-iran-attack-asian-stocks-set-to-drop-markets-wrap"
+          },
+          {
+            "source": "Bloomberg",
+            "title": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+            "published": "Wed, 08 Jul 2026 10:07:12 GMT",
+            "link": "https://www.bloomberg.com/news/articles/2026-07-08/us-stock-futures-slide-after-trump-says-iran-ceasefire-is-over"
+          },
+          {
+            "source": "WSJ",
+            "title": "Stocks Sink in Broad AI Rout Sparked by China's DeepSeek",
+            "published": "Mon, 27 Jan 2025 14:26:00 -0500",
+            "link": "https://www.wsj.com/articles/nikkei-may-rise-as-weak-yen-raises-earnings-hopes-776a8056?mod=rss_markets_main"
+          },
+          {
+            "source": "WSJ",
+            "title": "Comex Gold, Silver Settle Lower",
+            "published": "Mon, 27 Jan 2025 14:01:00 -0500",
+            "link": "https://www.wsj.com/articles/gold-edges-lower-feds-rate-decision-in-focus-09dbfceb?mod=rss_markets_main"
+          },
+          {
+            "source": "WSJ",
+            "title": "DeepSeek Won't Sink U.S. AI Titans",
+            "published": "Mon, 27 Jan 2025 13:12:00 -0500",
+            "link": "https://www.wsj.com/articles/deepseek-us-ai-stocks-nvidia-broadcom-6cdfae81?mod=rss_markets_main"
+          },
+          {
+            "source": "WSJ",
+            "title": "Financial Services Roundup: Market Talk",
+            "published": "Mon, 27 Jan 2025 12:27:00 -0500",
+            "link": "https://www.wsj.com/articles/financial-services-roundup-market-talk-94f52cba?mod=rss_markets_main"
+          },
+          {
+            "source": "WSJ",
+            "title": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "published": "Mon, 27 Jan 2025 12:20:00 -0500",
+            "link": "https://www.wsj.com/articles/arabica-coffee-prices-hit-new-high-on-u-s-colombia-tariff-spat-582446fe?mod=rss_markets_main"
+          },
+          {
+            "source": "WSJ",
+            "title": "Swiss franc, Japanese yen Rise as DeepSeek News Boosts Safe Havens",
+            "published": "Mon, 27 Jan 2025 09:55:00 -0500",
+            "link": "https://www.wsj.com/articles/safe-haven-currencies-strengthen-amid-fears-over-global-tariffs-9964e17a?mod=rss_markets_main"
+          },
+          {
+            "source": "WSJ",
+            "title": "Natural Gas Falls on Shifting Weather Forecasts",
+            "published": "Mon, 27 Jan 2025 09:05:00 -0500",
+            "link": "https://www.wsj.com/articles/u-s-natural-gas-futures-fall-on-shifting-weather-forecasts-1ef3e457?mod=rss_markets_main"
+          }
+        ],
+        "checklist": {
+          "polygon_news": false,
+          "bloomberg": true,
+          "wsj": true
+        },
+        "errors": [],
+        "ok": false
+      },
+      "options": {
+        "source": "yfinance",
+        "underlying": "QQQ",
+        "contracts_count": 237,
+        "put_call_ratio": 1.476,
+        "avg_implied_volatility": 0.5298,
+        "total_call_oi": 123698,
+        "total_put_oi": 182533,
+        "expiration": "2026-07-08",
+        "checklist": {
+          "qqq_option_chain": true,
+          "iv": true,
+          "put_call_ratio": true,
+          "open_interest": true
+        },
+        "errors": [],
+        "ok": true
+      },
+      "freshness": {
+        "ok": true,
+        "reasons": [],
+        "warnings": [],
+        "attention": [],
+        "macro_reference": [],
+        "field_sessions": {
+          "market.SPY": "2026-07-08 (regular)",
+          "market.QQQ": "2026-07-08 (regular)",
+          "market.TQQQ": "2026-07-08 (regular)",
+          "market.DIA": "2026-07-08 (regular)",
+          "market.ES=F": "2026-07-08 (regular)",
+          "market.^VIX": "2026-07-08 (regular)",
+          "market.DX-Y.NYB": "2026-07-08 (regular)",
+          "market.^TNX": "2026-07-08 (regular)",
+          "sector.XLK": "2026-07-08 (regular)",
+          "sector.SMH": "2026-07-08 (regular)",
+          "sector.XLF": "2026-07-08 (regular)",
+          "sector.XLE": "2026-07-08 (regular)",
+          "stocks.NVDA": "2026-07-08 (regular)",
+          "stocks.MSFT": "2026-07-08 (regular)",
+          "stocks.AAPL": "2026-07-08 (regular)",
+          "stocks.AMZN": "2026-07-08 (regular)",
+          "stocks.META": "2026-07-08 (regular)",
+          "stocks.GOOGL": "2026-07-08 (regular)",
+          "stocks.TSLA": "2026-07-08 (regular)"
+        },
+        "trading_date": "2026-07-08",
+        "prior_trading_day": "2026-07-07",
+        "collected_date": "2026-07-08"
+      },
+      "quote_session_dates": {
+        "SPY": "2026-07-08 (regular)",
+        "QQQ": "2026-07-08 (regular)",
+        "TQQQ": "2026-07-08 (regular)",
+        "DIA": "2026-07-08 (regular)",
+        "ES=F": "2026-07-08 (regular)",
+        "^VIX": "2026-07-08 (regular)",
+        "DX-Y.NYB": "2026-07-08 (regular)",
+        "^TNX": "2026-07-08 (regular)"
+      },
+      "data_ready": false,
+      "missing": [
+        "macro.fed",
+        "macro.pce",
+        "macro.cpi",
+        "macro.nfp_payrolls",
+        "macro.unemployment_rate",
+        "macro.avg_hourly_earnings",
+        "macro.initial_claims",
+        "macro.economic_calendar",
+        "news.polygon_news"
+      ],
+      "conclusion": {
+        "part_id": "Step0",
+        "judgment": "数据就绪：NO",
+        "confidence": null,
+        "one_liner": "缺失项：macro.fed, macro.pce, macro.cpi, macro.nfp_payrolls, macro.unemployment_rate, macro.avg_hourly_earnings, macro.initial_claims, macro.economic_calendar…"
+      }
+    },
+    "morning": {
+      "generated_at": "2026-07-08T17:13:55.935678-04:00",
+      "decision_as_of": "2026-07-08T08:00:00-04:00",
+      "decision_as_of_et": "08:00 ET（早盘决策）",
+      "trading_date": "2026-07-08",
+      "prior_trading_day": "2026-07-07",
+      "data_ready": false,
+      "llm_used": false,
+      "bias": "Bullish Bias",
+      "total_score": 3,
+      "driver_type": "Political",
+      "daily_driver": "Geopolitical Risk (Iran)",
+      "parts": {
+        "P1": {
+          "judgment": "Risk-on",
+          "confidence": 0.65,
+          "one_liner": "DIA -1.07% · SPY -0.31% · QQQ 0.28% · SMH 1.99%",
+          "body_md": "- **DIA (Dow proxy)**：-1.07%\n- **SPY**：-0.31%\n- **QQQ**：0.28%\n- **SMH**：1.99%\n- **定性**：Risk-on"
+        },
+        "P2": {
+          "judgment": "Driver：Geopolitical Risk (Iran)",
+          "confidence": 0.7,
+          "one_liner": "Geopolitical Risk (Iran) → Bond → Dollar → Sector → Index",
+          "body_md": "- **因果链**：Geopolitical Risk (Iran) → Bond → Dollar → Sector → Index"
+        },
+        "P3": {
+          "judgment": "N/A",
+          "confidence": null,
+          "one_liner": "LLM 未运行或失败，仅规则引擎输出",
+          "body_md": ""
+        },
+        "P4": {
+          "judgment": "Growth：Neutral · Score：0",
+          "confidence": 0.7,
+          "one_liner": "10Y Flat → No Headwind",
+          "body_md": "- **10Y**：N/A% (Flat)\n- **2Y**：N/A%\n- **Growth 镜头**：No Headwind\n- **因果**：10Y Flat → No Headwind\n- **Morning Score**：Bond → 0",
+          "scores": {
+            "bond": 0
+          }
+        },
+        "P5": {
+          "judgment": "对 QQQ：Neutral · Score：0",
+          "confidence": 0.65,
+          "one_liner": "Geopolitical Risk (Iran) → DXY Flat → QQQ Neutral",
+          "body_md": "- **因果**：Geopolitical Risk (Iran) → DXY Flat → QQQ Neutral\n- **Morning Score**：Dollar → 0",
+          "scores": {
+            "dollar": 0
+          }
+        },
+        "P6": {
+          "judgment": "恐慌：Medium · Score：-1",
+          "confidence": 0.75,
+          "one_liner": "VIX Up，谨慎",
+          "body_md": "VIX：Up\n情绪：Medium\nMorning Score：VIX → -1",
+          "scores": {
+            "vix": -1
+          }
+        },
+        "P7": {
+          "judgment": "最强板块：SMH · 轮动：普涨",
+          "confidence": 0.7,
+          "one_liner": "SMH 相对最强，XLF 最弱",
+          "body_md": "SMH：1.99%\nXLE：1.76%\nXLK：1.24%\nXLF：-1.93%",
+          "scores": {}
+        },
+        "P8": {
+          "judgment": "Bullish Long-term (AI Expansion Regime) · Neutral",
+          "confidence": 0.6,
+          "one_liner": "AI 主题中性：SMH +1.99% · NVDA +3.65%",
+          "body_md": "- **AI 判断**：Neutral\n- **SMH 半导体**：+1.99%\n- **XLK 科技**：+1.24%\n- **NVDA**：+3.65%\n- **Mag7 广度**：29% 上涨（均值 -0.49%）\n- **领涨**：NVDA +3.65%、AAPL +0.88%\n- **拖累**：TSLA -2.19%、META -2.02%\n- **长期 Regime**：Bullish Long-term (AI Expansion Regime)\n- **今日 AI 表现**：Neutral",
+          "scores": {
+            "ai_stance_signals": 0
+          }
+        },
+        "P9": {
+          "judgment": "买期权：No · 0DTE：No · Call：No · Put：No",
+          "confidence": null,
+          "one_liner": "事件日/节前 → 全部 NO",
+          "body_md": "- **适合买期权？**：No\n- **适合做 0DTE？**：No\n- **适合买 Call？**：No\n- **适合买 Put？**：No\n- **QQQ IV**：High\n- **事件日**：是 · **节前**：否\n- **数据源**：yfinance",
+          "buy_options": "No",
+          "zero_dte": "No",
+          "buy_call": "No",
+          "buy_put": "No",
+          "scores": {}
+        },
+        "P10": {
+          "judgment": "Primary：Political · Geopolitical Risk (Iran)",
+          "driver_type": "Political",
+          "driver": "Geopolitical Risk (Iran)",
+          "driver_tree": {
+            "primary": {
+              "type": "Political",
+              "label": "Geopolitical Risk (Iran)",
+              "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "score": 96,
+              "source": "rules"
+            },
+            "secondary": {
+              "type": "Macro",
+              "label": "Oil Rally",
+              "evidence": "XLE +1.8% · 2 oil headlines",
+              "score": 77,
+              "source": "rules"
+            },
+            "tertiary": {
+              "type": "Political",
+              "label": "Trade Policy",
+              "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "score": 73,
+              "source": "rules"
+            },
+            "all_ranked": [
+              {
+                "type": "Political",
+                "label": "Geopolitical Risk (Iran)",
+                "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+                "score": 96,
+                "source": "rules"
+              },
+              {
+                "type": "Macro",
+                "label": "Oil Rally",
+                "evidence": "XLE +1.8% · 2 oil headlines",
+                "score": 77,
+                "source": "rules"
+              },
+              {
+                "type": "Political",
+                "label": "Trade Policy",
+                "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+                "score": 73,
+                "source": "rules"
+              },
+              {
+                "type": "Momentum",
+                "label": "AI Momentum",
+                "evidence": "SMH +2.0% leading",
+                "score": 58,
+                "source": "rules"
+              }
+            ],
+            "session_update_slot": true
+          },
+          "confidence": 0.75,
+          "one_liner": "Political: Geopolitical Risk (Iran) → Macro: Oil Rally → Political: Trade Policy",
+          "body_md": "- **Driver Tree**（盘中可更新）\n  - **Primary** [Political]: Geopolitical Risk (Iran) — Oil Soars as US Extends Strikes Against Iran Into Second Night\n  - **Secondary** [Macro]: Oil Rally — XLE +1.8% · 2 oil headlines\n  - **Tertiary** [Political]: Trade Policy — tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat\n- **Macro Calendar**：Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)\n- **催化剂摘要**：Breaking: Geopolitical Risk (Iran), Geopolitical Risk (Iran), Geopolitical Risk (Iran) · Commodity: Oil Rally"
+        },
+        "P11": {
+          "judgment": "Bias：Bullish Bias · Total：+3",
+          "confidence": 0.64,
+          "one_liner": "Bullish Bias，综合得分 +3",
+          "body_md": "Macro | +0\nFed | +0\nBond | +0\nDollar | +0\nVIX | -1\nAI | +2\nEarnings | +0\nBreadth | +1\nMomentum | +1\n\n**Total**：+3",
+          "scores": {
+            "Macro": 0,
+            "Fed": 0,
+            "Bond": 0,
+            "Dollar": 0,
+            "VIX": -1,
+            "AI": 2,
+            "Earnings": 0,
+            "Breadth": 1,
+            "Momentum": 1
+          },
+          "total": 3,
+          "bias": "Bullish Bias"
+        },
+        "P12": {
+          "judgment": "N/A",
+          "confidence": null,
+          "one_liner": "LLM 未运行或失败，仅规则引擎输出",
+          "body_md": ""
+        },
+        "P13": {
+          "judgment": "Edge：3/4 YES",
+          "confidence": 0.79,
+          "one_liner": "宏观 Geopolitical Risk (Iran)、Oil Rally、Trade Policy · 板块 Semiconductor",
+          "body_md": "- **Macro Edge**：YES · Geopolitical Risk (Iran)、Oil Rally、Trade Policy\n  - 今日有重大催化剂（含地缘/突发）：Geopolitical Risk (Iran)、Oil Rally、Trade Policy\n- **Index Edge**：YES\n  - QQQ 盘前/开盘 +0.28%\n- **Sector Edge**：YES · Semiconductor\n  - SMH 领先 QQQ +1.71%\n- **Stock Edge**：NO\n  - 无单票 RS+新闻+量能共振",
+          "edges": {
+            "macro_edge": {
+              "edge": "YES",
+              "why": "今日有重大催化剂（含地缘/突发）：Geopolitical Risk (Iran)、Oil Rally、Trade Policy",
+              "catalyst": "Geopolitical Risk (Iran)、Oil Rally、Trade Policy"
+            },
+            "index_edge": {
+              "edge": "YES",
+              "why": "QQQ 盘前/开盘 +0.28%"
+            },
+            "sector_edge": {
+              "edge": "YES",
+              "why": "SMH 领先 QQQ +1.71%",
+              "sector": "Semiconductor"
+            },
+            "stock_edge": {
+              "edge": "NO",
+              "why": "无单票 RS+新闻+量能共振"
+            },
+            "advisory": "ADVISORY — 不构成投资建议"
+          },
+          "catalysts": [
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "date": null,
+              "category": "breaking",
+              "impact_score": 88
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+              "date": null,
+              "category": "breaking",
+              "impact_score": 88
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+              "date": null,
+              "category": "breaking",
+              "impact_score": 88
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+              "date": null,
+              "category": "breaking",
+              "impact_score": 88
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+              "date": null,
+              "category": "breaking",
+              "impact_score": 88
+            },
+            {
+              "name": "Oil Rally",
+              "release": "Energy / crude rally",
+              "date": null,
+              "category": "commodity",
+              "impact_score": 77
+            },
+            {
+              "name": "Trade Policy",
+              "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "date": null,
+              "category": "breaking",
+              "impact_score": 65
+            }
+          ],
+          "scores": {},
+          "macro_calendar": {
+            "catalysts": [
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+                "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+                "evidence": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+                "evidence": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+                "evidence": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+                "evidence": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Oil Rally",
+                "category": "commodity",
+                "impact": "high",
+                "impact_score": 77,
+                "release": "Energy / crude rally",
+                "evidence": "XLE +1.8% · 2 oil headlines",
+                "source": "market+news"
+              },
+              {
+                "name": "Trade Policy",
+                "category": "breaking",
+                "impact": "medium",
+                "impact_score": 65,
+                "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+                "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+                "source": "news",
+                "theme": "trade",
+                "severity": "medium"
+              }
+            ],
+            "has_material_catalyst": true,
+            "headline": "Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)",
+            "summary": "Breaking: Geopolitical Risk (Iran), Geopolitical Risk (Iran), Geopolitical Risk (Iran) · Commodity: Oil Rally",
+            "scheduled": [],
+            "breaking": [
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+                "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+                "evidence": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+                "evidence": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+                "evidence": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Geopolitical Risk (Iran)",
+                "category": "breaking",
+                "impact": "high",
+                "impact_score": 88,
+                "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+                "evidence": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+                "source": "news",
+                "theme": "geopolitics",
+                "severity": "high"
+              },
+              {
+                "name": "Trade Policy",
+                "category": "breaking",
+                "impact": "medium",
+                "impact_score": 65,
+                "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+                "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+                "source": "news",
+                "theme": "trade",
+                "severity": "medium"
+              }
+            ],
+            "commodity": [
+              {
+                "name": "Oil Rally",
+                "category": "commodity",
+                "impact": "high",
+                "impact_score": 77,
+                "release": "Energy / crude rally",
+                "evidence": "XLE +1.8% · 2 oil headlines",
+                "source": "market+news"
+              }
+            ]
+          }
+        },
+        "P14": {
+          "judgment": "AI > Defensive · Growth > Value · Mean Reversion > Momentum",
+          "confidence": 0.65,
+          "one_liner": "板块：SMH 最强 / XLF 最弱",
+          "body_md": "- **AI > Defensive**\n- **Growth > Value**\n- **Mean Reversion > Momentum**",
+          "preferences": [
+            "AI > Defensive",
+            "Growth > Value",
+            "Mean Reversion > Momentum"
+          ],
+          "scores": {}
+        },
+        "P15": {
+          "judgment": "最可能 Scenario：A",
+          "confidence": 0.65,
+          "one_liner": "围绕 Political（Geopolitical Risk (Iran)）的可验证情景",
+          "body_md": "Scenario A：若 Geopolitical Risk (Iran) 弱于预期 + QQQ > 昨高 → Call\nScenario B：若 Geopolitical Risk (Iran) 强于预期 + QQQ < 昨低 → Put / 放弃\nScenario C：若 QQQ 震荡 → 不交易"
+        },
+        "P16": {
+          "judgment": "计划：Wait",
+          "confidence": 0.65,
+          "one_liner": "IF major data not yet released THEN WAIT — no pre-release index bets",
+          "body_md": "**Conditions to go LONG**\n- IF QQQ > 712.3 (昨日高点) AND breadth positive THEN LONG QQQ / Call（突破昨高）\n- IF de-escalation headline + QQQ reclaims prior high THEN LONG risk-on bounce\n- IF oil stabilizes + XLE fades AND QQQ holds THEN LONG growth\n\n**Conditions to go SHORT**\n- IF QQQ < 700.9 (昨日低点) AND risk-off confirmed THEN SHORT / Put（破位昨低）\n- IF oil spike + SMH breaks prior low THEN SHORT SMH / defensive hedge\n- IF oil breaks higher + semis weak THEN SHORT SMH\n\n**Conditions to WAIT / No Trade**\n- IF major data not yet released THEN WAIT — no pre-release index bets\n- IF geopolitical headlines escalate AND VIX spikes THEN WAIT — reduce size, no chase\n- IF QQQ between 700.9 (昨日低点) and 712.3 (昨日高点) THEN WAIT — no edge in range\n- IF oil whipsaw ±2% intraday THEN WAIT — energy volatility",
+          "trade_plan": {
+            "gate": "Wait",
+            "conditions_long": [
+              "IF QQQ > 712.3 (昨日高点) AND breadth positive THEN LONG QQQ / Call（突破昨高）",
+              "IF de-escalation headline + QQQ reclaims prior high THEN LONG risk-on bounce",
+              "IF oil stabilizes + XLE fades AND QQQ holds THEN LONG growth"
+            ],
+            "conditions_short": [
+              "IF QQQ < 700.9 (昨日低点) AND risk-off confirmed THEN SHORT / Put（破位昨低）",
+              "IF oil spike + SMH breaks prior low THEN SHORT SMH / defensive hedge",
+              "IF oil breaks higher + semis weak THEN SHORT SMH"
+            ],
+            "conditions_wait": [
+              "IF major data not yet released THEN WAIT — no pre-release index bets",
+              "IF geopolitical headlines escalate AND VIX spikes THEN WAIT — reduce size, no chase",
+              "IF QQQ between 700.9 (昨日低点) and 712.3 (昨日高点) THEN WAIT — no edge in range",
+              "IF oil whipsaw ±2% intraday THEN WAIT — energy volatility"
+            ],
+            "primary_driver": "Geopolitical Risk (Iran)",
+            "macro_headline": "Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)"
+          },
+          "levels": {
+            "qqq_prev_high": 712.2599,
+            "qqq_prev_low": 700.91,
+            "qqq_prior_close": null
+          }
+        },
+        "R0": {
+          "judgment": "Regime：AI Expansion",
+          "confidence": 0.82,
+          "one_liner": "AI 扩张 Regime；Macro 数据日可暂时 dominate 日内 Driver"
+        },
+        "P17": {
+          "judgment": "Hypothesis：H-2026-07-08-001 · 待验证",
+          "confidence": 0.81,
+          "one_liner": "AI/Semiconductor leads index today; macro is secondary variable",
+          "hypothesis": {
+            "id": "H-2026-07-08-001",
+            "statement": "AI/Semiconductor leads index today; macro is secondary variable",
+            "evidence": [
+              "VIX=16.9 (low fear)",
+              "NVDA +3.6%",
+              "SMH +2.0%"
+            ],
+            "counter_evidence": [
+              "Breadth 29% (narrow market)"
+            ],
+            "confidence": 0.81,
+            "status": "待验证"
+          }
+        },
+        "P18": {
+          "judgment": "Best：— · NO TRADE · conf 45%",
+          "confidence": 0.45,
+          "one_liner": "今日无任何标的达到交易阈值",
+          "body_md": "| Rank | Symbol | Win% | ER% | R:R | Score | Trade |\n|------|--------|------|-----|-----|-------|-------|\n| 1 | NVDA | 69.0 | 1.45 | 0.33 | 0.5 | Small |\n| 2 | SPY | 59.0 | -0.11 | 0.62 | 0.0 | Pass |\n| 3 | QQQ | 59.0 | -0.16 | 0.34 | 0.0 | Pass |\n| 4 | SMH | 59.0 | -0.21 | 0.17 | 0.0 | Pass |\n| 5 | TQQQ | 54.0 | -0.48 | 0.12 | 0.0 | Pass |\n| 6 | TSLA | 59.0 | -0.45 | 1.57 | 0.0 | Pass |",
+          "trade_candidates": [
+            {
+              "symbol": "NVDA",
+              "win_prob": 69.0,
+              "win_prob_breakdown": {
+                "components": [
+                  {
+                    "factor": "Base",
+                    "key": "base",
+                    "points": 50.0
+                  },
+                  {
+                    "factor": "Trend",
+                    "key": "trend",
+                    "points": 10.0
+                  },
+                  {
+                    "factor": "Gap",
+                    "key": "gap",
+                    "points": 5.0
+                  },
+                  {
+                    "factor": "Volume",
+                    "key": "volume",
+                    "points": 4.0
+                  }
+                ],
+                "total": 69.0,
+                "raw_total": 69.0,
+                "was_clamped": false
+              },
+              "expected_return_pct": 1.45,
+              "expected_high": 207.08,
+              "expected_low": 195.1,
+              "expected_close": 207.08,
+              "current_price": 204.12,
+              "upside_pct": 1.45,
+              "downside_risk_pct": 4.42,
+              "risk_reward": 0.33,
+              "final_score": 0.5,
+              "trade_action": "Small",
+              "trade": "Small",
+              "gap_pct": -0.91,
+              "relative_strength": null,
+              "prior_day_change_pct": 3.71,
+              "why_factors": [
+                "昨日强势 +3.7% 今日 gap 可控",
+                "Gap 未过度延伸",
+                "Volume 信号"
+              ],
+              "why": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+              "score": 5,
+              "news_count": 0,
+              "factor_breakdown": {
+                "relative_strength_vs_qqq": null,
+                "gap_pct": -0.91,
+                "beta_proxy": null,
+                "volume_signal": true,
+                "news_count": 0,
+                "extended_gap_penalty": 0.0,
+                "vix_change_pct": 4.77,
+                "prior_day_change_pct": 3.71
+              },
+              "edge_type": "Sector Edge",
+              "score_formula_display": "final = win_prob(69%) × ER(1.4%) × rr_weight(0.5) / 100",
+              "rr_weight": 0.5,
+              "why_vs_runner_up": "ER 1.4% vs -0.1%；Win% 69 vs 59",
+              "advisory": true,
+              "rank": 1
+            },
+            {
+              "symbol": "SPY",
+              "win_prob": 59.0,
+              "win_prob_breakdown": {
+                "components": [
+                  {
+                    "factor": "Base",
+                    "key": "base",
+                    "points": 50.0
+                  },
+                  {
+                    "factor": "Gap",
+                    "key": "gap",
+                    "points": 5.0
+                  },
+                  {
+                    "factor": "Volume",
+                    "key": "volume",
+                    "points": 4.0
+                  }
+                ],
+                "total": 59.0,
+                "raw_total": 59.0,
+                "was_clamped": false
+              },
+              "expected_return_pct": -0.11,
+              "expected_high": 749.13,
+              "expected_low": 739.44,
+              "expected_close": 744.61,
+              "current_price": 745.4,
+              "upside_pct": 0.5,
+              "downside_risk_pct": 0.8,
+              "risk_reward": 0.62,
+              "final_score": 0.0,
+              "trade_action": "Pass",
+              "trade": "Pass",
+              "gap_pct": -0.61,
+              "relative_strength": null,
+              "prior_day_change_pct": -0.96,
+              "why_factors": [
+                "Gap 未过度延伸",
+                "Volume 信号",
+                "上行空间 <1.0%"
+              ],
+              "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+              "score": 0,
+              "news_count": 0,
+              "factor_breakdown": {
+                "relative_strength_vs_qqq": null,
+                "gap_pct": -0.61,
+                "beta_proxy": null,
+                "volume_signal": true,
+                "news_count": 0,
+                "extended_gap_penalty": 0.0,
+                "vix_change_pct": 4.77,
+                "prior_day_change_pct": -0.96
+              },
+              "edge_type": "Index Edge",
+              "score_formula_display": "final = win_prob(59%) × ER(-0.1%) × rr_weight(0.5) / 100",
+              "rr_weight": 0.5,
+              "why_vs_runner_up": "—",
+              "advisory": true,
+              "rank": 2
+            },
+            {
+              "symbol": "QQQ",
+              "win_prob": 59.0,
+              "win_prob_breakdown": {
+                "components": [
+                  {
+                    "factor": "Base",
+                    "key": "base",
+                    "points": 50.0
+                  },
+                  {
+                    "factor": "Gap",
+                    "key": "gap",
+                    "points": 5.0
+                  },
+                  {
+                    "factor": "Volume",
+                    "key": "volume",
+                    "points": 4.0
+                  }
+                ],
+                "total": 59.0,
+                "raw_total": 59.0,
+                "was_clamped": false
+              },
+              "expected_return_pct": -0.16,
+              "expected_high": 715.0,
+              "expected_low": 700.91,
+              "expected_close": 710.33,
+              "current_price": 711.44,
+              "upside_pct": 0.5,
+              "downside_risk_pct": 1.48,
+              "risk_reward": 0.34,
+              "final_score": 0.0,
+              "trade_action": "Pass",
+              "trade": "Pass",
+              "gap_pct": -0.63,
+              "relative_strength": null,
+              "prior_day_change_pct": -1.77,
+              "why_factors": [
+                "Gap 未过度延伸",
+                "Volume 信号",
+                "上行空间 <1.0%"
+              ],
+              "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+              "score": 0,
+              "news_count": 0,
+              "factor_breakdown": {
+                "relative_strength_vs_qqq": null,
+                "gap_pct": -0.63,
+                "beta_proxy": null,
+                "volume_signal": true,
+                "news_count": 0,
+                "extended_gap_penalty": 0.0,
+                "vix_change_pct": 4.77,
+                "prior_day_change_pct": -1.77
+              },
+              "edge_type": "Index Edge",
+              "score_formula_display": "final = win_prob(59%) × ER(-0.2%) × rr_weight(0.5) / 100",
+              "rr_weight": 0.5,
+              "why_vs_runner_up": "—",
+              "advisory": true,
+              "rank": 3
+            },
+            {
+              "symbol": "SMH",
+              "win_prob": 59.0,
+              "win_prob_breakdown": {
+                "components": [
+                  {
+                    "factor": "Base",
+                    "key": "base",
+                    "points": 50.0
+                  },
+                  {
+                    "factor": "Gap",
+                    "key": "gap",
+                    "points": 5.0
+                  },
+                  {
+                    "factor": "Volume",
+                    "key": "volume",
+                    "points": 4.0
+                  }
+                ],
+                "total": 59.0,
+                "raw_total": 59.0,
+                "was_clamped": false
+              },
+              "expected_return_pct": -0.21,
+              "expected_high": 595.96,
+              "expected_low": 575.04,
+              "expected_close": 591.73,
+              "current_price": 593.0,
+              "upside_pct": 0.5,
+              "downside_risk_pct": 3.03,
+              "risk_reward": 0.17,
+              "final_score": 0.0,
+              "trade_action": "Pass",
+              "trade": "Pass",
+              "gap_pct": -1.01,
+              "relative_strength": null,
+              "prior_day_change_pct": -2.22,
+              "why_factors": [
+                "Gap 未过度延伸",
+                "Volume 信号",
+                "上行空间 <1.0%"
+              ],
+              "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+              "score": 0,
+              "news_count": 0,
+              "factor_breakdown": {
+                "relative_strength_vs_qqq": null,
+                "gap_pct": -1.01,
+                "beta_proxy": null,
+                "volume_signal": true,
+                "news_count": 0,
+                "extended_gap_penalty": 0.0,
+                "vix_change_pct": 4.77,
+                "prior_day_change_pct": -2.22
+              },
+              "edge_type": "Sector Edge",
+              "score_formula_display": "final = win_prob(59%) × ER(-0.2%) × rr_weight(0.5) / 100",
+              "rr_weight": 0.5,
+              "why_vs_runner_up": "—",
+              "advisory": true,
+              "rank": 4
+            },
+            {
+              "symbol": "TQQQ",
+              "win_prob": 54.0,
+              "win_prob_breakdown": {
+                "components": [
+                  {
+                    "factor": "Base",
+                    "key": "base",
+                    "points": 50.0
+                  },
+                  {
+                    "factor": "Volume",
+                    "key": "volume",
+                    "points": 4.0
+                  }
+                ],
+                "total": 54.0,
+                "raw_total": 54.0,
+                "was_clamped": false
+              },
+              "expected_return_pct": -0.48,
+              "expected_high": 73.08,
+              "expected_low": 69.57,
+              "expected_close": 72.37,
+              "current_price": 72.72,
+              "upside_pct": 0.5,
+              "downside_risk_pct": 4.33,
+              "risk_reward": 0.12,
+              "final_score": 0.0,
+              "trade_action": "Pass",
+              "trade": "Pass",
+              "gap_pct": -1.99,
+              "relative_strength": null,
+              "prior_day_change_pct": -5.33,
+              "why_factors": [
+                "Volume 信号",
+                "上行空间 <1.0%"
+              ],
+              "why": "Volume 信号 · 上行空间 <1.0%",
+              "score": 0,
+              "news_count": 0,
+              "factor_breakdown": {
+                "relative_strength_vs_qqq": null,
+                "gap_pct": -1.99,
+                "beta_proxy": null,
+                "volume_signal": true,
+                "news_count": 0,
+                "extended_gap_penalty": 0.0,
+                "vix_change_pct": 4.77,
+                "prior_day_change_pct": -5.33
+              },
+              "edge_type": "Index Edge",
+              "score_formula_display": "final = win_prob(54%) × ER(-0.5%) × rr_weight(0.5) / 100",
+              "rr_weight": 0.5,
+              "why_vs_runner_up": "—",
+              "advisory": true,
+              "rank": 5
+            },
+            {
+              "symbol": "TSLA",
+              "win_prob": 59.0,
+              "win_prob_breakdown": {
+                "components": [
+                  {
+                    "factor": "Base",
+                    "key": "base",
+                    "points": 50.0
+                  },
+                  {
+                    "factor": "Gap",
+                    "key": "gap",
+                    "points": 5.0
+                  },
+                  {
+                    "factor": "Volume",
+                    "key": "volume",
+                    "points": 4.0
+                  }
+                ],
+                "total": 59.0,
+                "raw_total": 59.0,
+                "was_clamped": false
+              },
+              "expected_return_pct": -0.45,
+              "expected_high": 399.63,
+              "expected_low": 390.51,
+              "expected_close": 392.28,
+              "current_price": 394.06,
+              "upside_pct": 1.41,
+              "downside_risk_pct": 0.9,
+              "risk_reward": 1.57,
+              "final_score": 0.0,
+              "trade_action": "Pass",
+              "trade": "Pass",
+              "gap_pct": -0.87,
+              "relative_strength": null,
+              "prior_day_change_pct": -6.35,
+              "why_factors": [
+                "Gap 未过度延伸",
+                "Volume 信号",
+                "上行空间 <1.0%"
+              ],
+              "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+              "score": 0,
+              "news_count": 0,
+              "factor_breakdown": {
+                "relative_strength_vs_qqq": null,
+                "gap_pct": -0.87,
+                "beta_proxy": null,
+                "volume_signal": true,
+                "news_count": 0,
+                "extended_gap_penalty": 0.0,
+                "vix_change_pct": 4.77,
+                "prior_day_change_pct": -6.35
+              },
+              "edge_type": "Range",
+              "score_formula_display": "final = win_prob(59%) × ER(-0.5%) × rr_weight(0.79) / 100",
+              "rr_weight": 0.79,
+              "why_vs_runner_up": "—",
+              "advisory": true,
+              "rank": 6
+            }
+          ],
+          "best_opportunity": {
+            "direction": "NO TRADE",
+            "symbol": "—",
+            "instrument": "—",
+            "confidence": 45,
+            "entry": "—",
+            "stop": "—",
+            "target": "—",
+            "targets": [],
+            "duration": "—",
+            "why": [
+              "今日无任何标的达到交易阈值"
+            ],
+            "why_chain": "今日无任何标的达到交易阈值",
+            "avoid": [],
+            "one_liner": "今日无任何标的达到交易阈值",
+            "p16_gate": "No Trade",
+            "threshold_message": "今日无任何标的达到交易阈值",
+            "advisory": true
+          },
+          "best_trades": {
+            "primary": null,
+            "secondary": null,
+            "watchlist": null,
+            "index_trade": "NO TRADE",
+            "threshold_message": "今日无任何标的达到交易阈值",
+            "stock_trades": [],
+            "top_trades": [
+              {
+                "rank": 1,
+                "symbol": "NVDA",
+                "direction": "LONG",
+                "instrument": "Stock",
+                "confidence": 69,
+                "confidence_stars": "★★★☆☆",
+                "expected_move": "+6.73%",
+                "expected_return_pct": 6.73,
+                "win_prob": 69.0,
+                "win_prob_breakdown": {
+                  "components": [
+                    {
+                      "factor": "Base",
+                      "key": "base",
+                      "points": 50.0
+                    },
+                    {
+                      "factor": "Trend",
+                      "key": "trend",
+                      "points": 10.0
+                    },
+                    {
+                      "factor": "Gap",
+                      "key": "gap",
+                      "points": 5.0
+                    },
+                    {
+                      "factor": "Volume",
+                      "key": "volume",
+                      "points": 4.0
+                    }
+                  ],
+                  "total": 69.0,
+                  "raw_total": 69.0,
+                  "was_clamped": false
+                },
+                "risk_reward": 87.05,
+                "final_score": 0.5,
+                "trade_action": "Small",
+                "relative_strength": null,
+                "entry": "Above 194.0 (VWAP)",
+                "entry_source": "vwap",
+                "entry_price": 194.02,
+                "stop": "193.9 (ORB低点)",
+                "stop_source": "orb_low",
+                "stop_price": 193.87,
+                "target": "207.1 (预期收盘)",
+                "target_source": "expected_close",
+                "target_price": 207.08,
+                "targets": [
+                  "207.1 (预期收盘)"
+                ],
+                "level_anchors": {
+                  "vwap": 194.02,
+                  "orb_high": 197.45,
+                  "orb_low": 193.87,
+                  "prev_high": 205.15,
+                  "prev_low": 195.105,
+                  "prior_close": 196.93,
+                  "orb_from_minute": true
+                },
+                "why": [
+                  "昨日强势 +3.7% 今日 gap 可控",
+                  "Gap 未过度延伸",
+                  "Volume 信号"
+                ],
+                "why_chain": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+                "why_vs_runner_up": "ER 1.4% vs -0.1%；Win% 69 vs 59",
+                "factor_breakdown": {
+                  "relative_strength_vs_qqq": null,
+                  "gap_pct": -0.91,
+                  "beta_proxy": null,
+                  "volume_signal": true,
+                  "news_count": 0,
+                  "extended_gap_penalty": 0.0,
+                  "vix_change_pct": 4.77,
+                  "prior_day_change_pct": 3.71
+                },
+                "edge_type": "Sector Edge",
+                "score_formula_display": "final = win_prob(69%) × ER(1.4%) × rr_weight(0.5) / 100",
+                "expected_high": 207.08,
+                "expected_low": 195.1,
+                "expected_close": 207.08,
+                "current_price": 204.12,
+                "upside_pct": 1.45,
+                "downside_risk_pct": 4.42,
+                "why_factors": [
+                  "昨日强势 +3.7% 今日 gap 可控",
+                  "Gap 未过度延伸",
+                  "Volume 信号"
+                ],
+                "why_today": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+                "catalyst": "Geopolitical Risk (Iran) · Geopolitical Risk (Iran)",
+                "invalidation": "Close below stop $193.87 · Geopolitical escalation invalidates mean-reversion",
+                "advisory": true,
+                "level_reasons": {
+                  "entry": {
+                    "price": 194.02,
+                    "source": "vwap",
+                    "confidence": 77,
+                    "reasons": [
+                      {
+                        "source": "vwap",
+                        "label": "VWAP",
+                        "price": 194.02,
+                        "weight_pct": 100.0,
+                        "matched": true,
+                        "primary": true
+                      }
+                    ]
+                  },
+                  "stop": {
+                    "price": 193.87,
+                    "source": "orb_low",
+                    "confidence": 89,
+                    "reasons": [
+                      {
+                        "source": "orb_low",
+                        "label": "ORB Low",
+                        "price": 193.87,
+                        "weight_pct": 70.0,
+                        "matched": true,
+                        "primary": true
+                      },
+                      {
+                        "source": "vwap",
+                        "label": "VWAP",
+                        "price": 194.02,
+                        "weight_pct": 30.0,
+                        "matched": true,
+                        "primary": false
+                      }
+                    ]
+                  },
+                  "target": {
+                    "price": 207.08,
+                    "source": "expected_close",
+                    "confidence": 77,
+                    "reasons": [
+                      {
+                        "source": "expected_close",
+                        "label": "Expected Close",
+                        "price": 207.08,
+                        "weight_pct": 100.0,
+                        "matched": true,
+                        "primary": true
+                      }
+                    ]
+                  }
+                },
+                "return_calculation": "(207.08-194.02)/194.02=6.73%",
+                "heuristic_expected_return_pct": 1.45,
+                "target_action": "卖出/获利",
+                "trade_summary_cn": "做多 NVDA：在 194.02 附近入场，目标 207.08，预期 +6.73%",
+                "trade_economics": {
+                  "account_size": 10000.0,
+                  "risk_pct": 1.0,
+                  "position_pct": 100.0,
+                  "shares": 666,
+                  "contracts": 1,
+                  "max_loss_usd": 99.9,
+                  "win_usd": 8697.96,
+                  "loss_usd": 99.9,
+                  "risk_per_share": 0.15,
+                  "reward_per_share": 13.06,
+                  "size_label": "Small",
+                  "display": "$10,000 → Win +$8698 / Loss -$100"
+                },
+                "position_sizing": {
+                  "risk_pct": 1.0,
+                  "position_pct": 100.0,
+                  "contracts": 1,
+                  "shares": 666,
+                  "max_loss_usd": 99.9,
+                  "size_label": "Small",
+                  "display": "Risk 1.0% → Position 100.0% → 1 unit(s) → Max Loss $99.9"
+                },
+                "why_wins_today": [
+                  {
+                    "rank": 1,
+                    "dimension": "expected_range",
+                    "label": "Largest Expected Range",
+                    "primary_value": 5.87,
+                    "runner_up_value": 4.83,
+                    "wins": true
+                  },
+                  {
+                    "rank": 2,
+                    "dimension": "win_prob",
+                    "label": "Highest Probability",
+                    "primary_value": 69.0,
+                    "runner_up_value": 59.0,
+                    "wins": true
+                  },
+                  {
+                    "rank": 3,
+                    "dimension": "risk_reward",
+                    "label": "Best Risk Reward",
+                    "primary_value": 87.05,
+                    "runner_up_value": 1.57,
+                    "wins": true
+                  }
+                ],
+                "why_not_alternatives": [
+                  {
+                    "symbol": "SPY",
+                    "rank": 2,
+                    "reasons": [
+                      "Win% 69 vs 59",
+                      "ER 6.7% vs -0.1%",
+                      "Score 0.5 vs 0.0",
+                      "R:R 87.05 vs 0.62",
+                      "Tradeable (Small) vs Pass"
+                    ],
+                    "summary": "Why NVDA over SPY: Win% 69 vs 59 · ER 6.7% vs -0.1% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.62 · Tradeable (Small) vs Pass"
+                  },
+                  {
+                    "symbol": "QQQ",
+                    "rank": 3,
+                    "reasons": [
+                      "Win% 69 vs 59",
+                      "ER 6.7% vs -0.2%",
+                      "Score 0.5 vs 0.0",
+                      "R:R 87.05 vs 0.34",
+                      "Tradeable (Small) vs Pass"
+                    ],
+                    "summary": "Why NVDA over QQQ: Win% 69 vs 59 · ER 6.7% vs -0.2% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.34 · Tradeable (Small) vs Pass"
+                  },
+                  {
+                    "symbol": "SMH",
+                    "rank": 4,
+                    "reasons": [
+                      "Win% 69 vs 59",
+                      "ER 6.7% vs -0.2%",
+                      "Score 0.5 vs 0.0",
+                      "R:R 87.05 vs 0.17",
+                      "Tradeable (Small) vs Pass"
+                    ],
+                    "summary": "Why NVDA over SMH: Win% 69 vs 59 · ER 6.7% vs -0.2% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.17 · Tradeable (Small) vs Pass"
+                  },
+                  {
+                    "symbol": "TQQQ",
+                    "rank": 5,
+                    "reasons": [
+                      "Win% 69 vs 54",
+                      "ER 6.7% vs -0.5%",
+                      "Score 0.5 vs 0.0",
+                      "R:R 87.05 vs 0.12",
+                      "Tradeable (Small) vs Pass"
+                    ],
+                    "summary": "Why NVDA over TQQQ: Win% 69 vs 54 · ER 6.7% vs -0.5% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.12 · Tradeable (Small) vs Pass"
+                  },
+                  {
+                    "symbol": "TSLA",
+                    "rank": 6,
+                    "reasons": [
+                      "Win% 69 vs 59",
+                      "ER 6.7% vs -0.5%",
+                      "Score 0.5 vs 0.0",
+                      "R:R 87.05 vs 1.57",
+                      "Tradeable (Small) vs Pass"
+                    ],
+                    "summary": "Why NVDA over TSLA: Win% 69 vs 59 · ER 6.7% vs -0.5% · Score 0.5 vs 0.0 · R:R 87.05 vs 1.57 · Tradeable (Small) vs Pass"
+                  }
+                ]
+              }
+            ],
+            "watchlist_items": [
+              {
+                "symbol": "SPY",
+                "rank": 2,
+                "win_prob": 59.0,
+                "expected_return_pct": -0.11,
+                "trade_action": "Pass",
+                "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+                "note": "Monitor — below trade threshold"
+              },
+              {
+                "symbol": "QQQ",
+                "rank": 3,
+                "win_prob": 59.0,
+                "expected_return_pct": -0.16,
+                "trade_action": "Pass",
+                "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+                "note": "Monitor — below trade threshold"
+              },
+              {
+                "symbol": "SMH",
+                "rank": 4,
+                "win_prob": 59.0,
+                "expected_return_pct": -0.21,
+                "trade_action": "Pass",
+                "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+                "note": "Monitor — below trade threshold"
+              },
+              {
+                "symbol": "TQQQ",
+                "rank": 5,
+                "win_prob": 54.0,
+                "expected_return_pct": -0.48,
+                "trade_action": "Pass",
+                "why": "Volume 信号 · 上行空间 <1.0%",
+                "note": "Monitor — below trade threshold"
+              },
+              {
+                "symbol": "TSLA",
+                "rank": 6,
+                "win_prob": 59.0,
+                "expected_return_pct": -0.45,
+                "trade_action": "Pass",
+                "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+                "note": "Monitor — below trade threshold"
+              }
+            ],
+            "advisory": true
+          },
+          "edges": {
+            "macro_edge": {
+              "edge": "YES",
+              "why": "今日有重大催化剂（含地缘/突发）：Geopolitical Risk (Iran)、Oil Rally、Trade Policy",
+              "catalyst": "Geopolitical Risk (Iran)、Oil Rally、Trade Policy"
+            },
+            "index_edge": {
+              "edge": "YES",
+              "why": "QQQ 盘前/开盘 +0.28%"
+            },
+            "sector_edge": {
+              "edge": "YES",
+              "why": "SMH 领先 QQQ +1.71%",
+              "sector": "Semiconductor"
+            },
+            "stock_edge": {
+              "edge": "NO",
+              "why": "无单票 RS+新闻+量能共振"
+            },
+            "advisory": "ADVISORY — 不构成投资建议"
+          }
+        }
+      },
+      "r0": {
+        "label": "AI Expansion",
+        "confidence": 0.82
+      },
+      "hypothesis": {
+        "id": "H-2026-07-08-001",
+        "statement": "AI/Semiconductor leads index today; macro is secondary variable",
+        "evidence": [
+          "VIX=16.9 (low fear)",
+          "NVDA +3.6%",
+          "SMH +2.0%"
+        ],
+        "counter_evidence": [
+          "Breadth 29% (narrow market)"
+        ],
+        "confidence": 0.81,
+        "status": "待验证"
+      },
+      "trade_candidates": [
+        {
+          "symbol": "NVDA",
+          "win_prob": 69.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Trend",
+                "key": "trend",
+                "points": 10.0
+              },
+              {
+                "factor": "Gap",
+                "key": "gap",
+                "points": 5.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 69.0,
+            "raw_total": 69.0,
+            "was_clamped": false
+          },
+          "expected_return_pct": 1.45,
+          "expected_high": 207.08,
+          "expected_low": 195.1,
+          "expected_close": 207.08,
+          "current_price": 204.12,
+          "upside_pct": 1.45,
+          "downside_risk_pct": 4.42,
+          "risk_reward": 0.33,
+          "final_score": 0.5,
+          "trade_action": "Small",
+          "trade": "Small",
+          "gap_pct": -0.91,
+          "relative_strength": null,
+          "prior_day_change_pct": 3.71,
+          "why_factors": [
+            "昨日强势 +3.7% 今日 gap 可控",
+            "Gap 未过度延伸",
+            "Volume 信号"
+          ],
+          "why": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+          "score": 5,
+          "news_count": 0,
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -0.91,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": 3.71
+          },
+          "edge_type": "Sector Edge",
+          "score_formula_display": "final = win_prob(69%) × ER(1.4%) × rr_weight(0.5) / 100",
+          "rr_weight": 0.5,
+          "why_vs_runner_up": "ER 1.4% vs -0.1%；Win% 69 vs 59",
+          "advisory": true,
+          "rank": 1
+        },
+        {
+          "symbol": "SPY",
+          "win_prob": 59.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Gap",
+                "key": "gap",
+                "points": 5.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 59.0,
+            "raw_total": 59.0,
+            "was_clamped": false
+          },
+          "expected_return_pct": -0.11,
+          "expected_high": 749.13,
+          "expected_low": 739.44,
+          "expected_close": 744.61,
+          "current_price": 745.4,
+          "upside_pct": 0.5,
+          "downside_risk_pct": 0.8,
+          "risk_reward": 0.62,
+          "final_score": 0.0,
+          "trade_action": "Pass",
+          "trade": "Pass",
+          "gap_pct": -0.61,
+          "relative_strength": null,
+          "prior_day_change_pct": -0.96,
+          "why_factors": [
+            "Gap 未过度延伸",
+            "Volume 信号",
+            "上行空间 <1.0%"
+          ],
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "score": 0,
+          "news_count": 0,
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -0.61,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": -0.96
+          },
+          "edge_type": "Index Edge",
+          "score_formula_display": "final = win_prob(59%) × ER(-0.1%) × rr_weight(0.5) / 100",
+          "rr_weight": 0.5,
+          "why_vs_runner_up": "—",
+          "advisory": true,
+          "rank": 2
+        },
+        {
+          "symbol": "QQQ",
+          "win_prob": 59.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Gap",
+                "key": "gap",
+                "points": 5.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 59.0,
+            "raw_total": 59.0,
+            "was_clamped": false
+          },
+          "expected_return_pct": -0.16,
+          "expected_high": 715.0,
+          "expected_low": 700.91,
+          "expected_close": 710.33,
+          "current_price": 711.44,
+          "upside_pct": 0.5,
+          "downside_risk_pct": 1.48,
+          "risk_reward": 0.34,
+          "final_score": 0.0,
+          "trade_action": "Pass",
+          "trade": "Pass",
+          "gap_pct": -0.63,
+          "relative_strength": null,
+          "prior_day_change_pct": -1.77,
+          "why_factors": [
+            "Gap 未过度延伸",
+            "Volume 信号",
+            "上行空间 <1.0%"
+          ],
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "score": 0,
+          "news_count": 0,
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -0.63,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": -1.77
+          },
+          "edge_type": "Index Edge",
+          "score_formula_display": "final = win_prob(59%) × ER(-0.2%) × rr_weight(0.5) / 100",
+          "rr_weight": 0.5,
+          "why_vs_runner_up": "—",
+          "advisory": true,
+          "rank": 3
+        },
+        {
+          "symbol": "SMH",
+          "win_prob": 59.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Gap",
+                "key": "gap",
+                "points": 5.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 59.0,
+            "raw_total": 59.0,
+            "was_clamped": false
+          },
+          "expected_return_pct": -0.21,
+          "expected_high": 595.96,
+          "expected_low": 575.04,
+          "expected_close": 591.73,
+          "current_price": 593.0,
+          "upside_pct": 0.5,
+          "downside_risk_pct": 3.03,
+          "risk_reward": 0.17,
+          "final_score": 0.0,
+          "trade_action": "Pass",
+          "trade": "Pass",
+          "gap_pct": -1.01,
+          "relative_strength": null,
+          "prior_day_change_pct": -2.22,
+          "why_factors": [
+            "Gap 未过度延伸",
+            "Volume 信号",
+            "上行空间 <1.0%"
+          ],
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "score": 0,
+          "news_count": 0,
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -1.01,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": -2.22
+          },
+          "edge_type": "Sector Edge",
+          "score_formula_display": "final = win_prob(59%) × ER(-0.2%) × rr_weight(0.5) / 100",
+          "rr_weight": 0.5,
+          "why_vs_runner_up": "—",
+          "advisory": true,
+          "rank": 4
+        },
+        {
+          "symbol": "TQQQ",
+          "win_prob": 54.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 54.0,
+            "raw_total": 54.0,
+            "was_clamped": false
+          },
+          "expected_return_pct": -0.48,
+          "expected_high": 73.08,
+          "expected_low": 69.57,
+          "expected_close": 72.37,
+          "current_price": 72.72,
+          "upside_pct": 0.5,
+          "downside_risk_pct": 4.33,
+          "risk_reward": 0.12,
+          "final_score": 0.0,
+          "trade_action": "Pass",
+          "trade": "Pass",
+          "gap_pct": -1.99,
+          "relative_strength": null,
+          "prior_day_change_pct": -5.33,
+          "why_factors": [
+            "Volume 信号",
+            "上行空间 <1.0%"
+          ],
+          "why": "Volume 信号 · 上行空间 <1.0%",
+          "score": 0,
+          "news_count": 0,
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -1.99,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": -5.33
+          },
+          "edge_type": "Index Edge",
+          "score_formula_display": "final = win_prob(54%) × ER(-0.5%) × rr_weight(0.5) / 100",
+          "rr_weight": 0.5,
+          "why_vs_runner_up": "—",
+          "advisory": true,
+          "rank": 5
+        },
+        {
+          "symbol": "TSLA",
+          "win_prob": 59.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Gap",
+                "key": "gap",
+                "points": 5.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 59.0,
+            "raw_total": 59.0,
+            "was_clamped": false
+          },
+          "expected_return_pct": -0.45,
+          "expected_high": 399.63,
+          "expected_low": 390.51,
+          "expected_close": 392.28,
+          "current_price": 394.06,
+          "upside_pct": 1.41,
+          "downside_risk_pct": 0.9,
+          "risk_reward": 1.57,
+          "final_score": 0.0,
+          "trade_action": "Pass",
+          "trade": "Pass",
+          "gap_pct": -0.87,
+          "relative_strength": null,
+          "prior_day_change_pct": -6.35,
+          "why_factors": [
+            "Gap 未过度延伸",
+            "Volume 信号",
+            "上行空间 <1.0%"
+          ],
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "score": 0,
+          "news_count": 0,
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -0.87,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": -6.35
+          },
+          "edge_type": "Range",
+          "score_formula_display": "final = win_prob(59%) × ER(-0.5%) × rr_weight(0.79) / 100",
+          "rr_weight": 0.79,
+          "why_vs_runner_up": "—",
+          "advisory": true,
+          "rank": 6
+        }
+      ],
+      "best_opportunity": {
+        "direction": "NO TRADE",
+        "symbol": "—",
+        "instrument": "—",
+        "confidence": 45,
+        "entry": "—",
+        "stop": "—",
+        "target": "—",
+        "targets": [],
+        "duration": "—",
+        "why": [
+          "今日无任何标的达到交易阈值"
+        ],
+        "why_chain": "今日无任何标的达到交易阈值",
+        "avoid": [],
+        "one_liner": "今日无任何标的达到交易阈值",
+        "p16_gate": "No Trade",
+        "threshold_message": "今日无任何标的达到交易阈值",
+        "advisory": true
+      },
+      "best_trades": {
+        "primary": null,
+        "secondary": null,
+        "watchlist": null,
+        "index_trade": "NO TRADE",
+        "threshold_message": "今日无任何标的达到交易阈值",
+        "stock_trades": [],
+        "top_trades": [
+          {
+            "rank": 1,
+            "symbol": "NVDA",
+            "direction": "LONG",
+            "instrument": "Stock",
+            "confidence": 69,
+            "confidence_stars": "★★★☆☆",
+            "expected_move": "+6.73%",
+            "expected_return_pct": 6.73,
+            "win_prob": 69.0,
+            "win_prob_breakdown": {
+              "components": [
+                {
+                  "factor": "Base",
+                  "key": "base",
+                  "points": 50.0
+                },
+                {
+                  "factor": "Trend",
+                  "key": "trend",
+                  "points": 10.0
+                },
+                {
+                  "factor": "Gap",
+                  "key": "gap",
+                  "points": 5.0
+                },
+                {
+                  "factor": "Volume",
+                  "key": "volume",
+                  "points": 4.0
+                }
+              ],
+              "total": 69.0,
+              "raw_total": 69.0,
+              "was_clamped": false
+            },
+            "risk_reward": 87.05,
+            "final_score": 0.5,
+            "trade_action": "Small",
+            "relative_strength": null,
+            "entry": "Above 194.0 (VWAP)",
+            "entry_source": "vwap",
+            "entry_price": 194.02,
+            "stop": "193.9 (ORB低点)",
+            "stop_source": "orb_low",
+            "stop_price": 193.87,
+            "target": "207.1 (预期收盘)",
+            "target_source": "expected_close",
+            "target_price": 207.08,
+            "targets": [
+              "207.1 (预期收盘)"
+            ],
+            "level_anchors": {
+              "vwap": 194.02,
+              "orb_high": 197.45,
+              "orb_low": 193.87,
+              "prev_high": 205.15,
+              "prev_low": 195.105,
+              "prior_close": 196.93,
+              "orb_from_minute": true
+            },
+            "why": [
+              "昨日强势 +3.7% 今日 gap 可控",
+              "Gap 未过度延伸",
+              "Volume 信号"
+            ],
+            "why_chain": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+            "why_vs_runner_up": "ER 1.4% vs -0.1%；Win% 69 vs 59",
+            "factor_breakdown": {
+              "relative_strength_vs_qqq": null,
+              "gap_pct": -0.91,
+              "beta_proxy": null,
+              "volume_signal": true,
+              "news_count": 0,
+              "extended_gap_penalty": 0.0,
+              "vix_change_pct": 4.77,
+              "prior_day_change_pct": 3.71
+            },
+            "edge_type": "Sector Edge",
+            "score_formula_display": "final = win_prob(69%) × ER(1.4%) × rr_weight(0.5) / 100",
+            "expected_high": 207.08,
+            "expected_low": 195.1,
+            "expected_close": 207.08,
+            "current_price": 204.12,
+            "upside_pct": 1.45,
+            "downside_risk_pct": 4.42,
+            "why_factors": [
+              "昨日强势 +3.7% 今日 gap 可控",
+              "Gap 未过度延伸",
+              "Volume 信号"
+            ],
+            "why_today": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+            "catalyst": "Geopolitical Risk (Iran) · Geopolitical Risk (Iran)",
+            "invalidation": "Close below stop $193.87 · Geopolitical escalation invalidates mean-reversion",
+            "advisory": true,
+            "level_reasons": {
+              "entry": {
+                "price": 194.02,
+                "source": "vwap",
+                "confidence": 77,
+                "reasons": [
+                  {
+                    "source": "vwap",
+                    "label": "VWAP",
+                    "price": 194.02,
+                    "weight_pct": 100.0,
+                    "matched": true,
+                    "primary": true
+                  }
+                ]
+              },
+              "stop": {
+                "price": 193.87,
+                "source": "orb_low",
+                "confidence": 89,
+                "reasons": [
+                  {
+                    "source": "orb_low",
+                    "label": "ORB Low",
+                    "price": 193.87,
+                    "weight_pct": 70.0,
+                    "matched": true,
+                    "primary": true
+                  },
+                  {
+                    "source": "vwap",
+                    "label": "VWAP",
+                    "price": 194.02,
+                    "weight_pct": 30.0,
+                    "matched": true,
+                    "primary": false
+                  }
+                ]
+              },
+              "target": {
+                "price": 207.08,
+                "source": "expected_close",
+                "confidence": 77,
+                "reasons": [
+                  {
+                    "source": "expected_close",
+                    "label": "Expected Close",
+                    "price": 207.08,
+                    "weight_pct": 100.0,
+                    "matched": true,
+                    "primary": true
+                  }
+                ]
+              }
+            },
+            "return_calculation": "(207.08-194.02)/194.02=6.73%",
+            "heuristic_expected_return_pct": 1.45,
+            "target_action": "卖出/获利",
+            "trade_summary_cn": "做多 NVDA：在 194.02 附近入场，目标 207.08，预期 +6.73%",
+            "trade_economics": {
+              "account_size": 10000.0,
+              "risk_pct": 1.0,
+              "position_pct": 100.0,
+              "shares": 666,
+              "contracts": 1,
+              "max_loss_usd": 99.9,
+              "win_usd": 8697.96,
+              "loss_usd": 99.9,
+              "risk_per_share": 0.15,
+              "reward_per_share": 13.06,
+              "size_label": "Small",
+              "display": "$10,000 → Win +$8698 / Loss -$100"
+            },
+            "position_sizing": {
+              "risk_pct": 1.0,
+              "position_pct": 100.0,
+              "contracts": 1,
+              "shares": 666,
+              "max_loss_usd": 99.9,
+              "size_label": "Small",
+              "display": "Risk 1.0% → Position 100.0% → 1 unit(s) → Max Loss $99.9"
+            },
+            "why_wins_today": [
+              {
+                "rank": 1,
+                "dimension": "expected_range",
+                "label": "Largest Expected Range",
+                "primary_value": 5.87,
+                "runner_up_value": 4.83,
+                "wins": true
+              },
+              {
+                "rank": 2,
+                "dimension": "win_prob",
+                "label": "Highest Probability",
+                "primary_value": 69.0,
+                "runner_up_value": 59.0,
+                "wins": true
+              },
+              {
+                "rank": 3,
+                "dimension": "risk_reward",
+                "label": "Best Risk Reward",
+                "primary_value": 87.05,
+                "runner_up_value": 1.57,
+                "wins": true
+              }
+            ],
+            "why_not_alternatives": [
+              {
+                "symbol": "SPY",
+                "rank": 2,
+                "reasons": [
+                  "Win% 69 vs 59",
+                  "ER 6.7% vs -0.1%",
+                  "Score 0.5 vs 0.0",
+                  "R:R 87.05 vs 0.62",
+                  "Tradeable (Small) vs Pass"
+                ],
+                "summary": "Why NVDA over SPY: Win% 69 vs 59 · ER 6.7% vs -0.1% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.62 · Tradeable (Small) vs Pass"
+              },
+              {
+                "symbol": "QQQ",
+                "rank": 3,
+                "reasons": [
+                  "Win% 69 vs 59",
+                  "ER 6.7% vs -0.2%",
+                  "Score 0.5 vs 0.0",
+                  "R:R 87.05 vs 0.34",
+                  "Tradeable (Small) vs Pass"
+                ],
+                "summary": "Why NVDA over QQQ: Win% 69 vs 59 · ER 6.7% vs -0.2% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.34 · Tradeable (Small) vs Pass"
+              },
+              {
+                "symbol": "SMH",
+                "rank": 4,
+                "reasons": [
+                  "Win% 69 vs 59",
+                  "ER 6.7% vs -0.2%",
+                  "Score 0.5 vs 0.0",
+                  "R:R 87.05 vs 0.17",
+                  "Tradeable (Small) vs Pass"
+                ],
+                "summary": "Why NVDA over SMH: Win% 69 vs 59 · ER 6.7% vs -0.2% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.17 · Tradeable (Small) vs Pass"
+              },
+              {
+                "symbol": "TQQQ",
+                "rank": 5,
+                "reasons": [
+                  "Win% 69 vs 54",
+                  "ER 6.7% vs -0.5%",
+                  "Score 0.5 vs 0.0",
+                  "R:R 87.05 vs 0.12",
+                  "Tradeable (Small) vs Pass"
+                ],
+                "summary": "Why NVDA over TQQQ: Win% 69 vs 54 · ER 6.7% vs -0.5% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.12 · Tradeable (Small) vs Pass"
+              },
+              {
+                "symbol": "TSLA",
+                "rank": 6,
+                "reasons": [
+                  "Win% 69 vs 59",
+                  "ER 6.7% vs -0.5%",
+                  "Score 0.5 vs 0.0",
+                  "R:R 87.05 vs 1.57",
+                  "Tradeable (Small) vs Pass"
+                ],
+                "summary": "Why NVDA over TSLA: Win% 69 vs 59 · ER 6.7% vs -0.5% · Score 0.5 vs 0.0 · R:R 87.05 vs 1.57 · Tradeable (Small) vs Pass"
+              }
+            ]
+          }
+        ],
+        "watchlist_items": [
+          {
+            "symbol": "SPY",
+            "rank": 2,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.11,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "QQQ",
+            "rank": 3,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.16,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "SMH",
+            "rank": 4,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.21,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "TQQQ",
+            "rank": 5,
+            "win_prob": 54.0,
+            "expected_return_pct": -0.48,
+            "trade_action": "Pass",
+            "why": "Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "TSLA",
+            "rank": 6,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.45,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          }
+        ],
+        "advisory": true
+      },
+      "edges": {
+        "macro_edge": {
+          "edge": "YES",
+          "why": "今日有重大催化剂（含地缘/突发）：Geopolitical Risk (Iran)、Oil Rally、Trade Policy",
+          "catalyst": "Geopolitical Risk (Iran)、Oil Rally、Trade Policy"
+        },
+        "index_edge": {
+          "edge": "YES",
+          "why": "QQQ 盘前/开盘 +0.28%"
+        },
+        "sector_edge": {
+          "edge": "YES",
+          "why": "SMH 领先 QQQ +1.71%",
+          "sector": "Semiconductor"
+        },
+        "stock_edge": {
+          "edge": "NO",
+          "why": "无单票 RS+新闻+量能共振"
+        },
+        "advisory": "ADVISORY — 不构成投资建议"
+      },
+      "index_trade": "NO TRADE",
+      "stock_trades": [],
+      "transparency": {
+        "top_trades": [
+          {
+            "rank": 1,
+            "symbol": "NVDA",
+            "direction": "LONG",
+            "win_prob": 69.0,
+            "expected_return_pct": 6.73,
+            "risk_reward": 87.05,
+            "entry_price": 194.02,
+            "stop_price": 193.87,
+            "target_price": 207.08,
+            "why_today": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+            "catalyst": "Geopolitical Risk (Iran) · Geopolitical Risk (Iran)",
+            "invalidation": "Close below stop $193.87 · Geopolitical escalation invalidates mean-reversion",
+            "trade_action": "Small"
+          }
+        ],
+        "watchlist": [
+          {
+            "symbol": "SPY",
+            "rank": 2,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.11,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "QQQ",
+            "rank": 3,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.16,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "SMH",
+            "rank": 4,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.21,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "TQQQ",
+            "rank": 5,
+            "win_prob": 54.0,
+            "expected_return_pct": -0.48,
+            "trade_action": "Pass",
+            "why": "Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          },
+          {
+            "symbol": "TSLA",
+            "rank": 6,
+            "win_prob": 59.0,
+            "expected_return_pct": -0.45,
+            "trade_action": "Pass",
+            "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+            "note": "Monitor — below trade threshold"
+          }
+        ],
+        "macro_calendar": {
+          "catalysts": [
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+              "evidence": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+              "evidence": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+              "evidence": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+              "evidence": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Oil Rally",
+              "category": "commodity",
+              "impact": "high",
+              "impact_score": 77,
+              "release": "Energy / crude rally",
+              "evidence": "XLE +1.8% · 2 oil headlines",
+              "source": "market+news"
+            },
+            {
+              "name": "Trade Policy",
+              "category": "breaking",
+              "impact": "medium",
+              "impact_score": 65,
+              "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "source": "news",
+              "theme": "trade",
+              "severity": "medium"
+            }
+          ],
+          "has_material_catalyst": true,
+          "headline": "Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)",
+          "summary": "Breaking: Geopolitical Risk (Iran), Geopolitical Risk (Iran), Geopolitical Risk (Iran) · Commodity: Oil Rally",
+          "scheduled": [],
+          "breaking": [
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+              "evidence": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+              "evidence": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+              "evidence": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Geopolitical Risk (Iran)",
+              "category": "breaking",
+              "impact": "high",
+              "impact_score": 88,
+              "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+              "evidence": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+              "source": "news",
+              "theme": "geopolitics",
+              "severity": "high"
+            },
+            {
+              "name": "Trade Policy",
+              "category": "breaking",
+              "impact": "medium",
+              "impact_score": 65,
+              "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "source": "news",
+              "theme": "trade",
+              "severity": "medium"
+            }
+          ],
+          "commodity": [
+            {
+              "name": "Oil Rally",
+              "category": "commodity",
+              "impact": "high",
+              "impact_score": 77,
+              "release": "Energy / crude rally",
+              "evidence": "XLE +1.8% · 2 oil headlines",
+              "source": "market+news"
+            }
+          ]
+        },
+        "trade_plan": {
+          "gate": "Wait",
+          "conditions_long": [
+            "IF QQQ > 712.3 (昨日高点) AND breadth positive THEN LONG QQQ / Call（突破昨高）",
+            "IF de-escalation headline + QQQ reclaims prior high THEN LONG risk-on bounce",
+            "IF oil stabilizes + XLE fades AND QQQ holds THEN LONG growth"
+          ],
+          "conditions_short": [
+            "IF QQQ < 700.9 (昨日低点) AND risk-off confirmed THEN SHORT / Put（破位昨低）",
+            "IF oil spike + SMH breaks prior low THEN SHORT SMH / defensive hedge",
+            "IF oil breaks higher + semis weak THEN SHORT SMH"
+          ],
+          "conditions_wait": [
+            "IF major data not yet released THEN WAIT — no pre-release index bets",
+            "IF geopolitical headlines escalate AND VIX spikes THEN WAIT — reduce size, no chase",
+            "IF QQQ between 700.9 (昨日低点) and 712.3 (昨日高点) THEN WAIT — no edge in range",
+            "IF oil whipsaw ±2% intraday THEN WAIT — energy volatility"
+          ],
+          "primary_driver": "Geopolitical Risk (Iran)",
+          "macro_headline": "Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)"
+        },
+        "todays_opportunities": [
+          {
+            "symbol": "NVDA",
+            "stars": "★★★☆☆",
+            "label": "NVDA SHORT",
+            "win_prob": 69.0,
+            "action": "Trade",
+            "trade_action": "Small",
+            "final_score": 0.5,
+            "is_primary": false
+          },
+          {
+            "symbol": "SPY",
+            "stars": "★☆☆☆☆",
+            "label": "SPY Avoid",
+            "win_prob": 59.0,
+            "action": "Avoid",
+            "trade_action": "Pass",
+            "final_score": 0.0,
+            "is_primary": false
+          },
+          {
+            "symbol": "QQQ",
+            "stars": "★☆☆☆☆",
+            "label": "QQQ Avoid",
+            "win_prob": 59.0,
+            "action": "Avoid",
+            "trade_action": "Pass",
+            "final_score": 0.0,
+            "is_primary": false
+          },
+          {
+            "symbol": "SMH",
+            "stars": "★☆☆☆☆",
+            "label": "SMH Avoid",
+            "win_prob": 59.0,
+            "action": "Avoid",
+            "trade_action": "Pass",
+            "final_score": 0.0,
+            "is_primary": false
+          },
+          {
+            "symbol": "TQQQ",
+            "stars": "★☆☆☆☆",
+            "label": "TQQQ Avoid",
+            "win_prob": 54.0,
+            "action": "Avoid",
+            "trade_action": "Pass",
+            "final_score": 0.0,
+            "is_primary": false
+          },
+          {
+            "symbol": "TSLA",
+            "stars": "★☆☆☆☆",
+            "label": "TSLA Avoid",
+            "win_prob": 59.0,
+            "action": "Avoid",
+            "trade_action": "Pass",
+            "final_score": 0.0,
+            "is_primary": false
+          }
+        ],
+        "index_rejection_reasons": [
+          {
+            "factor": "P16 Gate",
+            "status": "No Trade",
+            "detail": "指数敞口：No Trade"
+          },
+          {
+            "factor": "SPY",
+            "status": "Pass",
+            "detail": "Score 0.0 未达阈值"
+          },
+          {
+            "factor": "Macro Event",
+            "status": "High uncertainty",
+            "detail": "Geopolitical Risk (Iran)、Geopolitical Risk (Iran)、Geopolitical Risk (Iran)"
+          }
+        ],
+        "day_risks": {
+          "risks": [
+            "Geopolitical Risk (Iran) / Geopolitical Risk (Iran) Whipsaw"
+          ],
+          "donts": [
+            "Don't Trade Before Data Release"
+          ],
+          "headline": "Geopolitical Risk (Iran) / Geopolitical Risk (Iran) Whipsaw"
+        }
+      },
+      "macro_calendar": {
+        "catalysts": [
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+            "evidence": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+            "evidence": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+            "evidence": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+            "evidence": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Oil Rally",
+            "category": "commodity",
+            "impact": "high",
+            "impact_score": 77,
+            "release": "Energy / crude rally",
+            "evidence": "XLE +1.8% · 2 oil headlines",
+            "source": "market+news"
+          },
+          {
+            "name": "Trade Policy",
+            "category": "breaking",
+            "impact": "medium",
+            "impact_score": 65,
+            "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "source": "news",
+            "theme": "trade",
+            "severity": "medium"
+          }
+        ],
+        "has_material_catalyst": true,
+        "headline": "Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)",
+        "summary": "Breaking: Geopolitical Risk (Iran), Geopolitical Risk (Iran), Geopolitical Risk (Iran) · Commodity: Oil Rally",
+        "scheduled": [],
+        "breaking": [
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+            "evidence": "GrainCorp Pushes for Australia Biofuel Mandates After Iran War",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+            "evidence": "Emerging Currencies Slide as US Forces Launch New Iran Strikes",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+            "evidence": "Stocks Fall as US-Iran Jitters Spur Rally in Oil: Markets Wrap",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Geopolitical Risk (Iran)",
+            "category": "breaking",
+            "impact": "high",
+            "impact_score": 88,
+            "release": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+            "evidence": "US Stocks Pare Iran War-Driven Losses After Dip Buyers Emerge",
+            "source": "news",
+            "theme": "geopolitics",
+            "severity": "high"
+          },
+          {
+            "name": "Trade Policy",
+            "category": "breaking",
+            "impact": "medium",
+            "impact_score": 65,
+            "release": "Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "source": "news",
+            "theme": "trade",
+            "severity": "medium"
+          }
+        ],
+        "commodity": [
+          {
+            "name": "Oil Rally",
+            "category": "commodity",
+            "impact": "high",
+            "impact_score": 77,
+            "release": "Energy / crude rally",
+            "evidence": "XLE +1.8% · 2 oil headlines",
+            "source": "market+news"
+          }
+        ]
+      },
+      "driver_tree": {
+        "primary": {
+          "type": "Political",
+          "label": "Geopolitical Risk (Iran)",
+          "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+          "score": 96,
+          "source": "rules"
+        },
+        "secondary": {
+          "type": "Macro",
+          "label": "Oil Rally",
+          "evidence": "XLE +1.8% · 2 oil headlines",
+          "score": 77,
+          "source": "rules"
+        },
+        "tertiary": {
+          "type": "Political",
+          "label": "Trade Policy",
+          "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+          "score": 73,
+          "source": "rules"
+        },
+        "all_ranked": [
+          {
+            "type": "Political",
+            "label": "Geopolitical Risk (Iran)",
+            "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "score": 96,
+            "source": "rules"
+          },
+          {
+            "type": "Macro",
+            "label": "Oil Rally",
+            "evidence": "XLE +1.8% · 2 oil headlines",
+            "score": 77,
+            "source": "rules"
+          },
+          {
+            "type": "Political",
+            "label": "Trade Policy",
+            "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "score": 73,
+            "source": "rules"
+          },
+          {
+            "type": "Momentum",
+            "label": "AI Momentum",
+            "evidence": "SMH +2.0% leading",
+            "score": 58,
+            "source": "rules"
+          }
+        ],
+        "session_update_slot": true
+      },
+      "trade_plan": {
+        "gate": "Wait",
+        "conditions_long": [
+          "IF QQQ > 712.3 (昨日高点) AND breadth positive THEN LONG QQQ / Call（突破昨高）",
+          "IF de-escalation headline + QQQ reclaims prior high THEN LONG risk-on bounce",
+          "IF oil stabilizes + XLE fades AND QQQ holds THEN LONG growth"
+        ],
+        "conditions_short": [
+          "IF QQQ < 700.9 (昨日低点) AND risk-off confirmed THEN SHORT / Put（破位昨低）",
+          "IF oil spike + SMH breaks prior low THEN SHORT SMH / defensive hedge",
+          "IF oil breaks higher + semis weak THEN SHORT SMH"
+        ],
+        "conditions_wait": [
+          "IF major data not yet released THEN WAIT — no pre-release index bets",
+          "IF geopolitical headlines escalate AND VIX spikes THEN WAIT — reduce size, no chase",
+          "IF QQQ between 700.9 (昨日低点) and 712.3 (昨日高点) THEN WAIT — no edge in range",
+          "IF oil whipsaw ±2% intraday THEN WAIT — energy volatility"
+        ],
+        "primary_driver": "Geopolitical Risk (Iran)",
+        "macro_headline": "Geopolitical Risk (Iran) + Geopolitical Risk (Iran) + Geopolitical Risk (Iran)"
+      },
+      "top_trades": [
+        {
+          "rank": 1,
+          "symbol": "NVDA",
+          "direction": "LONG",
+          "instrument": "Stock",
+          "confidence": 69,
+          "confidence_stars": "★★★☆☆",
+          "expected_move": "+6.73%",
+          "expected_return_pct": 6.73,
+          "win_prob": 69.0,
+          "win_prob_breakdown": {
+            "components": [
+              {
+                "factor": "Base",
+                "key": "base",
+                "points": 50.0
+              },
+              {
+                "factor": "Trend",
+                "key": "trend",
+                "points": 10.0
+              },
+              {
+                "factor": "Gap",
+                "key": "gap",
+                "points": 5.0
+              },
+              {
+                "factor": "Volume",
+                "key": "volume",
+                "points": 4.0
+              }
+            ],
+            "total": 69.0,
+            "raw_total": 69.0,
+            "was_clamped": false
+          },
+          "risk_reward": 87.05,
+          "final_score": 0.5,
+          "trade_action": "Small",
+          "relative_strength": null,
+          "entry": "Above 194.0 (VWAP)",
+          "entry_source": "vwap",
+          "entry_price": 194.02,
+          "stop": "193.9 (ORB低点)",
+          "stop_source": "orb_low",
+          "stop_price": 193.87,
+          "target": "207.1 (预期收盘)",
+          "target_source": "expected_close",
+          "target_price": 207.08,
+          "targets": [
+            "207.1 (预期收盘)"
+          ],
+          "level_anchors": {
+            "vwap": 194.02,
+            "orb_high": 197.45,
+            "orb_low": 193.87,
+            "prev_high": 205.15,
+            "prev_low": 195.105,
+            "prior_close": 196.93,
+            "orb_from_minute": true
+          },
+          "why": [
+            "昨日强势 +3.7% 今日 gap 可控",
+            "Gap 未过度延伸",
+            "Volume 信号"
+          ],
+          "why_chain": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+          "why_vs_runner_up": "ER 1.4% vs -0.1%；Win% 69 vs 59",
+          "factor_breakdown": {
+            "relative_strength_vs_qqq": null,
+            "gap_pct": -0.91,
+            "beta_proxy": null,
+            "volume_signal": true,
+            "news_count": 0,
+            "extended_gap_penalty": 0.0,
+            "vix_change_pct": 4.77,
+            "prior_day_change_pct": 3.71
+          },
+          "edge_type": "Sector Edge",
+          "score_formula_display": "final = win_prob(69%) × ER(1.4%) × rr_weight(0.5) / 100",
+          "expected_high": 207.08,
+          "expected_low": 195.1,
+          "expected_close": 207.08,
+          "current_price": 204.12,
+          "upside_pct": 1.45,
+          "downside_risk_pct": 4.42,
+          "why_factors": [
+            "昨日强势 +3.7% 今日 gap 可控",
+            "Gap 未过度延伸",
+            "Volume 信号"
+          ],
+          "why_today": "昨日强势 +3.7% 今日 gap 可控 · Gap 未过度延伸 · Volume 信号",
+          "catalyst": "Geopolitical Risk (Iran) · Geopolitical Risk (Iran)",
+          "invalidation": "Close below stop $193.87 · Geopolitical escalation invalidates mean-reversion",
+          "advisory": true,
+          "level_reasons": {
+            "entry": {
+              "price": 194.02,
+              "source": "vwap",
+              "confidence": 77,
+              "reasons": [
+                {
+                  "source": "vwap",
+                  "label": "VWAP",
+                  "price": 194.02,
+                  "weight_pct": 100.0,
+                  "matched": true,
+                  "primary": true
+                }
+              ]
+            },
+            "stop": {
+              "price": 193.87,
+              "source": "orb_low",
+              "confidence": 89,
+              "reasons": [
+                {
+                  "source": "orb_low",
+                  "label": "ORB Low",
+                  "price": 193.87,
+                  "weight_pct": 70.0,
+                  "matched": true,
+                  "primary": true
+                },
+                {
+                  "source": "vwap",
+                  "label": "VWAP",
+                  "price": 194.02,
+                  "weight_pct": 30.0,
+                  "matched": true,
+                  "primary": false
+                }
+              ]
+            },
+            "target": {
+              "price": 207.08,
+              "source": "expected_close",
+              "confidence": 77,
+              "reasons": [
+                {
+                  "source": "expected_close",
+                  "label": "Expected Close",
+                  "price": 207.08,
+                  "weight_pct": 100.0,
+                  "matched": true,
+                  "primary": true
+                }
+              ]
+            }
+          },
+          "return_calculation": "(207.08-194.02)/194.02=6.73%",
+          "heuristic_expected_return_pct": 1.45,
+          "target_action": "卖出/获利",
+          "trade_summary_cn": "做多 NVDA：在 194.02 附近入场，目标 207.08，预期 +6.73%",
+          "trade_economics": {
+            "account_size": 10000.0,
+            "risk_pct": 1.0,
+            "position_pct": 100.0,
+            "shares": 666,
+            "contracts": 1,
+            "max_loss_usd": 99.9,
+            "win_usd": 8697.96,
+            "loss_usd": 99.9,
+            "risk_per_share": 0.15,
+            "reward_per_share": 13.06,
+            "size_label": "Small",
+            "display": "$10,000 → Win +$8698 / Loss -$100"
+          },
+          "position_sizing": {
+            "risk_pct": 1.0,
+            "position_pct": 100.0,
+            "contracts": 1,
+            "shares": 666,
+            "max_loss_usd": 99.9,
+            "size_label": "Small",
+            "display": "Risk 1.0% → Position 100.0% → 1 unit(s) → Max Loss $99.9"
+          },
+          "why_wins_today": [
+            {
+              "rank": 1,
+              "dimension": "expected_range",
+              "label": "Largest Expected Range",
+              "primary_value": 5.87,
+              "runner_up_value": 4.83,
+              "wins": true
+            },
+            {
+              "rank": 2,
+              "dimension": "win_prob",
+              "label": "Highest Probability",
+              "primary_value": 69.0,
+              "runner_up_value": 59.0,
+              "wins": true
+            },
+            {
+              "rank": 3,
+              "dimension": "risk_reward",
+              "label": "Best Risk Reward",
+              "primary_value": 87.05,
+              "runner_up_value": 1.57,
+              "wins": true
+            }
+          ],
+          "why_not_alternatives": [
+            {
+              "symbol": "SPY",
+              "rank": 2,
+              "reasons": [
+                "Win% 69 vs 59",
+                "ER 6.7% vs -0.1%",
+                "Score 0.5 vs 0.0",
+                "R:R 87.05 vs 0.62",
+                "Tradeable (Small) vs Pass"
+              ],
+              "summary": "Why NVDA over SPY: Win% 69 vs 59 · ER 6.7% vs -0.1% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.62 · Tradeable (Small) vs Pass"
+            },
+            {
+              "symbol": "QQQ",
+              "rank": 3,
+              "reasons": [
+                "Win% 69 vs 59",
+                "ER 6.7% vs -0.2%",
+                "Score 0.5 vs 0.0",
+                "R:R 87.05 vs 0.34",
+                "Tradeable (Small) vs Pass"
+              ],
+              "summary": "Why NVDA over QQQ: Win% 69 vs 59 · ER 6.7% vs -0.2% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.34 · Tradeable (Small) vs Pass"
+            },
+            {
+              "symbol": "SMH",
+              "rank": 4,
+              "reasons": [
+                "Win% 69 vs 59",
+                "ER 6.7% vs -0.2%",
+                "Score 0.5 vs 0.0",
+                "R:R 87.05 vs 0.17",
+                "Tradeable (Small) vs Pass"
+              ],
+              "summary": "Why NVDA over SMH: Win% 69 vs 59 · ER 6.7% vs -0.2% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.17 · Tradeable (Small) vs Pass"
+            },
+            {
+              "symbol": "TQQQ",
+              "rank": 5,
+              "reasons": [
+                "Win% 69 vs 54",
+                "ER 6.7% vs -0.5%",
+                "Score 0.5 vs 0.0",
+                "R:R 87.05 vs 0.12",
+                "Tradeable (Small) vs Pass"
+              ],
+              "summary": "Why NVDA over TQQQ: Win% 69 vs 54 · ER 6.7% vs -0.5% · Score 0.5 vs 0.0 · R:R 87.05 vs 0.12 · Tradeable (Small) vs Pass"
+            },
+            {
+              "symbol": "TSLA",
+              "rank": 6,
+              "reasons": [
+                "Win% 69 vs 59",
+                "ER 6.7% vs -0.5%",
+                "Score 0.5 vs 0.0",
+                "R:R 87.05 vs 1.57",
+                "Tradeable (Small) vs Pass"
+              ],
+              "summary": "Why NVDA over TSLA: Win% 69 vs 59 · ER 6.7% vs -0.5% · Score 0.5 vs 0.0 · R:R 87.05 vs 1.57 · Tradeable (Small) vs Pass"
+            }
+          ]
+        }
+      ],
+      "watchlist": [
+        {
+          "symbol": "SPY",
+          "rank": 2,
+          "win_prob": 59.0,
+          "expected_return_pct": -0.11,
+          "trade_action": "Pass",
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "note": "Monitor — below trade threshold"
+        },
+        {
+          "symbol": "QQQ",
+          "rank": 3,
+          "win_prob": 59.0,
+          "expected_return_pct": -0.16,
+          "trade_action": "Pass",
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "note": "Monitor — below trade threshold"
+        },
+        {
+          "symbol": "SMH",
+          "rank": 4,
+          "win_prob": 59.0,
+          "expected_return_pct": -0.21,
+          "trade_action": "Pass",
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "note": "Monitor — below trade threshold"
+        },
+        {
+          "symbol": "TQQQ",
+          "rank": 5,
+          "win_prob": 54.0,
+          "expected_return_pct": -0.48,
+          "trade_action": "Pass",
+          "why": "Volume 信号 · 上行空间 <1.0%",
+          "note": "Monitor — below trade threshold"
+        },
+        {
+          "symbol": "TSLA",
+          "rank": 6,
+          "win_prob": 59.0,
+          "expected_return_pct": -0.45,
+          "trade_action": "Pass",
+          "why": "Gap 未过度延伸 · Volume 信号 · 上行空间 <1.0%",
+          "note": "Monitor — below trade threshold"
+        }
+      ],
+      "executive_summary": {
+        "bias": "Bullish Bias",
+        "bias_stars": "★★★★☆",
+        "driver_type": "Political",
+        "driver": "Geopolitical Risk (Iran)",
+        "driver_tree": {
+          "primary": {
+            "type": "Political",
+            "label": "Geopolitical Risk (Iran)",
+            "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+            "score": 96,
+            "source": "rules"
+          },
+          "secondary": {
+            "type": "Macro",
+            "label": "Oil Rally",
+            "evidence": "XLE +1.8% · 2 oil headlines",
+            "score": 77,
+            "source": "rules"
+          },
+          "tertiary": {
+            "type": "Political",
+            "label": "Trade Policy",
+            "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+            "score": 73,
+            "source": "rules"
+          },
+          "all_ranked": [
+            {
+              "type": "Political",
+              "label": "Geopolitical Risk (Iran)",
+              "evidence": "Oil Soars as US Extends Strikes Against Iran Into Second Night",
+              "score": 96,
+              "source": "rules"
+            },
+            {
+              "type": "Macro",
+              "label": "Oil Rally",
+              "evidence": "XLE +1.8% · 2 oil headlines",
+              "score": 77,
+              "source": "rules"
+            },
+            {
+              "type": "Political",
+              "label": "Trade Policy",
+              "evidence": "tariff — Arabica Coffee Prices Hit Record on U.S., Colombia Tariff Spat",
+              "score": 73,
+              "source": "rules"
+            },
+            {
+              "type": "Momentum",
+              "label": "AI Momentum",
+              "evidence": "SMH +2.0% leading",
+              "score": 58,
+              "source": "rules"
+            }
+          ],
+          "session_update_slot": true
+        },
+        "driver_display": "Political — Geopolitical Risk (Iran)",
+        "best_trade": "今日无任何标的达到交易阈值",
+        "primary_trade": null,
+        "confidence": null,
+        "entry": "—",
+        "entry_source": null,
+        "entry_price": null,
+        "stop": "—",
+        "stop_source": null,
+        "stop_price": null,
+        "target": "—",
+        "target_source": null,
+        "target_price": null,
+        "target_action": null,
+        "direction": "NO TRADE",
+        "expected_return_pct": null,
+        "expected_move": null,
+        "return_calculation": null,
+        "trade_summary_cn": null,
+        "why_chain": "今日无任何标的达到交易阈值",
+        "why_factors": [],
+        "why_vs_runner_up": null,
+        "edge_type": null,
+        "win_prob_breakdown": null,
+        "level_reasons": null,
+        "trade_economics": null,
+        "position_sizing": null,
+        "why_wins_today": [],
+        "why_not_alternatives": [],
+        "one_liner": "今日无任何标的达到交易阈值",
+        "threshold_message": "今日无任何标的达到交易阈值",
+        "index_trade": "NO TRADE",
+        "advisory": "ADVISORY — 不构成投资建议"
+      }
+    }
+  }
+}

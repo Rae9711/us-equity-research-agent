@@ -62,20 +62,24 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "commission_per_share": 0.0,
     # --- Exit management (profit) — must survive load_account migration ---
     "exit_management": True,
-    "breakeven_trigger_r": 1.0,   # move stop to entry after +1R of open profit
+    "breakeven_trigger_r": 0.5,   # faster BE — high-WR bias
     "breakeven_buffer_r": 0.05,   # nudge BE stop past entry to cover costs
-    "trail_trigger_r": 1.5,       # start trailing after +1.5R
-    "trail_distance_r": 1.0,      # chandelier trail = high-water − 1.0R
+    "trail_trigger_r": 1.0,       # start trailing earlier
+    "trail_distance_r": 0.75,     # tighter chandelier
     "scale_out_enabled": True,
-    "scale_out_pct": 0.5,         # take 50% off at the first target, run the rest
+    "scale_out_pct": 0.6,         # lock more at T1
     "runner_target_r": 3.0,       # extend runner target to 3R when no T2 supplied
     # --- Risk controls ---
     "correlation_guard": True,    # de-risk concentrated same-factor exposure
     "adaptive_risk": True,        # scale risk from realized expectancy toward ~10%/mo
     "adaptive_risk_cap": 3.0,     # ceiling when edge proven (see journal.adaptive_risk_pct)
     "adaptive_risk_floor": 0.35,
+    "max_loss_per_trade_r": 1.0,  # force flat if open loss ≤ −1R
+    "max_daily_loss_pct": 2.0,    # no new entries after −2% day
+    "option_premium_stop_pct": 50.0,
+    "option_premium_target_mult": 2.0,
     # Bumped when DEFAULT_PARAMS semantics change; load_account migrates once.
-    "params_schema_version": 2,
+    "params_schema_version": 3,
 }
 
 
@@ -233,8 +237,24 @@ def _migrate_legacy_params(params: dict[str, Any]) -> None:
         if params.get("eod_exit_mode") not in ("force", "soft", "off"):
             params["eod_exit_mode"] = "soft"
         params["params_schema_version"] = 2
+        ver = 2
     elif params.get("eod_exit_mode") not in ("force", "soft", "off"):
         params["eod_exit_mode"] = "soft"
+
+    if ver < 3:
+        # High-WR / small-loss defaults + circuit breakers + option stops.
+        for key in (
+            "breakeven_trigger_r",
+            "trail_trigger_r",
+            "trail_distance_r",
+            "scale_out_pct",
+            "max_loss_per_trade_r",
+            "max_daily_loss_pct",
+            "option_premium_stop_pct",
+            "option_premium_target_mult",
+        ):
+            params[key] = DEFAULT_PARAMS[key]
+        params["params_schema_version"] = 3
 
 
 def sync_closed_pnl_metrics(account: dict[str, Any]) -> dict[str, Any]:
@@ -289,14 +309,16 @@ def mark_to_market(
         shares = float(pos.get("shares") or 0)
         avg = float(pos.get("avg_entry") or 0)
         direction = (pos.get("direction") or "LONG").upper()
+        is_option = (pos.get("asset_class") or "equity") == "option"
+        mult = float(pos.get("multiplier") or (100 if is_option else 1))
         if direction == "SHORT":
-            u = (avg - px) * shares
+            u = (avg - px) * shares * mult
         else:
-            u = (px - avg) * shares
+            u = (px - avg) * shares * mult
         unrealized += u
         pos["last_price"] = round(px, 4)
         pos["unrealized_pnl"] = round(u, 2)
-        pos["market_value"] = round(shares * px, 2)
+        pos["market_value"] = round(shares * px * mult, 2)
 
     # Match prior single-position equity: cash + long MV + short unrealized
     equity = cash
@@ -306,10 +328,12 @@ def mark_to_market(
         direction = (pos.get("direction") or "LONG").upper()
         if px is None or px <= 0:
             continue
+        is_option = (pos.get("asset_class") or "equity") == "option"
+        mult = float(pos.get("multiplier") or (100 if is_option else 1))
         if direction == "SHORT":
             equity += float(pos.get("unrealized_pnl") or 0)
         else:
-            equity += shares * px
+            equity += shares * px * mult
 
     account["unrealized_pnl"] = round(unrealized, 2)
     account["equity"] = round(equity, 2)

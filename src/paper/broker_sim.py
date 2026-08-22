@@ -232,6 +232,8 @@ def execute_entry(
         "action": "ENTRY",
         "symbol": symbol.upper(),
         "direction": direction,
+        "asset_class": "equity",
+        "instrument": sig.get("instrument") or "Stock/ETF",
         "shares": shares,
         "price": round(fill, 4),
         "requested_price": round(price, 4),
@@ -245,6 +247,11 @@ def execute_entry(
         "horizon": horizon,
         "book": book_key,
     }
+    from src.paper.trade_report import enrich_trade_report
+
+    enrich_trade_report(trade, signal=sig, position=position)
+    position["instrument"] = trade.get("instrument")
+    position["asset_class"] = "equity"
     append_trade(account, trade)
     mark_to_market(account, fill, price_by_symbol={symbol.upper(): fill})
     return trade
@@ -347,6 +354,8 @@ def execute_exit(
         "action": "SCALE_OUT" if partial else "EXIT",
         "symbol": symbol,
         "direction": direction,
+        "asset_class": pos.get("asset_class") or "equity",
+        "instrument": pos.get("instrument"),
         "shares": qty,
         "price": round(fill, 4),
         "requested_price": round(price, 4),
@@ -363,6 +372,13 @@ def execute_exit(
         "horizon": pos.get("horizon"),
         "book": book_key,
     }
+    from src.paper.trade_report import enrich_trade_report
+
+    enrich_trade_report(
+        trade,
+        position=pos,
+        equity=float(account.get("equity") or account.get("starting_cash") or STARTING_CASH),
+    )
     append_trade(account, trade)
     if partial:
         mark_to_market(account, price_by_symbol={symbol.upper(): fill})

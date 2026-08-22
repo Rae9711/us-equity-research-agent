@@ -29,6 +29,16 @@ from src.paper.broker_sim import (
     execute_entry,
     execute_exit,
 )
+from src.paper.instrument import is_option_instrument
+from src.paper.options_sim import (
+    OptionChainUnavailable,
+    can_afford_option,
+    execute_option_entry,
+    execute_option_exit,
+    plan_option_exit,
+    resolve_open_option_premium,
+    resolve_option_entry_quote,
+)
 from src.paper.price_guard import (
     DEFAULT_MAX_DEVIATION_PCT,
     anchors_from_position,
@@ -102,6 +112,85 @@ def _collect_symbols(trading_date: str, account: dict[str, Any]) -> list[str]:
     return syms
 
 
+def _manage_option_position(
+    account: dict[str, Any],
+    book: str,
+    trading_date: str,
+    phase: str,
+    price_map: dict[str, float] | None,
+    raw: dict[str, Any] | None,
+    params: dict[str, Any],
+    pos: dict[str, Any],
+) -> dict[str, Any]:
+    """Manage a long option book using premium marks + underlying triggers."""
+    label = BOOK_LABEL_ZH.get(book, book)
+    sym = pos["symbol"]
+    base: dict[str, Any] = {
+        "book": book,
+        "book_zh": label,
+        "action": "HOLD",
+        "reason": "",
+        "trade": None,
+        "signal": {
+            "symbol": sym,
+            "direction": "LONG",
+            "source": pos.get("signal_source"),
+            "horizon": pos.get("horizon"),
+            "instrument": pos.get("instrument"),
+        },
+        "quote": None,
+        "quote_source": "option_premium",
+    }
+
+    if price_map and sym in price_map:
+        u_px = float(price_map[sym])
+        u_src = "forced"
+    else:
+        u_px_opt, u_src = resolve_quote(sym, trading_date, raw=raw, prefer_live=True)
+        u_px = float(u_px_opt) if u_px_opt is not None else None
+
+    forced_prem = None
+    if price_map and pos.get("forced_mark_premium") is not None:
+        forced_prem = float(pos["forced_mark_premium"])
+    elif price_map and f"{sym}_PREMIUM" in price_map:
+        forced_prem = float(price_map[f"{sym}_PREMIUM"])
+
+    prem = resolve_open_option_premium(
+        pos,
+        underlying_px=u_px,
+        trading_date=trading_date,
+        forced_premium=forced_prem,
+    )
+    if prem is None:
+        base["reason"] = f"{label}期权 {sym}：无权利金报价，继续持有"
+        return base
+
+    base["quote"] = prem
+    if u_px is not None:
+        pos["underlying_last"] = u_px
+
+    plan = plan_option_exit(pos, float(prem), u_px, params, phase=phase)
+    if plan.get("action") == "exit":
+        trade = execute_option_exit(
+            account,
+            premium=float(prem),
+            reason=f"{label}{plan.get('reason') or '期权平仓'}",
+            trading_date=trading_date,
+            book=book,
+        )
+        base["action"] = "EXIT"
+        base["reason"] = trade["reason"]
+        base["trade"] = trade
+        return base
+
+    mark_to_market(account, price_by_symbol={sym: float(prem)})
+    base["reason"] = (
+        f"{label}期权 {pos.get('instrument') or sym} {pos.get('contracts') or pos.get('shares')}张"
+        f" · 权利金入场 {pos.get('avg_entry')} · 现价 {prem}，未触止损/止盈"
+    )
+    return base
+
+
 def _manage_position(
     account: dict[str, Any],
     book: str,
@@ -115,6 +204,11 @@ def _manage_position(
     pos = get_position(account, book)
     if not pos:
         return None
+
+    if (pos.get("asset_class") or "equity") == "option":
+        return _manage_option_position(
+            account, book, trading_date, phase, price_map, raw, params, pos
+        )
 
     label = BOOK_LABEL_ZH.get(book, book)
     sym = pos["symbol"]
@@ -142,6 +236,7 @@ def _manage_position(
             "direction": direction,
             "source": pos.get("signal_source"),
             "horizon": pos.get("horizon"),
+            "instrument": pos.get("instrument"),
         },
         "quote": px,
         "quote_source": qsrc,
@@ -183,6 +278,19 @@ def _manage_position(
 
         if manage:
             plan = plan_exit(pos, tick_px, params)
+            if plan.get("action") == "exit":
+                trade = execute_exit(
+                    account,
+                    price=tick_px,
+                    reason=f"{label}{plan.get('reason') or '平仓'} @ {tick_px}",
+                    trading_date=trading_date,
+                    book=book,
+                )
+                base["action"] = "EXIT"
+                base["reason"] = trade["reason"]
+                base["trade"] = trade
+                base["quote"] = tick_px
+                return base
             if plan.get("action") == "scale_out":
                 if plan.get("new_stop") is not None:
                     pos["stop"] = plan["new_stop"]
@@ -355,12 +463,82 @@ def _try_entry(
             quote=float(px),
             entry_status=picked.get("entry_status"),
             peer_entering=peer_entering,
+            trading_date=trading_date,
         )
         result["allocation"] = allocation
         if allocation.get("hold_cash"):
             result["action"] = "SKIP"
             result["reason"] = allocation.get("reason_zh") or "保留现金"
             return result
+
+    use_option = is_option_instrument(str(sig.get("instrument") or ""))
+    if use_option:
+        try:
+            opt_q = resolve_option_entry_quote(
+                sig, underlying_px=float(px), trading_date=trading_date
+            )
+        except OptionChainUnavailable as exc:
+            result["action"] = "SKIP"
+            result["reason"] = f"{label}期权无链报价，不下单：{exc}"
+            return result
+        contracts, err = can_afford_option(
+            account,
+            premium=float(opt_q["premium"]),
+            risk_pct=(allocation or {}).get("risk_pct"),
+            max_position_pct=(allocation or {}).get("max_position_pct"),
+            max_notional=(allocation or {}).get("deployable_cash"),
+        )
+        if contracts <= 0:
+            result["action"] = "SKIP"
+            result["reason"] = f"{label}期权资金不足无法开仓：{err}"
+            return result
+        alloc_reason = (allocation or {}).get("reason_zh") or ""
+        entry_reason = picked.get("reason") or f"模拟{label}买入期权"
+        if alloc_reason:
+            entry_reason = f"{entry_reason} · {alloc_reason}"
+        try:
+            trade = execute_option_entry(
+                account,
+                quote=opt_q,
+                contracts=contracts,
+                signal=sig,
+                reason=entry_reason,
+                trading_date=trading_date,
+                book=book,
+                underlying_stop=sig.get("stop_price"),
+                underlying_target=sig.get("target_price"),
+            )
+        except InsufficientCashError as exc:
+            result["action"] = "SKIP"
+            result["reason"] = f"{label}资金不足：{exc}"
+            return result
+        except Exception as exc:  # noqa: BLE001
+            result["action"] = "SKIP"
+            result["reason"] = f"{label}期权开仓失败：{exc}"
+            return result
+        if allocation:
+            trade["allocation"] = {
+                "cash_reserve_pct": allocation.get("cash_reserve_pct"),
+                "risk_pct": allocation.get("risk_pct"),
+                "max_position_pct": allocation.get("max_position_pct"),
+                "budget_share": allocation.get("budget_share"),
+                "confidence": allocation.get("confidence"),
+                "reason_zh": allocation.get("reason_zh"),
+            }
+            equity = float(account.get("equity") or 1)
+            notional = float(trade.get("notional") or 0)
+            trade["position_pct"] = round(notional / equity * 100.0, 1) if equity else 0
+            from src.paper.trade_report import enrich_trade_report
+
+            enrich_trade_report(
+                trade, signal=sig, allocation=allocation, equity=equity
+            )
+        result["action"] = "ENTRY"
+        result["reason"] = trade.get("reason") or entry_reason
+        result["trade"] = trade
+        result["quote"] = opt_q["premium"]
+        result["quote_source"] = opt_q.get("source") or "option"
+        return result
 
     shares, err = can_afford(
         account,
@@ -424,6 +602,9 @@ def _try_entry(
         equity = float(account.get("equity") or 1)
         notional = float(trade.get("notional") or 0)
         trade["position_pct"] = round(notional / equity * 100.0, 1) if equity else 0
+        from src.paper.trade_report import enrich_trade_report
+
+        enrich_trade_report(trade, signal=sig, allocation=allocation, equity=equity)
 
     result["action"] = "ENTRY"
     result["reason"] = trade.get("reason") or entry_reason

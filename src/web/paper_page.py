@@ -10,6 +10,7 @@ from typing import Any
 from src.paper.account import ensure_positions, load_account, mark_to_market, open_positions
 from src.paper.allocation import portfolio_allocation_snapshot
 from src.paper.signals import load_candidate_signals
+from src.paper.trade_report import build_trade_cards
 from src.research.entry_status import infer_session_phase
 from src.utils.trading_calendar import today_et
 
@@ -60,9 +61,16 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
             "book": book,
             "book_zh": "短线" if book == "intraday" else "长线",
             **pos,
+            "qty_label": (
+                f"{pos.get('contracts') or pos.get('shares')} 张"
+                if (pos.get("asset_class") or "") == "option"
+                else f"{pos.get('shares')} 股"
+            ),
         }
         for book, pos in open_positions(account)
     ]
+
+    trade_cards = build_trade_cards(account, trading_date=date_str, limit=40)
 
     return {
         "trading_date": date_str,
@@ -82,6 +90,7 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
         "decisions": decisions,
         "today_decisions": today_decisions,
         "trades": trades,
+        "trade_cards": trade_cards,
         "journal": journal,
         "equity_curve": curve[-60:],
         "signal_preview": {

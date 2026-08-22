@@ -64,6 +64,17 @@ def open_profit_r(pos: dict[str, Any], price: float) -> float | None:
     return move / r
 
 
+def max_loss_hit(pos: dict[str, Any], price: float, params: dict[str, Any]) -> bool:
+    """True when open loss reaches/exceeds ``max_loss_per_trade_r`` (e.g. −1R)."""
+    cap = _safe_float(params.get("max_loss_per_trade_r"))
+    if cap is None or cap <= 0:
+        return False
+    pnl_r = open_profit_r(pos, price)
+    if pnl_r is None:
+        return False
+    return pnl_r <= -abs(cap)
+
+
 def ratchet_stop(pos: dict[str, Any], params: dict[str, Any]) -> tuple[float | None, str | None]:
     """Return (new_stop, note) if the stop should tighten; else (current, None).
 
@@ -160,6 +171,18 @@ def plan_exit(
     update_water_marks(pos, price)
 
     if not manage:
+        return plan
+
+    # Hard R loss circuit breaker (slippage / gap beyond plan stop).
+    if max_loss_hit(pos, price, params):
+        plan["action"] = "exit"
+        pnl_r = open_profit_r(pos, price)
+        cap = float(params.get("max_loss_per_trade_r") or 1.0)
+        plan["reason"] = (
+            f"单笔亏损熔断 {pnl_r:.2f}R ≤ −{cap:.2f}R @ {price}"
+            if pnl_r is not None
+            else f"单笔亏损熔断 @ {price}"
+        )
         return plan
 
     first_target = _safe_float(pos.get("target1")) or _safe_float(pos.get("target"))

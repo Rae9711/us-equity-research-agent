@@ -10,7 +10,7 @@
   {% include "nav.html" %}
   <div class="page-wrap">
     <h1 class="page-title">模拟交易</h1>
-    <p class="advisory-banner">模拟交易 · 不构成投资建议 · 资金虚拟 $10,000 · 进取目标约月 ≥10%（非保证）· 真实行情数据纸上交易 · 期望R（EV）门禁 · 可部署约 80% · 现金底仓约 10–20%</p>
+    <p class="advisory-banner">模拟交易 · 不构成投资建议 · 资金虚拟 $10,000 · 进取目标约月 ≥10%（非保证）· 真实行情数据纸上交易 · 期望R（EV）门禁 · 可部署约 80% · 现金底仓约 10–20% · 股票/ETF多空 + QQQ期权模拟 · 日亏/单笔熔断</p>
     <p class="muted">日期 {{ trading_date }} · 阶段 {{ session_phase }} · 双账本：短线 Intraday + 长线 Swing · 可执行 setup 优选（非盲目 #1）· 收盘软平仓（盈利可过夜 runner）</p>
 
     <section class="panel paper-metrics">
@@ -82,7 +82,15 @@
         <div class="paper-leg {% if not loop.last %}paper-leg-gap{% endif %}">
           <div class="muted">{{ leg.book_zh }} · {{ leg.book }}</div>
           <dl class="kv">
-            <dt>标的</dt><dd><strong>{{ leg.symbol }}</strong> {{ leg.direction }} · {{ leg.shares }} 股</dd>
+            <dt>标的</dt>
+            <dd>
+              <strong>{{ leg.symbol }}</strong> {{ leg.direction }}
+              · {{ leg.qty_label or ((leg.shares|string) + ' 股') }}
+              {% if leg.asset_class == 'option' %}
+              · {{ leg.instrument or '期权' }}
+              {% if leg.strike %} · 行权价 {{ leg.strike }}{% endif %}
+              {% endif %}
+            </dd>
             <dt>成本</dt><dd>${{ leg.avg_entry }} · 现价 {{ leg.last_price or '—' }}</dd>
             <dt>止损 / 止盈</dt><dd>{{ leg.stop or '—' }} / {{ leg.target or '—' }}</dd>
             <dt>市值 / 占比</dt>
@@ -145,6 +153,49 @@
       </ul>
       {% else %}
       <p class="muted">尚无分配笔记。Tick 开仓/保留现金时会写入「为何用 X% 仓位 / 留 Y% 现金」。</p>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>逐笔战报</h2>
+      <p class="muted">每笔写清：做了什么 · 怎么做 · 收益多少（含 SKIP 为何 0% 仓位）。</p>
+      {% if trade_cards %}
+      <div class="paper-trade-cards">
+        {% for c in trade_cards %}
+        {% set snap = c.method_snapshot or {} %}
+        {% set pnl = c.pnl %}
+        <article class="paper-trade-card {% if c.is_skip %}paper-trade-card-skip{% endif %}">
+          <header>
+            <strong>{{ c.trading_date or '—' }}</strong>
+            <span class="tag">{{ c.action }}</span>
+            {% if c.symbol %}<strong>{{ c.symbol }}</strong>{% endif %}
+            {% if c.instrument or snap.instrument %}
+            <span class="muted">{{ c.instrument or snap.instrument }}</span>
+            {% endif %}
+          </header>
+          <dl class="kv">
+            <dt>做了什么</dt><dd>{{ snap.what or c.narrative_zh or '—' }}</dd>
+            <dt>怎么做</dt><dd>{{ snap.how or c.reason or '—' }}</dd>
+            <dt>为何仓位</dt><dd>{{ snap.why_size or '—' }}</dd>
+            <dt>收益</dt>
+            <dd class="{% if pnl is not none %}{% if pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}{% endif %}">
+              {% if pnl is not none %}
+                ${{ '%.2f'|format(pnl) }}
+                {% if c.pnl_pct_equity is not none %} · {{ '%.2f'|format(c.pnl_pct_equity) }}%权益{% endif %}
+                {% if c.r_multiple is not none %} · {{ '%.2f'|format(c.r_multiple) }}R{% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+          </dl>
+          {% if c.narrative_zh %}
+          <p class="muted">{{ c.narrative_zh }}</p>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">尚无战报。Tick 开仓/平仓/SKIP 后会出现在这里。</p>
       {% endif %}
     </section>
 

@@ -82,11 +82,14 @@ def normalize_slot(slot: dict[str, Any], *, source: str, horizon: str) -> dict[s
         "win_prob": slot.get("win_prob"),
         "risk_reward": slot.get("risk_reward") or slot.get("rr"),
         "horizon": horizon or slot.get("horizon") or "Intraday",
+        "instrument": slot.get("instrument"),
         "source": source,
         "trade_action": slot.get("trade_action"),
         "level_anchors": slot.get("level_anchors"),
         "rank": slot.get("rank"),
         "raw_slot": slot,
+        # Tests / paper ticks may inject a chain quote without network.
+        "forced_option_quote": slot.get("forced_option_quote"),
     }
 
 
