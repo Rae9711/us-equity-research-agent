@@ -255,6 +255,9 @@ def build_trade_cards(
         row = dict(t)
         if not row.get("method_snapshot"):
             enrich_trade_report(row, equity=_safe_float(account.get("equity")))
+        row.setdefault("pnl_pct_equity", None)
+        row.setdefault("r_multiple", None)
+        row.setdefault("is_skip", False)
         cards.append(row)
         if len(cards) >= limit:
             break

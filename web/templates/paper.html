@@ -162,34 +162,36 @@
       {% if trade_cards %}
       <div class="paper-trade-cards">
         {% for c in trade_cards %}
-        {% set snap = c.method_snapshot or {} %}
-        {% set pnl = c.pnl %}
-        <article class="paper-trade-card {% if c.is_skip %}paper-trade-card-skip{% endif %}">
+        {% set snap = c.get('method_snapshot') or {} %}
+        {% set pnl = c.get('pnl') %}
+        <article class="paper-trade-card {% if c.get('is_skip') %}paper-trade-card-skip{% endif %}">
           <header>
-            <strong>{{ c.trading_date or '—' }}</strong>
-            <span class="tag">{{ c.action }}</span>
-            {% if c.symbol %}<strong>{{ c.symbol }}</strong>{% endif %}
-            {% if c.instrument or snap.instrument %}
-            <span class="muted">{{ c.instrument or snap.instrument }}</span>
+            <strong>{{ c.get('trading_date') or '—' }}</strong>
+            <span class="tag">{{ c.get('action') }}</span>
+            {% if c.get('symbol') %}<strong>{{ c.get('symbol') }}</strong>{% endif %}
+            {% if c.get('instrument') or snap.get('instrument') %}
+            <span class="muted">{{ c.get('instrument') or snap.get('instrument') }}</span>
             {% endif %}
           </header>
           <dl class="kv">
-            <dt>做了什么</dt><dd>{{ snap.what or c.narrative_zh or '—' }}</dd>
-            <dt>怎么做</dt><dd>{{ snap.how or c.reason or '—' }}</dd>
-            <dt>为何仓位</dt><dd>{{ snap.why_size or '—' }}</dd>
+            <dt>做了什么</dt><dd>{{ snap.get('what') or c.get('narrative_zh') or '—' }}</dd>
+            <dt>怎么做</dt><dd>{{ snap.get('how') or c.get('reason') or '—' }}</dd>
+            <dt>为何仓位</dt><dd>{{ snap.get('why_size') or '—' }}</dd>
             <dt>收益</dt>
+            {% set pnl_pct = c.get('pnl_pct_equity') %}
+            {% set r_mult = c.get('r_multiple') %}
             <dd class="{% if pnl is not none %}{% if pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}{% endif %}">
               {% if pnl is not none %}
                 ${{ '%.2f'|format(pnl) }}
-                {% if c.pnl_pct_equity is not none %} · {{ '%.2f'|format(c.pnl_pct_equity) }}%权益{% endif %}
-                {% if c.r_multiple is not none %} · {{ '%.2f'|format(c.r_multiple) }}R{% endif %}
+                {% if pnl_pct is not none %} · {{ '%.2f'|format(pnl_pct) }}%权益{% endif %}
+                {% if r_mult is not none %} · {{ '%.2f'|format(r_mult) }}R{% endif %}
               {% else %}
                 —
               {% endif %}
             </dd>
           </dl>
-          {% if c.narrative_zh %}
-          <p class="muted">{{ c.narrative_zh }}</p>
+          {% if c.get('narrative_zh') %}
+          <p class="muted">{{ c.get('narrative_zh') }}</p>
           {% endif %}
         </article>
         {% endfor %}
