@@ -82,6 +82,52 @@ def _stop_hit(direction: str, price: float, stop: float | None) -> bool:
     return False
 
 
+def _clip_to_stop(direction: str, price: float, stop: float | None) -> float:
+    """If last has run through the stop, fill at the stop — not the extreme."""
+    if stop is None:
+        return float(price)
+    stop_f = float(stop)
+    px = float(price)
+    if direction == "LONG" and px < stop_f:
+        return stop_f
+    if direction == "SHORT" and px > stop_f:
+        return stop_f
+    return px
+
+
+def stopped_out_today(
+    account: dict[str, Any],
+    *,
+    symbol: str,
+    direction: str,
+    trading_date: str,
+    book: str | None = None,
+) -> bool:
+    """True when this symbol/direction already took a losing EXIT today."""
+    want = (symbol or "").upper()
+    dirc = (direction or "").upper()
+    for t in account.get("trades") or []:
+        if t.get("voided"):
+            continue
+        if t.get("trading_date") != trading_date:
+            continue
+        if str(t.get("action") or "").upper() != "EXIT":
+            continue
+        if (t.get("symbol") or "").upper() != want:
+            continue
+        if (t.get("direction") or "").upper() != dirc:
+            continue
+        if book and t.get("book") and t.get("book") != book:
+            continue
+        try:
+            pnl = float(t.get("pnl")) if t.get("pnl") is not None else -1.0
+        except (TypeError, ValueError):
+            pnl = -1.0
+        if pnl < 0:
+            return True
+    return False
+
+
 def _target_hit(direction: str, price: float, target: float | None) -> bool:
     if target is None:
         return False
@@ -263,12 +309,15 @@ def _manage_position(
     horizon = (pos.get("horizon") or ("Swing" if book == BOOK_SWING else "Intraday")).lower()
     manage = bool(params.get("exit_management", True))
 
-    # Walk a conservative high/low path so stops/targets between ticks are not missed.
+    # Walk since last mark/entry. Do not replay the full-session high/low —
+    # those include prints from before we were in the trade.
+    from_px = _safe_float(pos.get("last_price")) or _safe_float(pos.get("avg_entry"))
     path = bar_path_prices(
         direction=direction,
         last=float(px),
         high=_safe_float(bar.get("high")),
         low=_safe_float(bar.get("low")),
+        from_price=from_px,
     )
     for tick_px in path:
         pos = get_position(account, book)
@@ -276,20 +325,39 @@ def _manage_position(
             break
         update_water_marks(pos, tick_px)
 
+        stop = _safe_float(pos.get("stop"))
+        fill_px = _clip_to_stop(direction, tick_px, stop)
+
+        # Honour the plan stop before the −1R breaker, and fill at the stop
+        # so a gap/last print past the stop does not become a −3R fill.
+        if _stop_hit(direction, tick_px, stop):
+            trade = execute_exit(
+                account,
+                price=fill_px,
+                reason=f"{label}止损触发 @ {fill_px} (stop={stop})",
+                trading_date=trading_date,
+                book=book,
+            )
+            base["action"] = "EXIT"
+            base["reason"] = trade["reason"]
+            base["trade"] = trade
+            base["quote"] = fill_px
+            return base
+
         if manage:
             plan = plan_exit(pos, tick_px, params)
             if plan.get("action") == "exit":
                 trade = execute_exit(
                     account,
-                    price=tick_px,
-                    reason=f"{label}{plan.get('reason') or '平仓'} @ {tick_px}",
+                    price=fill_px,
+                    reason=f"{label}{plan.get('reason') or '平仓'} @ {fill_px}",
                     trading_date=trading_date,
                     book=book,
                 )
                 base["action"] = "EXIT"
                 base["reason"] = trade["reason"]
                 base["trade"] = trade
-                base["quote"] = tick_px
+                base["quote"] = fill_px
                 return base
             if plan.get("action") == "scale_out":
                 if plan.get("new_stop") is not None:
@@ -312,26 +380,11 @@ def _manage_position(
                 if plan.get("stop_note"):
                     base["stop_note"] = plan["stop_note"]
 
-        stop = _safe_float(pos.get("stop"))
         check_target = target
         if manage and pos.get("scaled_out"):
             rt = runner_target(pos, params)
             if rt is not None:
                 check_target = rt
-
-        if _stop_hit(direction, tick_px, stop):
-            trade = execute_exit(
-                account,
-                price=tick_px,
-                reason=f"{label}止损触发 @ {tick_px} (stop={stop})",
-                trading_date=trading_date,
-                book=book,
-            )
-            base["action"] = "EXIT"
-            base["reason"] = trade["reason"]
-            base["trade"] = trade
-            base["quote"] = tick_px
-            return base
 
         if _target_hit(direction, tick_px, check_target):
             trade = execute_exit(
@@ -451,6 +504,19 @@ def _try_entry(
         result["action"] = "SKIP"
         result["reason"] = f"{label}拒绝开仓：{reject or '报价异常'}"
         result["quote_rejected"] = True
+        return result
+
+    if stopped_out_today(
+        account,
+        symbol=str(sig.get("symbol") or ""),
+        direction=str(sig.get("direction") or "LONG"),
+        trading_date=trading_date,
+        book=book,
+    ):
+        result["action"] = "SKIP"
+        result["reason"] = (
+            f"{label}当日已止损 {str(sig.get('symbol') or '').upper()}，不再反复开仓"
+        )
         return result
 
     smart = bool(params.get("smart_allocation", True))

@@ -788,3 +788,97 @@ def test_run_paper_tick_persists(data_root):
     assert get_position(loaded, "intraday")["symbol"] == "ARM"
     assert loaded["decisions"]
     assert (data_root / "paper" / "account.json").exists()
+
+
+def test_bar_path_does_not_replay_pre_entry_session_high():
+    from src.paper.signals import bar_path_prices
+
+    # Session day-high 243 happened before a 237 entry; next tick last=238.
+    path = bar_path_prices(
+        direction="SHORT",
+        last=238.0,
+        high=243.0,
+        low=235.0,
+        from_price=237.0,
+    )
+    assert max(path) <= 238.0
+    assert 243.0 not in path
+
+
+def test_stop_fill_clips_to_plan_stop_not_day_extreme(data_root):
+    """Gap/last past stop must fill at stop (~1R), not at the day's extreme."""
+    from src.paper.account import set_position
+
+    acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0
+    acct["params"]["use_bar_path_exits"] = True
+    # Simulate an open short that already marked at entry.
+    set_position(
+        acct,
+        "intraday",
+        {
+            "symbol": "ARM",
+            "direction": "SHORT",
+            "shares": 10,
+            "avg_entry": 237.0,
+            "stop": 239.49,
+            "initial_stop": 239.49,
+            "target": 233.0,
+            "risk_per_share": 2.49,
+            "last_price": 237.0,
+            "horizon": "Intraday",
+            "opened_date": "2026-08-25",
+        },
+    )
+    # Force a print well past the stop, with a session high that would previously
+    # have been walked as if it just printed.
+    decision = decide_and_act(
+        acct,
+        "2026-08-25",
+        session_phase="open",
+        force_price=243.32,
+    )
+    assert decision["action"] == "EXIT"
+    exits = [t for t in acct["trades"] if t.get("action") == "EXIT"]
+    assert exits
+    # Fill at stop 239.49 (not 243.32) → about −1R, not −2.5R+.
+    assert exits[-1]["price"] == pytest.approx(239.49, abs=0.02)
+    assert float(exits[-1]["pnl"]) > -40  # 10 shares × ~2.5 ≈ −25, not −63
+
+
+def test_no_same_day_reentry_after_stop_out(data_root):
+    primary = {
+        "symbol": "ARM",
+        "direction": "SHORT",
+        "entry_price": 237.0,
+        "entry_zone": {"low": 236.0, "mid": 237.0, "high": 238.0},
+        "stop_price": 239.49,
+        "target_price": 233.0,
+        "win_prob": 80,
+        "expected_return_pct": 4.0,
+        "risk_reward": 3.0,
+        "horizon": "Intraday",
+    }
+    _write_morning(data_root, "2026-08-25", primary)
+    acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0
+    # Prior losing EXIT today on ARM short.
+    acct["trades"] = [
+        {
+            "action": "EXIT",
+            "symbol": "ARM",
+            "direction": "SHORT",
+            "book": "intraday",
+            "trading_date": "2026-08-25",
+            "pnl": -50.0,
+        }
+    ]
+    decision = decide_and_act(
+        acct,
+        "2026-08-25",
+        session_phase="open",
+        force_price=237.0,
+    )
+    assert decision["action"] == "SKIP"
+    assert get_position(acct, "intraday") is None
+    assert "当日已止损" in (decision["reason"] or "")

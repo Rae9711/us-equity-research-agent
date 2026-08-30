@@ -220,16 +220,29 @@ def bar_path_prices(
     last: float,
     high: float | None,
     low: float | None,
+    from_price: float | None = None,
 ) -> list[float]:
-    """Conservative intra-bar path: adverse extreme before favourable, then last."""
+    """Path since the last mark (or entry), adverse extreme first.
+
+    Session high/low from the raw day bar can include prints *before* we
+    entered. Walking those as if they just happened fills stops at the
+    day's extreme (e.g. ARM short @ 237 exiting at day-high 243 = −3R)
+    instead of at the plan stop. Clamp H/L to the range since ``from_price``.
+    """
+    last_f = float(last)
+    start = float(from_price) if from_price is not None else last_f
+    tick_lo = min(start, last_f)
+    tick_hi = max(start, last_f)
+    hi = float(high) if high is not None else tick_hi
+    lo = float(low) if low is not None else tick_lo
+    hi = min(max(hi, tick_lo), tick_hi)
+    lo = min(max(lo, tick_lo), tick_hi)
     d = (direction or "LONG").upper()
-    hi = high if high is not None else last
-    lo = low if low is not None else last
     if d == "LONG":
         # Stop checked via low first; target via high.
-        path = [lo, hi, last]
+        path = [lo, hi, last_f]
     else:
-        path = [hi, lo, last]
+        path = [hi, lo, last_f]
     # Dedupe while preserving order
     out: list[float] = []
     for p in path:
