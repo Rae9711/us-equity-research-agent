@@ -16,7 +16,8 @@
       Event-LS 研究门禁：<strong>{{ event_ls_qualification.status }}</strong> ·
       OOS {{ '通过' if event_ls_qualification.backtest_passed else '未通过' }} ·
       模拟盘 {{ '通过' if event_ls_qualification.paper_passed else '未通过' }} ·
-      执行 {{ '开启' if event_ls_qualification.enabled else '关闭' }}
+      用户请求 {{ '是' if event_ls_qualification.requested_enabled else '否' }} ·
+      有效执行 {{ '开启' if event_ls_qualification.effective_enabled else '关闭' }}
       （月均 10% 仅为研究指标，不保证）
     </p>
 

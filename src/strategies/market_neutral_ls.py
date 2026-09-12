@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, fields
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 import yaml
 
+_ET = ZoneInfo("America/New_York")
 
 @dataclass(frozen=True)
 class Bar:
@@ -38,6 +40,7 @@ class Event:
     available_at: Optional[datetime] = None
     relevance: float = 1.0
     reaction: Optional[float] = None
+    reaction_known_at: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,11 @@ class StrategyConfig:
     cost_gate_multiple: float = 2.0
     default_spread_bps: float = 5.0
     default_impact_bps: float = 5.0
+    default_slippage_bps: float = 2.0
     default_borrow_bps: float = 3.0
+    news_freshness_days: int = 3
+    earnings_freshness_days: int = 10
+    revision_freshness_days: int = 30
     min_holding_days: int = 2
     max_holding_days: int = 10
     spy_symbol: str = "SPY"
@@ -142,10 +149,10 @@ def _clip(value: float, lower: float, upper: float) -> float:
 
 
 def _utc_naive(value: datetime) -> datetime:
-    """Normalize aware/naive vendor timestamps for deterministic comparison."""
+    """Normalize aware/naive vendor timestamps to New York wall time."""
     if value.tzinfo is None or value.utcoffset() is None:
         return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone(_ET).replace(tzinfo=None)
 
 
 class MarketNeutralLongShortStrategy:
@@ -157,8 +164,9 @@ class MarketNeutralLongShortStrategy:
         sector_map: Optional[Mapping[str, str]] = None,
     ) -> None:
         self.config = config or StrategyConfig.from_yaml()
+        source_map = load_sector_map() if sector_map is None else sector_map
         self.sector_map = {
-            key.upper(): value for key, value in (sector_map or load_sector_map()).items()
+            key.upper(): value for key, value in source_map.items()
         }
 
     @staticmethod
@@ -201,13 +209,27 @@ class MarketNeutralLongShortStrategy:
         rows: Sequence[Bar],
         as_of: datetime,
     ) -> Dict[str, float]:
-        visible = [
-            event
-            for event in events
-            if event.symbol.upper() == symbol
-            and _utc_naive(event.timestamp) <= _utc_naive(as_of)
-            and _utc_naive(event.available_at or event.timestamp) <= _utc_naive(as_of)
-        ]
+        visible = []
+        for event in events:
+            if event.symbol.upper() != symbol:
+                continue
+            if event.available_at is None:
+                continue
+            event_at = _utc_naive(event.timestamp)
+            available_at = _utc_naive(event.available_at)
+            decision_at = _utc_naive(as_of)
+            if event_at > decision_at or available_at > decision_at:
+                continue
+            kind = event.event_type.lower()
+            if kind in ("news", "headline"):
+                freshness = self.config.news_freshness_days
+            elif kind in ("revision", "earnings_revision", "estimate_revision"):
+                freshness = self.config.revision_freshness_days
+            else:
+                freshness = self.config.earnings_freshness_days
+            if (decision_at.date() - available_at.date()).days > freshness:
+                continue
+            visible.append(event)
         visible.sort(
             key=lambda item: (
                 _utc_naive(item.available_at or item.timestamp),
@@ -236,7 +258,12 @@ class MarketNeutralLongShortStrategy:
             elif kind in ("news", "headline"):
                 # Sentiment/value is known only when the event itself is available.
                 direction = event.sentiment if event.sentiment != 0 else event.value
-                reaction = 1.0 if event.reaction is None else event.reaction
+                reaction_visible = (
+                    event.reaction is not None
+                    and event.reaction_known_at is not None
+                    and _utc_naive(event.reaction_known_at) <= _utc_naive(as_of)
+                )
+                reaction = event.reaction if reaction_visible else 1.0
                 news += direction * reaction * _clip(event.relevance, 0.0, 1.0)
         if last_earnings is not None:
             event_time = _utc_naive(last_earnings.timestamp)
@@ -294,7 +321,10 @@ class MarketNeutralLongShortStrategy:
             impact = live.impact_bps if live is not None else last.impact_bps
             spread = spread if spread > 0 else cfg.default_spread_bps
             impact = impact if impact > 0 else cfg.default_impact_bps
-            execution_cost = spread + impact
+            execution_cost = (
+                spread
+                + 2.0 * (impact + cfg.default_slippage_bps)
+            )
             candidates.append(
                 Signal(
                     symbol=symbol,

@@ -28,7 +28,12 @@ from src.strategies.market_neutral_ls import (
 
 def _filtered_config(cls: Any, values: Mapping[str, Any]) -> Any:
     allowed = {item.name for item in fields(cls)}
-    return cls(**{key: value for key, value in values.items() if key in allowed})
+    unknown = sorted(set(values) - allowed)
+    if unknown:
+        raise ValueError(
+            "unknown {} keys: {}".format(cls.__name__, ", ".join(unknown))
+        )
+    return cls(**dict(values))
 
 
 def _event(row: Mapping[str, Any]) -> Event:
@@ -46,6 +51,8 @@ def _event(row: Mapping[str, Any]) -> Event:
         if row.get("available_at") is not None else None,
         relevance=float(row.get("relevance", 1.0) or 0.0),
         reaction=float(row["reaction"]) if row.get("reaction") is not None else None,
+        reaction_known_at=_datetime(row["reaction_known_at"])
+        if row.get("reaction_known_at") is not None else None,
     )
 
 
@@ -68,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("dataset", type=Path, help="JSON input dataset")
     parser.add_argument("--output", type=Path, help="write JSON result to this path")
     parser.add_argument("--report", type=Path, help="write a Markdown report")
+    parser.add_argument(
+        "--record-qualification",
+        metavar="EVIDENCE_ID",
+        help="explicitly import result metrics into the paper qualification record",
+    )
     parser.add_argument(
         "--pretty", action="store_true", help="pretty-print JSON sent to stdout/output"
     )
@@ -99,6 +111,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             borrow_rates=payload.get("borrow_rates"),
             ssr_restricted=payload.get("ssr_restricted"),
             forced_cover=payload.get("forced_cover"),
+            pit_audit_report=payload.get("pit_audit_report"),
         )
         encoded = json.dumps(
             result.to_dict(),
@@ -112,6 +125,17 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             sys.stdout.write(encoded + "\n")
         if args.report:
             args.report.write_text(result.markdown_report(), encoding="utf-8")
+        if args.record_qualification:
+            from src.paper.acceptance import record_event_ls_backtest
+            from src.paper.account import load_account, save_account
+
+            account = load_account()
+            record_event_ls_backtest(
+                account,
+                result.metrics,
+                evidence_id=args.record_qualification,
+            )
+            save_account(account)
         return 0
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         sys.stderr.write("market-neutral backtest: {}\n".format(exc))

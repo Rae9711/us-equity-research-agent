@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
@@ -24,6 +24,10 @@ from src.strategies.market_neutral_ls import (
 )
 
 _ET = ZoneInfo("America/New_York")
+_DECISION_TIME = time(9, 25)
+_REQUIRED_PIT_CATEGORIES = {
+    "daily", "intraday", "news", "earnings", "borrow", "universe", "macro"
+}
 
 
 def _date(value: Any) -> date:
@@ -85,12 +89,16 @@ class DailyBar:
     low: float
     close: float
     volume: float
+    open_volume: Optional[float] = None
+    open_spread_bps: Optional[float] = None
+    open_impact_bps: Optional[float] = None
     spread_bps: float = 0.0
     impact_bps: float = 0.0
     halted: bool = False
     sector: Optional[str] = None
     beta: Optional[float] = None
     known_at: Optional[datetime] = None
+    open_known_at: Optional[datetime] = None
     member_from: Optional[date] = None
     member_to: Optional[date] = None
 
@@ -107,8 +115,24 @@ class DailyBar:
             raise ValueError("low must be at most open, close, and high")
         if self.volume < 0:
             raise ValueError("volume cannot be negative")
+        if self.open_volume is not None:
+            object.__setattr__(
+                self, "open_volume", _finite(self.open_volume, "open_volume")
+            )
+            if self.open_volume < 0:
+                raise ValueError("open_volume cannot be negative")
+        for name in ("open_spread_bps", "open_impact_bps"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, _finite(value, name))
+                if value < 0:
+                    raise ValueError("{} cannot be negative".format(name))
         if self.known_at is not None:
             object.__setattr__(self, "known_at", _datetime(self.known_at))
+        if self.open_known_at is not None:
+            object.__setattr__(
+                self, "open_known_at", _datetime(self.open_known_at)
+            )
         if self.member_from is not None:
             object.__setattr__(self, "member_from", _date(self.member_from))
         if self.member_to is not None:
@@ -133,12 +157,28 @@ class DailyBar:
             low=float(row.get("low", min(float(row["open"]), float(row["close"])))),
             close=float(row["close"]),
             volume=float(row.get("volume", 0.0) or 0.0),
+            open_volume=(
+                float(row["open_volume"])
+                if row.get("open_volume") is not None else None
+            ),
+            open_spread_bps=(
+                float(row["open_spread_bps"])
+                if row.get("open_spread_bps") is not None else None
+            ),
+            open_impact_bps=(
+                float(row["open_impact_bps"])
+                if row.get("open_impact_bps") is not None else None
+            ),
             spread_bps=float(row.get("spread_bps", 0.0) or 0.0),
             impact_bps=float(row.get("impact_bps", 0.0) or 0.0),
             halted=bool(row.get("halted", False)),
             sector=row.get("sector"),
             beta=float(row["beta"]) if row.get("beta") is not None else None,
             known_at=_datetime(row["known_at"]) if row.get("known_at") else None,
+            open_known_at=(
+                _datetime(row["open_known_at"])
+                if row.get("open_known_at") else None
+            ),
             member_from=_date(row["member_from"]) if row.get("member_from") else None,
             member_to=_date(row["member_to"]) if row.get("member_to") else None,
         )
@@ -178,6 +218,17 @@ class BacktestConfig:
             raise ValueError("exposure limits must be positive")
         if self.max_daily_loss_pct <= 0:
             raise ValueError("max_daily_loss_pct must be positive")
+        for name in (
+            "default_spread_bps",
+            "slippage_bps",
+            "default_impact_bps",
+            "impact_curve_bps",
+            "annual_borrow_rate",
+        ):
+            value = _finite(getattr(self, name), name)
+            object.__setattr__(self, name, value)
+            if value < 0:
+                raise ValueError("{} cannot be negative".format(name))
         if self.trading_days_per_year <= 0:
             raise ValueError("trading_days_per_year must be positive")
 
@@ -191,6 +242,9 @@ class Position:
     opened_index: int
     sector: str
     beta: float
+    realized_pnl: float = 0.0
+    borrow_cost: float = 0.0
+    closed_shares: float = 0.0
 
     def market_value(self, price: float) -> float:
         return self.shares * price
@@ -225,6 +279,7 @@ class ClosedTrade:
     holding_days: int
     reason: str
     sector: str = "UNKNOWN"
+    fully_closed: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         row = asdict(self)
@@ -330,7 +385,7 @@ class MarketNeutralBacktester:
     def _strategy_bars(
         self, rows: Sequence[DailyBar], decision_day: date
     ) -> List[Bar]:
-        decision_at = datetime.combine(decision_day, time(9, 30))
+        decision_at = datetime.combine(decision_day, _DECISION_TIME)
         return [
             Bar(
                 symbol=row.symbol,
@@ -352,22 +407,27 @@ class MarketNeutralBacktester:
 
     @staticmethod
     def _visible_events(events: Sequence[Event], decision_day: date) -> List[Event]:
-        decision_at = datetime.combine(decision_day, time(9, 30))
+        decision_at = datetime.combine(decision_day, _DECISION_TIME)
         visible = []
         for event in events:
+            if event.available_at is None:
+                continue
             happened = _datetime(event.timestamp)
-            available = _datetime(event.available_at or event.timestamp)
+            available = _datetime(event.available_at)
             if happened <= decision_at and available <= decision_at:
                 visible.append(event)
         return visible
 
     def _betas(
-        self, history: Sequence[Bar], symbols: Iterable[str]
+        self,
+        history: Sequence[Bar],
+        symbols: Iterable[str],
+        strategy: Optional[MarketNeutralLongShortStrategy] = None,
     ) -> Dict[str, float]:
         by_symbol: Dict[str, List[Bar]] = {}
         for row in history:
             by_symbol.setdefault(row.symbol, []).append(row)
-        calculated = self.strategy._rolling_betas(by_symbol)
+        calculated = (strategy or self.strategy)._rolling_betas(by_symbol)
         return {symbol: calculated.get(symbol, 1.0) for symbol in symbols}
 
     def _constrain_weights(
@@ -432,6 +492,10 @@ class MarketNeutralBacktester:
         borrow_rates: Optional[Mapping[str, Any]] = None,
         ssr_restricted: Optional[Mapping[str, Any]] = None,
         forced_cover: Optional[Mapping[str, Any]] = None,
+        pit_audit_report: Optional[Mapping[str, Any]] = None,
+        _evaluation_start: Optional[date] = None,
+        _evaluation_end: Optional[date] = None,
+        _compute_walk_forward: bool = True,
     ) -> BacktestResult:
         cfg = self.config
         rows = sorted(list(bars), key=lambda row: (row.date, row.symbol))
@@ -443,15 +507,13 @@ class MarketNeutralBacktester:
             raise ValueError("only one daily bar per date and symbol is allowed")
 
         by_day: Dict[date, Dict[str, DailyBar]] = {}
-        sectors = dict(self.strategy.sector_map)
-        explicit_betas: Dict[str, float] = {}
         for row in rows:
             by_day.setdefault(row.date, {})[row.symbol] = row
-            if row.sector:
-                sectors[row.symbol] = row.sector
-            if row.beta is not None:
-                explicit_betas[row.symbol] = row.beta
-        days = sorted(by_day)
+        days = [
+            day
+            for day in sorted(by_day)
+            if _evaluation_end is None or day <= _evaluation_end
+        ]
         cash = cfg.initial_cash
         positions: Dict[str, Position] = {}
         snapshots: List[DailySnapshot] = []
@@ -464,9 +526,43 @@ class MarketNeutralBacktester:
         dated_borrow_complete = bool(
             borrow_available and borrow_rates and ssr_restricted and forced_cover
         )
+        missing_position_days: Dict[str, int] = {}
+        stale_mark_detected = False
+        execution_strategy_config = replace(
+            self.strategy.config,
+            default_spread_bps=cfg.default_spread_bps,
+            default_impact_bps=cfg.default_impact_bps,
+            default_slippage_bps=cfg.slippage_bps,
+        )
 
         for day_index, day in enumerate(days):
             market = by_day[day]
+            for symbol in positions:
+                if symbol in market:
+                    missing_position_days[symbol] = 0
+                else:
+                    missing_position_days[symbol] = (
+                        missing_position_days.get(symbol, 0) + 1
+                    )
+                    if missing_position_days[symbol] > 1:
+                        stale_mark_detected = True
+            decision_at = datetime.combine(day, _DECISION_TIME)
+            known_history = [
+                row
+                for row in rows
+                if row.date < day
+                and (row.known_at is None or row.known_at <= decision_at)
+            ]
+            sectors: Dict[str, str] = {}
+            explicit_betas: Dict[str, float] = {}
+            for row in known_history:
+                if row.sector:
+                    sectors[row.symbol] = row.sector
+                if row.beta is not None:
+                    explicit_betas[row.symbol] = row.beta
+            day_strategy = MarketNeutralLongShortStrategy(
+                execution_strategy_config, sectors
+            )
             availability_values, availability_is_dated = _dated_values(
                 borrow_available, day
             )
@@ -481,35 +577,51 @@ class MarketNeutralBacktester:
                 and rates_are_dated
                 and ssr_is_dated
                 and forced_cover_is_dated
+                and set(market).issubset(availability_values)
+                and set(market).issubset(rate_values)
+                and set(market).issubset(ssr_values)
+                and set(market).issubset(forced_cover_values)
             )
-            rates = {
-                symbol: float(value)
-                for symbol, value in rate_values.items()
-                if value is not None
-            }
+            valid_rates = {}
+            for symbol, value in rate_values.items():
+                try:
+                    rate = _finite(value, "borrow_rate")
+                except (TypeError, ValueError):
+                    continue
+                if rate >= 0:
+                    valid_rates[symbol] = rate
+            rates = valid_rates
             # A locate without its contemporaneous fee is incomplete and cannot
             # support a short return. Missing data always means unavailable.
+            control_values_valid = (
+                all(type(value) is bool for value in availability_values.values())
+                and all(type(value) is bool for value in ssr_values.values())
+                and all(type(value) is bool for value in forced_cover_values.values())
+                and set(rate_values) == set(rates)
+            )
+            dated_borrow_complete = dated_borrow_complete and control_values_valid
             borrowable = {
-                symbol: bool(value) and symbol in rates
+                symbol: value is True and symbol in rates
                 for symbol, value in availability_values.items()
             }
             short_entry_allowed = {
                 symbol: allowed
-                and not bool(ssr_values.get(symbol, False))
-                and not bool(forced_cover_values.get(symbol, False))
+                and ssr_values.get(symbol) is False
+                and forced_cover_values.get(symbol) is False
                 for symbol, allowed in borrowable.items()
             }
-            open_equity = cash + sum(
+            decision_equity = cash + sum(
                 position.shares * (
-                    market[symbol].open
-                    if symbol in market else previous_closes[symbol]
+                    previous_closes[symbol]
+                    if symbol in previous_closes else position.average_price
                 )
                 for symbol, position in positions.items()
-                if symbol in market or symbol in previous_closes
             )
-            peak = max(peak, open_equity)
-            open_drawdown = 100.0 * max(0.0, 1.0 - open_equity / peak)
-            throttle = drawdown_throttle(open_drawdown)
+            peak = max(peak, decision_equity)
+            decision_drawdown = 100.0 * max(
+                0.0, 1.0 - decision_equity / peak
+            )
+            throttle = drawdown_throttle(decision_drawdown)
             if throttle == 0.0:
                 permanently_halted = True
             new_entries_halted = bool(
@@ -521,14 +633,30 @@ class MarketNeutralBacktester:
             history = self._strategy_bars(rows, day)
             visible_events = self._visible_events(event_rows, day)
             target_weights: Dict[str, float] = {}
-            betas = self._betas(history, set(market) | set(positions))
+            betas = self._betas(
+                history, set(market) | set(positions), day_strategy
+            )
             betas.update(explicit_betas)
             betas["SPY"] = 1.0
-            if not permanently_halted:
-                portfolio = self.strategy.generate(
+            for symbol, position in positions.items():
+                position.beta = betas.get(symbol, position.beta)
+                position.sector = sectors.get(symbol, position.sector)
+            evaluation_active = (
+                (_evaluation_start is None or day >= _evaluation_start)
+                and (_evaluation_end is None or day <= _evaluation_end)
+            )
+            final_evaluation_day = (
+                _evaluation_end is not None and day == _evaluation_end
+            )
+            if (
+                not permanently_halted
+                and evaluation_active
+                and not final_evaluation_day
+            ):
+                portfolio = day_strategy.generate(
                     history,
                     visible_events,
-                    datetime.combine(day, time(9, 30)),
+                    datetime.combine(day, _DECISION_TIME),
                     short_entry_allowed,
                     {symbol: (
                         rates.get(symbol, cfg.annual_borrow_rate)
@@ -550,7 +678,11 @@ class MarketNeutralBacktester:
                 bar = market.get(symbol)
                 if bar is None:
                     continue
-                target = target_weights.get(symbol, 0.0) * open_equity / bar.open
+                target = (
+                    target_weights.get(symbol, 0.0)
+                    * decision_equity
+                    / bar.open
+                )
                 current = positions.get(symbol)
                 if current is not None:
                     held = day_index - current.opened_index
@@ -561,11 +693,14 @@ class MarketNeutralBacktester:
                     if permanently_halted:
                         target = 0.0
                         forced_symbols.add(symbol)
+                    elif final_evaluation_day:
+                        target = 0.0
+                        forced_symbols.add(symbol)
                     elif current.shares < 0 and not borrowable.get(symbol, False):
                         target = 0.0
                         forced_symbols.add(symbol)
-                    elif current.shares < 0 and bool(
-                        forced_cover_values.get(symbol, False)
+                    elif current.shares < 0 and (
+                        forced_cover_values.get(symbol) is True
                     ):
                         target = 0.0
                         forced_symbols.add(symbol)
@@ -573,7 +708,16 @@ class MarketNeutralBacktester:
                         target = 0.0
                         forced_symbols.add(symbol)
                     elif held < cfg.min_hold_days and reducing_or_reversing:
-                        target = current.shares
+                        # Risk throttles may always reduce an existing sleeve;
+                        # the minimum hold only blocks discretionary exits or
+                        # reversals.
+                        if not (
+                            throttle < 1.0
+                            and abs(target) < abs(current.shares)
+                        ):
+                            target = current.shares
+                        elif target * current.shares <= 0:
+                            target = 0.0
                     elif new_entries_halted:
                         if target * current.shares <= 0:
                             target = 0.0
@@ -592,11 +736,38 @@ class MarketNeutralBacktester:
             opening_shares = {
                 symbol: position.shares for symbol, position in positions.items()
             }
+            # Non-emergency rebalances are filled at one common participation
+            # ratio. This keeps long/short sleeves and the hedge on the line
+            # between the already-held book and the constrained target.
+            rebalance_scale = 1.0
+            regular_orders = []
+            for symbol in sorted(all_symbols - forced_symbols):
+                current_shares = positions[symbol].shares if symbol in positions else 0.0
+                request = desired.get(symbol, 0.0) - current_shares
+                if abs(request) <= 1e-10:
+                    continue
+                regular_orders.append(symbol)
+                bar = market.get(symbol)
+                if (
+                    bar is None
+                    or bar.halted
+                    or bar.open_volume is None
+                    or bar.open_volume <= 0
+                ):
+                    rebalance_scale = 0.0
+                    break
+                rebalance_scale = min(
+                    rebalance_scale,
+                    bar.open_volume * cfg.volume_participation / abs(request),
+                )
             for symbol in sorted(all_symbols):
                 current = positions.get(symbol)
                 current_shares = current.shares if current else 0.0
                 requested = desired.get(symbol, 0.0) - current_shares
                 if abs(requested) <= 1e-10:
+                    continue
+                if symbol in regular_orders and rebalance_scale <= 0:
+                    blocked[symbol] = "atomic_rebalance_blocked"
                     continue
                 bar = market.get(symbol)
                 if bar is None:
@@ -605,8 +776,8 @@ class MarketNeutralBacktester:
                 if bar.halted:
                     blocked[symbol] = "halted"
                     continue
-                if bar.volume <= 0:
-                    blocked[symbol] = "missing_volume"
+                if bar.open_volume is None or bar.open_volume <= 0:
+                    blocked[symbol] = "missing_open_volume"
                     continue
                 if requested < 0 and current_shares + requested < 0 and not borrowable.get(symbol, False):
                     blocked[symbol] = "borrow_unavailable"
@@ -614,16 +785,28 @@ class MarketNeutralBacktester:
                 if (
                     requested < 0
                     and current_shares + requested < min(current_shares, 0.0)
-                    and bool(ssr_values.get(symbol, False))
+                    and ssr_values.get(symbol) is True
                 ):
                     blocked[symbol] = "ssr_restricted"
                     continue
-                max_fill = bar.volume * cfg.volume_participation
-                fill_shares = math.copysign(min(abs(requested), max_fill), requested)
-                participation = abs(fill_shares) / bar.volume
-                spread = bar.spread_bps if bar.spread_bps > 0 else cfg.default_spread_bps
+                max_fill = bar.open_volume * cfg.volume_participation
+                fill_shares = (
+                    requested * min(1.0, rebalance_scale)
+                    if symbol in regular_orders
+                    else math.copysign(min(abs(requested), max_fill), requested)
+                )
+                participation = abs(fill_shares) / bar.open_volume
+                spread = (
+                    bar.open_spread_bps
+                    if bar.open_spread_bps is not None
+                    else cfg.default_spread_bps
+                )
                 impact = (
-                    (bar.impact_bps if bar.impact_bps > 0 else cfg.default_impact_bps)
+                    (
+                        bar.open_impact_bps
+                        if bar.open_impact_bps is not None
+                        else cfg.default_impact_bps
+                    )
                     + cfg.impact_curve_bps * participation * participation
                 )
                 adverse_bps = spread / 2.0 + cfg.slippage_bps + impact
@@ -641,18 +824,26 @@ class MarketNeutralBacktester:
                     closing = min(abs(fill_shares), abs(old_shares))
                     side_sign = 1.0 if old_shares > 0 else -1.0
                     pnl = closing * side_sign * (execution_price - current.average_price)
+                    current.realized_pnl += pnl
+                    current.closed_shares += closing
+                new_shares = old_shares + fill_shares
+                fully_closed = (
+                    current is not None
+                    and old_shares * fill_shares < 0
+                    and (abs(new_shares) <= 1e-10 or old_shares * new_shares < 0)
+                )
+                if fully_closed and current is not None:
                     trades.append(ClosedTrade(
                         symbol=symbol,
                         side="LONG" if old_shares > 0 else "SHORT",
                         opened_on=current.opened_on,
                         closed_on=day,
-                        shares=closing,
-                        pnl=pnl,
+                        shares=current.closed_shares,
+                        pnl=current.realized_pnl - current.borrow_cost,
                         holding_days=day_index - current.opened_index,
                         reason=reason,
                         sector=current.sector,
                     ))
-                new_shares = old_shares + fill_shares
                 if abs(new_shares) <= 1e-10:
                     positions.pop(symbol, None)
                 elif current is None or old_shares * new_shares <= 0:
@@ -673,7 +864,9 @@ class MarketNeutralBacktester:
                     day, symbol, requested, fill_shares, execution_price, bar.open,
                     cost, reason, abs(fill_shares) + 1e-10 < abs(requested),
                 ))
-                capacity_samples.append(bar.close * bar.volume * cfg.volume_participation)
+                capacity_samples.append(
+                    bar.open * bar.open_volume * cfg.volume_participation
+                )
 
             # Existing shares earn the overnight move; post-rebalance shares
             # earn only the opening-to-close move.
@@ -712,6 +905,7 @@ class MarketNeutralBacktester:
                 annual_rate = rates.get(symbol, cfg.annual_borrow_rate)
                 charge = abs(position.shares) * mark * annual_rate / cfg.trading_days_per_year
                 cash -= charge
+                position.borrow_cost += charge
                 borrow_cost += charge
                 day_short_pnl -= charge
 
@@ -750,7 +944,7 @@ class MarketNeutralBacktester:
             snapshots.append(DailySnapshot(
                 day, equity, cash, daily_return, drawdown, throttle,
                 gross, net, beta_exposure, sector_exposure,
-                day_turnover / open_equity if open_equity > 0 else 0.0,
+                day_turnover / decision_equity if decision_equity > 0 else 0.0,
                 day_cost, borrow_cost, day_long_pnl, day_short_pnl,
                 target_weights=dict(sorted(target_weights.items())),
                 positions={symbol: position.shares for symbol, position in sorted(positions.items())},
@@ -767,24 +961,143 @@ class MarketNeutralBacktester:
             cfg.trading_days_per_year,
         )
         metrics["borrow_data_complete"] = dated_borrow_complete
-        metrics["pit_quality_passed"] = dated_borrow_complete and all(
+        bar_quality_passed = all(
             row.known_at is not None
+            and row.open_known_at is not None
             and row.member_from is not None
             and row.member_to is not None
             and row.date <= row.known_at.date() <= row.date + timedelta(days=3)
+            and row.open_known_at <= datetime.combine(row.date, time(9, 30))
             and row.member_from <= row.date < row.member_to
             for row in rows
         )
-        walk_forward = _walk_forward_metrics(snapshots, trades, cfg)
-        oos_indices = sorted({
-            index
-            for fold in walk_forward
-            for index in fold.pop("_test_indices", [])
-        })
-        if oos_indices:
-            oos_rows = [snapshots[index] for index in oos_indices]
-            oos_days = {row.date for row in oos_rows}
-            oos_trades = [trade for trade in trades if trade.closed_on in oos_days]
+        audit_section = (pit_audit_report or {}).get("audit") or {}
+        gap_section = (pit_audit_report or {}).get("data_gaps") or {}
+        audit_categories = set(gap_section.get("required_categories") or ())
+        audit_counts = gap_section.get("counts") or {}
+        audit_quality_passed = bool(
+            pit_audit_report
+            and pit_audit_report.get("ok") is True
+            and audit_section.get("ok") is True
+            and gap_section.get("ok") is True
+            and not gap_section.get("missing_categories")
+            and not pit_audit_report.get("unavailable_partitions")
+            and audit_categories == _REQUIRED_PIT_CATEGORIES
+            and isinstance(audit_counts, Mapping)
+            and all(int(audit_counts.get(category, 0)) > 0
+                    for category in _REQUIRED_PIT_CATEGORIES)
+        )
+        metrics["pit_audit_passed"] = audit_quality_passed
+        event_quality_passed = all(
+            event.available_at is not None
+            and _datetime(event.available_at) >= _datetime(event.timestamp)
+            and (
+                event.reaction is None
+                or (
+                    event.reaction_known_at is not None
+                    and _datetime(event.reaction_known_at)
+                    >= _datetime(event.timestamp)
+                )
+            )
+            for event in event_rows
+        )
+        metrics["event_pit_quality_passed"] = event_quality_passed
+        metrics["stale_mark_detected"] = stale_mark_detected
+        metrics["pit_quality_passed"] = (
+            dated_borrow_complete
+            and bar_quality_passed
+            and audit_quality_passed
+            and event_quality_passed
+            and not stale_mark_detected
+        )
+        tolerance = 1e-6
+        metrics["portfolio_controls_passed"] = not stale_mark_detected and all(
+            row.gross_exposure <= cfg.max_gross + tolerance
+            and abs(row.net_exposure) <= cfg.max_abs_net + tolerance
+            and abs(row.beta_exposure) <= cfg.max_abs_beta + tolerance
+            and all(
+                exposure <= cfg.max_sector_gross + tolerance
+                for exposure in row.sector_exposure.values()
+            )
+            for row in snapshots
+        )
+        metrics["drawdown_throttle_passed"] = all(
+            sum(abs(value) for value in row.target_weights.values())
+            <= cfg.max_gross * row.throttle + tolerance
+            and row.gross_exposure
+            <= cfg.max_gross * row.throttle + tolerance
+            and (row.throttle > 0 or not row.positions)
+            for row in snapshots
+        )
+        walk_forward: List[Dict[str, Any]] = []
+        oos_rows: List[DailySnapshot] = []
+        oos_trades: List[ClosedTrade] = []
+        oos_liquidation_complete = True
+        oos_portfolio_controls_passed = True
+        oos_drawdown_throttle_passed = True
+        if _compute_walk_forward:
+            wf_config = WalkForwardConfig(
+                train_months=cfg.walk_forward_train_months,
+                validation_months=cfg.walk_forward_validation_months,
+                test_months=cfg.walk_forward_test_months,
+                purge_days=cfg.purge_days,
+                embargo_days=cfg.embargo_days,
+            )
+            for fold in splits_from_config(days, wf_config):
+                test_start = min(fold.test_dates)
+                test_end = max(fold.test_dates)
+                isolated = MarketNeutralBacktester(self.strategy, cfg).run(
+                    rows,
+                    event_rows,
+                    borrow_available=borrow_available,
+                    borrow_rates=borrow_rates,
+                    ssr_restricted=ssr_restricted,
+                    forced_cover=forced_cover,
+                    pit_audit_report=pit_audit_report,
+                    _evaluation_start=test_start,
+                    _evaluation_end=test_end,
+                    _compute_walk_forward=False,
+                )
+                test_rows = [
+                    row
+                    for row in isolated.snapshots
+                    if test_start <= row.date <= test_end
+                ]
+                test_trades = [
+                    trade
+                    for trade in isolated.trades
+                    if trade.opened_on >= test_start and trade.closed_on <= test_end
+                ]
+                start_equity = (
+                    test_rows[0].equity / (1.0 + test_rows[0].daily_return)
+                    if test_rows else cfg.initial_cash
+                )
+                fold_row = fold.to_dict()
+                fold_row["state_isolated"] = True
+                fold_row["parameters_frozen"] = True
+                fold_row["ending_positions_flat"] = not bool(
+                    test_rows[-1].positions if test_rows else {}
+                )
+                oos_liquidation_complete = (
+                    oos_liquidation_complete
+                    and fold_row["ending_positions_flat"]
+                )
+                oos_portfolio_controls_passed = (
+                    oos_portfolio_controls_passed
+                    and isolated.metrics["portfolio_controls_passed"]
+                )
+                oos_drawdown_throttle_passed = (
+                    oos_drawdown_throttle_passed
+                    and isolated.metrics["drawdown_throttle_passed"]
+                )
+                fold_row["test_metrics"] = _performance_metrics(
+                    test_rows, test_trades, start_equity, (),
+                    cfg.trading_days_per_year,
+                )
+                walk_forward.append(fold_row)
+                oos_rows.extend(test_rows)
+                oos_trades.extend(test_trades)
+        if oos_rows:
             oos_metrics = _performance_metrics(
                 oos_rows, oos_trades,
                 oos_rows[0].equity / (1 + oos_rows[0].daily_return),
@@ -801,9 +1114,15 @@ class MarketNeutralBacktester:
                 "oos_avg_monthly_return_pct": oos_metrics["avg_monthly_return_pct"],
                 "oos_months_hit_10pct": oos_metrics["months_hit_10pct"],
                 "oos_months_total": oos_metrics["months_total"],
+                "oos_liquidation_complete": oos_liquidation_complete,
+                "oos_portfolio_controls_passed": oos_portfolio_controls_passed,
+                "oos_drawdown_throttle_passed": oos_drawdown_throttle_passed,
             })
         else:
             metrics["oos_closed_trades"] = 0
+            metrics["oos_liquidation_complete"] = False
+            metrics["oos_portfolio_controls_passed"] = False
+            metrics["oos_drawdown_throttle_passed"] = False
         acceptance = evaluate_backtest_acceptance(metrics).to_dict()
         return BacktestResult(cfg, snapshots, trades, metrics, walk_forward, acceptance)
 
@@ -914,34 +1233,6 @@ def _performance_metrics(
     }
 
 
-def _walk_forward_metrics(
-    snapshots: Sequence[DailySnapshot],
-    trades: Sequence[ClosedTrade],
-    config: BacktestConfig,
-) -> List[Dict[str, Any]]:
-    wf_config = WalkForwardConfig(
-        train_months=config.walk_forward_train_months,
-        validation_months=config.walk_forward_validation_months,
-        test_months=config.walk_forward_test_months,
-        purge_days=config.purge_days,
-        embargo_days=config.embargo_days,
-    )
-    folds = splits_from_config([row.date for row in snapshots], wf_config)
-    output = []
-    for fold in folds:
-        test_rows = [snapshots[index] for index in fold.test]
-        test_days = {item.date for item in test_rows}
-        test_trades = [trade for trade in trades if trade.closed_on in test_days]
-        start = test_rows[0].equity / (1.0 + test_rows[0].daily_return)
-        row = fold.to_dict()
-        row["test_metrics"] = _performance_metrics(
-            test_rows, test_trades, start, (), config.trading_days_per_year
-        )
-        row["_test_indices"] = list(fold.test)
-        output.append(row)
-    return output
-
-
 def run_market_neutral_backtest(
     bars: Iterable[DailyBar],
     events: Iterable[Event] = (),
@@ -952,6 +1243,7 @@ def run_market_neutral_backtest(
     borrow_rates: Optional[Mapping[str, Any]] = None,
     ssr_restricted: Optional[Mapping[str, Any]] = None,
     forced_cover: Optional[Mapping[str, Any]] = None,
+    pit_audit_report: Optional[Mapping[str, Any]] = None,
 ) -> BacktestResult:
     """Convenience API for callers that do not need to retain engine state."""
 
@@ -964,4 +1256,5 @@ def run_market_neutral_backtest(
         borrow_rates=borrow_rates,
         ssr_restricted=ssr_restricted,
         forced_cover=forced_cover,
+        pit_audit_report=pit_audit_report,
     )

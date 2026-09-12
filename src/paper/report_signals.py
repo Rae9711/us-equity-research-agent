@@ -16,6 +16,8 @@ no divergence between backtest and production signal interpretation.
 from __future__ import annotations
 
 import json
+import math
+from datetime import datetime, time
 from typing import Any
 
 from src.paper.signals import load_candidate_signals, normalize_slot
@@ -30,6 +32,8 @@ def _safe_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     if v != v:  # NaN
+        return None
+    if not math.isfinite(v):
         return None
     return v
 
@@ -179,24 +183,97 @@ def event_ls_signals_for_date(trading_date: str) -> list[dict[str, Any]]:
     except (OSError, json.JSONDecodeError):
         return []
     portfolio = morning.get("event_ls_portfolio") or {}
+    if not isinstance(portfolio, dict):
+        return []
     costs_gate = portfolio.get("costs_gate") or {}
-    if not portfolio.get("deploy") or costs_gate.get("pass") is not True:
+    if (
+        not isinstance(costs_gate, dict)
+        or portfolio.get("deploy") is not True
+        or costs_gate.get("pass") is not True
+    ):
         return []
 
     as_of = portfolio.get("as_of") or portfolio.get("known_at")
+    if not as_of:
+        return []
+    try:
+        known_at = datetime.fromisoformat(str(as_of).replace("Z", "+00:00"))
+        decision = datetime.combine(
+            datetime.fromisoformat(trading_date).date(), time(9, 30)
+        )
+        if known_at.tzinfo is not None:
+            from zoneinfo import ZoneInfo
+
+            known_at = known_at.astimezone(
+                ZoneInfo("America/New_York")
+            ).replace(tzinfo=None)
+        if known_at > decision:
+            return []
+    except ValueError:
+        return []
     hold = portfolio.get("hold_days") or [2, 10]
+    if (
+        not isinstance(hold, (list, tuple))
+        or len(hold) != 2
+        or not all(isinstance(value, int) for value in hold)
+        or not (2 <= hold[0] <= hold[1] <= 10)
+    ):
+        return []
     rows: list[dict[str, Any]] = []
-    raw_legs = list(portfolio.get("legs") or [])
-    if portfolio.get("hedge"):
-        raw_legs.append({**portfolio["hedge"], "is_hedge": True})
+    legs = portfolio.get("legs") or []
+    if not isinstance(legs, list) or not all(isinstance(leg, dict) for leg in legs):
+        return []
+    raw_legs = [{**leg, "_validated_hedge": False} for leg in legs]
+    hedge = portfolio.get("hedge")
+    if hedge is not None:
+        if not isinstance(hedge, dict):
+            return []
+        raw_legs.append({**hedge, "_validated_hedge": True})
+    seen: set[str] = set()
     for leg in raw_legs:
         symbol = str(leg.get("symbol") or "").upper()
         direction = str(leg.get("direction") or "").upper()
-        weight = _safe_float(leg.get("weight") or leg.get("weight_pct"))
-        if not symbol or direction not in ("LONG", "SHORT") or weight is None:
-            continue
-        # Persisted percentages may be either 0.05 or 5.0; normalize to fraction.
-        signed = abs(weight) / 100.0 if abs(weight) > 1.0 else abs(weight)
+        if "weight_pct" in leg:
+            raw_weight = _safe_float(leg.get("weight_pct"))
+            weight = raw_weight / 100.0 if raw_weight is not None else None
+        else:
+            weight = _safe_float(leg.get("weight"))
+        leg_hold = leg.get("hold_days") or hold
+        cost = _safe_float(leg.get("estimated_cost_bps"))
+        alpha = _safe_float(leg.get("predicted_alpha_bps"))
+        beta_value = _safe_float(leg.get("beta"))
+        borrow_fee = _safe_float(leg.get("borrow_fee_bps"))
+        total_cost = (
+            cost + (borrow_fee or 0.0)
+            if cost is not None and direction == "SHORT"
+            else cost
+        )
+        if (
+            not symbol
+            or symbol in seen
+            or direction not in ("LONG", "SHORT")
+            or weight is None
+            or not 0 < abs(weight) <= 0.10
+            or not isinstance(leg_hold, (list, tuple))
+            or list(leg_hold) != list(hold)
+            or cost is None
+            or cost < 0
+            or alpha is None
+            or total_cost is None
+            or alpha <= 2.0 * total_cost
+            or beta_value is None
+            or (
+                direction == "SHORT"
+                and (
+                    leg.get("borrow_available") is not True
+                    or borrow_fee is None
+                    or borrow_fee < 0
+                )
+            )
+        ):
+            return []
+        seen.add(symbol)
+        signed = abs(weight)
         if direction == "SHORT":
             signed = -signed
         rows.append(
@@ -205,15 +282,35 @@ def event_ls_signals_for_date(trading_date: str) -> list[dict[str, Any]]:
                 "direction": direction,
                 "target_weight": round(signed, 8),
                 "sector": leg.get("sector") or leg.get("industry"),
-                "beta": _safe_float(leg.get("beta")),
-                "predicted_alpha_bps": _safe_float(leg.get("predicted_alpha_bps")),
-                "estimated_cost_bps": _safe_float(leg.get("estimated_cost_bps")),
-                "hold_days": list(leg.get("hold_days") or hold),
+                "beta": beta_value,
+                "predicted_alpha_bps": alpha,
+                "estimated_cost_bps": total_cost,
+                "hold_days": list(leg_hold),
                 "known_at": as_of,
                 "source": "report:event_ls",
-                "is_hedge": bool(leg.get("is_hedge")),
+                "is_hedge": leg.get("_validated_hedge") is True,
             }
         )
+    if not rows:
+        return []
+    gross = sum(abs(row["target_weight"]) for row in rows)
+    net = sum(row["target_weight"] for row in rows)
+    sectors: dict[str, float] = {}
+    beta = 0.0
+    for row in rows:
+        if not row["is_hedge"]:
+            sector = str(row.get("sector") or "UNKNOWN")
+            sectors[sector] = sectors.get(sector, 0.0) + abs(row["target_weight"])
+        beta += row["target_weight"] * (
+            row["beta"] if row["beta"] is not None else 1.0
+        )
+    if (
+        gross > 1.0 + 1e-9
+        or abs(net) > 0.10 + 1e-9
+        or any(value > 0.15 + 1e-9 for value in sectors.values())
+        or abs(beta) > 0.05 + 1e-9
+    ):
+        return []
     return rows
 
 

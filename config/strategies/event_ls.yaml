@@ -30,8 +30,12 @@ costs:
   cost_gate_multiple: 2.0
   default_spread_bps: 5.0
   default_impact_bps: 5.0
+  default_slippage_bps: 2.0
   default_borrow_bps: 3.0
 
 holding:
   min_holding_days: 2
   max_holding_days: 10
+  news_freshness_days: 3
+  earnings_freshness_days: 10
+  revision_freshness_days: 30

@@ -43,7 +43,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     audit = audit_rows(rows, args.decision_at, contract)
     gaps = data_gap_report(rows, args.decision_at, contract)
     result = {
-        "ok": audit.ok and gaps["ok"],
+        "ok": not unavailable and audit.ok and gaps["ok"],
         "partition_date": args.date,
         "unavailable_partitions": unavailable,
         "audit": audit.as_dict(),

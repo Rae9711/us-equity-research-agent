@@ -41,5 +41,16 @@ prove what was known on each historical date. Missing fees block the affected
 short; SSR blocks new or increased shorts; forced-cover flags liquidate an
 existing short even during its minimum holding period.
 
+Opening fills use `open_volume` only; completed daily volume is never used for
+auction participation. The input must also include a successful
+`pit_audit_report` with positive counts for every required category. Sector and
+beta metadata are resolved only from prior known bars. Missing held-symbol
+marks for more than one session fail PIT and portfolio-control acceptance.
+
+Qualification evidence is imported only by an explicit
+`--record-qualification <immutable-id>` CLI option. Reusing an evidence ID with
+different metrics is rejected. Passing OOS evidence merely opens the paper
+observation stage; it never enables execution.
+
 The strategy never backfills missing values with future revisions, current
 index members, or current borrow availability.

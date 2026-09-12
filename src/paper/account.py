@@ -81,6 +81,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
     # --- Event-enhanced market-neutral research book ---
     # Disabled until BOTH OOS and paper qualification gates pass.
     "event_ls_enabled": False,
+    "event_ls_requested_enabled": False,
     "event_ls_backtest_passed": False,
     "event_ls_max_gross_pct": 100.0,
     "event_ls_max_abs_net_pct": 10.0,
@@ -88,6 +89,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "event_ls_max_abs_beta": 0.05,
     "event_ls_max_name_pct": 10.0,
     "event_ls_volume_participation": 0.05,
+    "event_ls_min_fill_ratio": 0.90,
     "event_ls_annual_borrow_rate": 0.03,
     "event_ls_min_hold_days": 2,
     "event_ls_max_hold_days": 10,
@@ -95,7 +97,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "event_ls_paper_min_days": 63,
     "event_ls_drawdown_tiers": [4.0, 6.0, 8.0, 10.0],
     # Bumped when DEFAULT_PARAMS semantics change; load_account migrates once.
-    "params_schema_version": 4,
+    "params_schema_version": 5,
 }
 
 
@@ -143,6 +145,9 @@ def default_account() -> dict[str, Any]:
                 "backtest_passed": False,
                 "paper_passed": False,
                 "enabled": False,
+                "requested_enabled": False,
+                "effective_enabled": False,
+                "paper_eligible": False,
                 "reason": "Requires OOS acceptance and 63 days / 100 paper trades",
             }
         },
@@ -301,6 +306,15 @@ def _migrate_legacy_params(params: dict[str, Any]) -> None:
         ):
             params.setdefault(key, deepcopy(DEFAULT_PARAMS[key]))
         params["params_schema_version"] = 4
+        ver = 4
+
+    if ver < 5:
+        params.setdefault("event_ls_requested_enabled", False)
+        params.setdefault(
+            "event_ls_min_fill_ratio",
+            DEFAULT_PARAMS["event_ls_min_fill_ratio"],
+        )
+        params["params_schema_version"] = 5
 
 
 def sync_closed_pnl_metrics(account: dict[str, Any]) -> dict[str, Any]:

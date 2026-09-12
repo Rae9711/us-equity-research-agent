@@ -61,10 +61,10 @@ def bars(beta_by_symbol=None):
 def events():
     timestamp = AS_OF - timedelta(days=1)
     return [
-        Event("TA", timestamp, "news", sentiment=1.0),
-        Event("TB", timestamp, "news", sentiment=-1.0),
-        Event("FA", timestamp, "news", sentiment=0.8),
-        Event("FB", timestamp, "news", sentiment=-0.8),
+        Event("TA", timestamp, "news", sentiment=1.0, available_at=timestamp),
+        Event("TB", timestamp, "news", sentiment=-1.0, available_at=timestamp),
+        Event("FA", timestamp, "news", sentiment=0.8, available_at=timestamp),
+        Event("FB", timestamp, "news", sentiment=-0.8, available_at=timestamp),
     ]
 
 
@@ -114,6 +114,37 @@ def test_no_lookahead_from_future_bar_or_news():
     assert [signal.symbol for signal in contaminated.signals] == [
         signal.symbol for signal in baseline.signals
     ]
+
+
+def test_stale_news_expires_and_future_reaction_is_ignored():
+    engine = strategy(news_freshness_days=3)
+    stale = [
+        replace(
+            event,
+            timestamp=AS_OF - timedelta(days=4),
+            available_at=AS_OF - timedelta(days=4),
+        )
+        for event in events()
+    ]
+    assert engine.generate(
+        bars(), stale, AS_OF, all_borrowable()
+    ).signals == []
+
+    baseline = engine.generate(bars(), events(), AS_OF, all_borrowable())
+    contaminated = engine.generate(
+        bars(),
+        [
+            replace(
+                event,
+                reaction=-100.0,
+                reaction_known_at=AS_OF + timedelta(minutes=1),
+            )
+            for event in events()
+        ],
+        AS_OF,
+        all_borrowable(),
+    )
+    assert contaminated.weights == pytest.approx(baseline.weights)
 
 
 def test_within_sector_selection_is_sector_neutral():

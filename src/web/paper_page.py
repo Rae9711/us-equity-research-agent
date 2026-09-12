@@ -94,6 +94,8 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
                 "backtest_passed": False,
                 "paper_passed": False,
                 "enabled": False,
+                "requested_enabled": False,
+                "effective_enabled": False,
             }
         ),
         "decisions": decisions,

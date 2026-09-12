@@ -118,18 +118,31 @@ def test_event_ls_report_preserves_multi_leg_targets(data_root):
                     "direction": "LONG",
                     "weight_pct": 5.0,
                     "industry": "Technology",
+                    "beta": 1.2,
+                    "predicted_alpha_bps": 30.0,
+                    "estimated_cost_bps": 10.0,
                 },
                 {
                     "symbol": "AMD",
                     "direction": "SHORT",
                     "weight_pct": 5.0,
                     "industry": "Technology",
+                    "beta": 1.0,
+                    "predicted_alpha_bps": 30.0,
+                    "estimated_cost_bps": 10.0,
+                    "borrow_available": True,
+                    "borrow_fee_bps": 2.0,
                 },
             ],
             "hedge": {
                 "symbol": "SPY",
                 "direction": "SHORT",
                 "weight": 0.02,
+                "beta": 1.0,
+                "predicted_alpha_bps": 10.0,
+                "estimated_cost_bps": 2.0,
+                "borrow_available": True,
+                "borrow_fee_bps": 1.0,
             },
         }
     }
@@ -141,6 +154,36 @@ def test_event_ls_report_preserves_multi_leg_targets(data_root):
     assert next(row for row in rows if row["symbol"] == "AMD")["target_weight"] == -0.05
     assert next(row for row in rows if row["symbol"] == "SPY")["is_hedge"] is True
     assert available_event_ls_report_dates() == ["2026-03-03"]
+
+    one_percent = json.loads(json.dumps(payload))
+    one_percent["event_ls_portfolio"].pop("hedge")
+    for leg in one_percent["event_ls_portfolio"]["legs"]:
+        leg["weight_pct"] = 1.0
+    (day / "morning.json").write_text(
+        json.dumps(one_percent), encoding="utf-8"
+    )
+    one_percent_rows = event_ls_signals_for_date("2026-03-03")
+    assert {abs(row["target_weight"]) for row in one_percent_rows} == {0.01}
+
+    invalid = json.loads(json.dumps(one_percent))
+    invalid["event_ls_portfolio"]["legs"][1].pop("borrow_available")
+    (day / "morning.json").write_text(json.dumps(invalid), encoding="utf-8")
+    assert event_ls_signals_for_date("2026-03-03") == []
+
+    malformed = json.loads(json.dumps(one_percent))
+    malformed["event_ls_portfolio"]["deploy"] = "false"
+    malformed["event_ls_portfolio"]["legs"][1]["borrow_fee_bps"] = -1
+    malformed["event_ls_portfolio"]["legs"][0].pop("beta")
+    (day / "morning.json").write_text(json.dumps(malformed), encoding="utf-8")
+    assert event_ls_signals_for_date("2026-03-03") == []
+
+    expensive_short = json.loads(json.dumps(one_percent))
+    expensive_short["event_ls_portfolio"]["legs"][1]["borrow_fee_bps"] = 1_000
+    expensive_short["event_ls_portfolio"]["legs"][0]["is_hedge"] = True
+    (day / "morning.json").write_text(
+        json.dumps(expensive_short), encoding="utf-8"
+    )
+    assert event_ls_signals_for_date("2026-03-03") == []
 
     payload["event_ls_portfolio"]["costs_gate"]["pass"] = False
     (day / "morning.json").write_text(json.dumps(payload), encoding="utf-8")
