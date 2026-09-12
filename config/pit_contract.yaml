@@ -1,0 +1,53 @@
+version: 1
+name: historical-point-in-time
+
+# Every decision must be able to account for each category below. A category
+# with zero rows known at decision time is reported as a data gap.
+required_categories:
+  - daily
+  - intraday
+  - news
+  - earnings
+  - borrow
+  - universe
+  - macro
+
+row:
+  required_fields:
+    - symbol
+    - kind
+    - observed_at
+    - known_at
+  # Explicit `identifier` or `id` wins. These fields form the natural fallback.
+  identifier_fields:
+    - symbol
+    - kind
+    - observed_at
+
+# Rows can override classification with `tradable: true|false`. In its absence,
+# these asset types are tradable; macro category rows are non-tradable.
+tradable_asset_types:
+  - equity
+  - etf
+  - adr
+  - option
+  - future
+non_tradable_categories:
+  - macro
+
+# Membership intervals are [member_from, member_to): the removal date is not
+# eligible. This avoids selecting current constituents during historical runs.
+membership:
+  member_to_exclusive: true
+
+short_candidate:
+  required_borrow_fields:
+    - borrow_available
+    - borrow_fee_rate
+
+storage:
+  environment_root: PIT_DATA_ROOT
+  default_root: data/pit
+  format: jsonl
+  partition_layout: "{category}/date={date}/data.jsonl"
+  immutable: true
