@@ -11,7 +11,9 @@ import pytest
 
 from src.paper.backtest import Bar, resolve_fill_price, run_paper_backtest
 from src.paper.report_signals import (
+    available_event_ls_report_dates,
     available_report_dates,
+    event_ls_signals_for_date,
     report_signals_for_date,
     report_symbols,
 )
@@ -99,6 +101,50 @@ def test_report_provider_parses_and_filters(data_root):
 
     assert available_report_dates() == ["2026-03-02"]
     assert set(report_symbols(["2026-03-02"])) == {"NVDA", "META"}
+
+
+def test_event_ls_report_preserves_multi_leg_targets(data_root):
+    day = data_root / "reports" / "2026-03-03"
+    day.mkdir(parents=True)
+    payload = {
+        "event_ls_portfolio": {
+            "deploy": True,
+            "as_of": "2026-03-03T09:25:00-05:00",
+            "hold_days": [2, 10],
+            "costs_gate": {"pass": True},
+            "legs": [
+                {
+                    "symbol": "NVDA",
+                    "direction": "LONG",
+                    "weight_pct": 5.0,
+                    "industry": "Technology",
+                },
+                {
+                    "symbol": "AMD",
+                    "direction": "SHORT",
+                    "weight_pct": 5.0,
+                    "industry": "Technology",
+                },
+            ],
+            "hedge": {
+                "symbol": "SPY",
+                "direction": "SHORT",
+                "weight": 0.02,
+            },
+        }
+    }
+    (day / "morning.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    rows = event_ls_signals_for_date("2026-03-03")
+    assert {row["symbol"] for row in rows} == {"NVDA", "AMD", "SPY"}
+    assert next(row for row in rows if row["symbol"] == "NVDA")["target_weight"] == 0.05
+    assert next(row for row in rows if row["symbol"] == "AMD")["target_weight"] == -0.05
+    assert next(row for row in rows if row["symbol"] == "SPY")["is_hedge"] is True
+    assert available_event_ls_report_dates() == ["2026-03-03"]
+
+    payload["event_ls_portfolio"]["costs_gate"]["pass"] = False
+    (day / "morning.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert event_ls_signals_for_date("2026-03-03") == []
 
 
 # --------------------------------------------------------------------------- #

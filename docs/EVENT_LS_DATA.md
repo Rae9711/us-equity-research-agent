@@ -1,0 +1,38 @@
+# Event-LS point-in-time data contract
+
+The event-enhanced long/short strategy is research-only. A 10% average monthly
+return is a stretch KPI, not a forecast or guarantee.
+
+## Required history
+
+Every observation must include `observed_at` (what it describes), `known_at`
+(when it became knowable), and the universe membership interval
+`[member_from, member_to)`. The immutable partition contract is defined in
+`config/pit_contract.yaml`.
+
+Required categories:
+
+- `daily`: at least five years of adjusted OHLCV and corporate actions.
+- `intraday`: 1- or 5-minute OHLCV plus a spread proxy at decision boundaries.
+- `news`: exact publication and vendor-arrival timestamps.
+- `earnings`: report time, actual, contemporaneous consensus and estimate
+  revision history.
+- `borrow`: locate availability, annualized fee, SSR and forced-cover flags.
+- `universe`: historical S&P 500 / Nasdaq 100 membership including removals,
+  delistings and IPO dates.
+- `macro`: SPY, QQQ, VIX, sector ETFs, rates and release timestamps.
+
+## Validation workflow
+
+1. Load source records into `PITPartitionStore`; published partitions cannot be
+   overwritten.
+2. Run `audit_rows(rows, decision_at)` before feature construction.
+3. Refuse rows with `known_at > decision_at`, invalid membership, duplicate
+   identifiers, or missing short-borrow fields.
+4. Run `data_gap_report`; any required missing category prevents research
+   acceptance.
+5. Backtests must set `pit_quality_passed=true`; otherwise the acceptance gate
+   remains failed regardless of returns.
+
+The strategy never backfills missing values with future revisions, current
+index members, or current borrow availability.

@@ -87,6 +87,15 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
         "position_pct": portfolio.get("position_pct"),
         "allocation_reason": portfolio.get("allocation_reason"),
         "allocation_notes": allocation_notes,
+        "event_ls_qualification": (
+            (account.get("strategy_qualification") or {}).get("event_ls")
+            or {
+                "status": "NOT_READY",
+                "backtest_passed": False,
+                "paper_passed": False,
+                "enabled": False,
+            }
+        ),
         "decisions": decisions,
         "today_decisions": today_decisions,
         "trades": trades,

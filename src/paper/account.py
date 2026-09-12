@@ -78,8 +78,24 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "max_daily_loss_pct": 2.0,    # no new entries after −2% day
     "option_premium_stop_pct": 50.0,
     "option_premium_target_mult": 2.0,
+    # --- Event-enhanced market-neutral research book ---
+    # Disabled until BOTH OOS and paper qualification gates pass.
+    "event_ls_enabled": False,
+    "event_ls_backtest_passed": False,
+    "event_ls_max_gross_pct": 100.0,
+    "event_ls_max_abs_net_pct": 10.0,
+    "event_ls_max_sector_gross_pct": 15.0,
+    "event_ls_max_abs_beta": 0.05,
+    "event_ls_max_name_pct": 10.0,
+    "event_ls_volume_participation": 0.05,
+    "event_ls_annual_borrow_rate": 0.03,
+    "event_ls_min_hold_days": 2,
+    "event_ls_max_hold_days": 10,
+    "event_ls_paper_min_trades": 100,
+    "event_ls_paper_min_days": 63,
+    "event_ls_drawdown_tiers": [4.0, 6.0, 8.0, 10.0],
     # Bumped when DEFAULT_PARAMS semantics change; load_account migrates once.
-    "params_schema_version": 3,
+    "params_schema_version": 4,
 }
 
 
@@ -121,6 +137,15 @@ def default_account() -> dict[str, Any]:
             }
         ],
         "journal": [],
+        "strategy_qualification": {
+            "event_ls": {
+                "status": "NOT_READY",
+                "backtest_passed": False,
+                "paper_passed": False,
+                "enabled": False,
+                "reason": "Requires OOS acceptance and 63 days / 100 paper trades",
+            }
+        },
         "params": dict(DEFAULT_PARAMS),
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
@@ -255,6 +280,27 @@ def _migrate_legacy_params(params: dict[str, Any]) -> None:
         ):
             params[key] = DEFAULT_PARAMS[key]
         params["params_schema_version"] = 3
+        ver = 3
+
+    if ver < 4:
+        for key in (
+            "event_ls_enabled",
+            "event_ls_backtest_passed",
+            "event_ls_max_gross_pct",
+            "event_ls_max_abs_net_pct",
+            "event_ls_max_sector_gross_pct",
+            "event_ls_max_abs_beta",
+            "event_ls_max_name_pct",
+            "event_ls_volume_participation",
+            "event_ls_annual_borrow_rate",
+            "event_ls_min_hold_days",
+            "event_ls_max_hold_days",
+            "event_ls_paper_min_trades",
+            "event_ls_paper_min_days",
+            "event_ls_drawdown_tiers",
+        ):
+            params.setdefault(key, deepcopy(DEFAULT_PARAMS[key]))
+        params["params_schema_version"] = 4
 
 
 def sync_closed_pnl_metrics(account: dict[str, Any]) -> dict[str, Any]:

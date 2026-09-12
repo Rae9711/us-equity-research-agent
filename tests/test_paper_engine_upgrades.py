@@ -277,10 +277,13 @@ def test_load_account_migrates_exit_params(data_root):
     assert p["risk_pct"] == 1.5
     assert p["cash_reserve_min_pct"] == 10.0
     assert p["adaptive_risk_cap"] == 3.0
-    assert p["params_schema_version"] >= 3
+    assert p["params_schema_version"] >= 4
     assert p["max_daily_loss_pct"] == 2.0
     assert p["max_loss_per_trade_r"] == 1.0
     assert p["breakeven_trigger_r"] == 0.5
+    assert p["event_ls_enabled"] is False
+    assert p["event_ls_max_abs_net_pct"] == 10.0
+    assert loaded["strategy_qualification"]["event_ls"]["status"] == "NOT_READY"
     assert account_path().exists()
 
 

@@ -12,6 +12,13 @@
     <h1 class="page-title">模拟交易</h1>
     <p class="advisory-banner">模拟交易 · 不构成投资建议 · 资金虚拟 $10,000 · 不保证每日盈利 · 无校准 edge 则空仓 · 真实行情数据纸上交易 · 期望R（EV）门禁 · 可部署约 80% · 现金底仓约 10–20% · 股票/ETF多空 + QQQ期权模拟 · 日亏/单笔熔断 · 同日同标的不反复开仓</p>
     <p class="muted">日期 {{ trading_date }} · 阶段 {{ session_phase }} · 双账本：短线 Intraday + 长线 Swing · 可执行 setup 优选（非盲目 #1）· 收盘软平仓（盈利可过夜 runner）</p>
+    <p class="muted">
+      Event-LS 研究门禁：<strong>{{ event_ls_qualification.status }}</strong> ·
+      OOS {{ '通过' if event_ls_qualification.backtest_passed else '未通过' }} ·
+      模拟盘 {{ '通过' if event_ls_qualification.paper_passed else '未通过' }} ·
+      执行 {{ '开启' if event_ls_qualification.enabled else '关闭' }}
+      （月均 10% 仅为研究指标，不保证）
+    </p>
 
     <section class="panel paper-metrics">
       <div class="paper-metrics-grid">

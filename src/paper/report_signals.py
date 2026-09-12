@@ -15,10 +15,11 @@ no divergence between backtest and production signal interpretation.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from src.paper.signals import load_candidate_signals, normalize_slot
-from src.utils.paths import reports_dir
+from src.utils.paths import morning_json_path, reports_dir
 
 
 def _safe_float(value: Any) -> float | None:
@@ -161,3 +162,61 @@ def report_symbols(dates: list[str]) -> list[str]:
                 seen.add(s)
                 syms.append(s)
     return syms
+
+
+def event_ls_signals_for_date(trading_date: str) -> list[dict[str, Any]]:
+    """Read the persisted multi-leg event-LS target without collapsing it.
+
+    This is intentionally separate from ``report_signals_for_date``: the legacy
+    paper engine has two single-position books, while event-LS needs an
+    N-position rebalance. A failed research/cost gate always returns no signal.
+    """
+    path = morning_json_path(trading_date)
+    if not path.exists():
+        return []
+    try:
+        morning = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    portfolio = morning.get("event_ls_portfolio") or {}
+    costs_gate = portfolio.get("costs_gate") or {}
+    if not portfolio.get("deploy") or costs_gate.get("pass") is not True:
+        return []
+
+    as_of = portfolio.get("as_of") or portfolio.get("known_at")
+    hold = portfolio.get("hold_days") or [2, 10]
+    rows: list[dict[str, Any]] = []
+    raw_legs = list(portfolio.get("legs") or [])
+    if portfolio.get("hedge"):
+        raw_legs.append({**portfolio["hedge"], "is_hedge": True})
+    for leg in raw_legs:
+        symbol = str(leg.get("symbol") or "").upper()
+        direction = str(leg.get("direction") or "").upper()
+        weight = _safe_float(leg.get("weight") or leg.get("weight_pct"))
+        if not symbol or direction not in ("LONG", "SHORT") or weight is None:
+            continue
+        # Persisted percentages may be either 0.05 or 5.0; normalize to fraction.
+        signed = abs(weight) / 100.0 if abs(weight) > 1.0 else abs(weight)
+        if direction == "SHORT":
+            signed = -signed
+        rows.append(
+            {
+                "symbol": symbol,
+                "direction": direction,
+                "target_weight": round(signed, 8),
+                "sector": leg.get("sector") or leg.get("industry"),
+                "beta": _safe_float(leg.get("beta")),
+                "predicted_alpha_bps": _safe_float(leg.get("predicted_alpha_bps")),
+                "estimated_cost_bps": _safe_float(leg.get("estimated_cost_bps")),
+                "hold_days": list(leg.get("hold_days") or hold),
+                "known_at": as_of,
+                "source": "report:event_ls",
+                "is_hedge": bool(leg.get("is_hedge")),
+            }
+        )
+    return rows
+
+
+def available_event_ls_report_dates() -> list[str]:
+    """Report dates whose persisted event-LS portfolio passes its cost gate."""
+    return [d for d in available_report_dates() if event_ls_signals_for_date(d)]

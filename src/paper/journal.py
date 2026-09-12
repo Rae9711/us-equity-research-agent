@@ -314,6 +314,15 @@ def record_evening_learning(trading_date: str) -> dict[str, Any]:
             "updated_for": trading_date,
         }
 
+    from src.paper.acceptance import refresh_event_ls_qualification
+
+    qualification = refresh_event_ls_qualification(account)
+    note["event_ls_qualification"] = {
+        "status": qualification["status"],
+        "backtest_passed": qualification["backtest_passed"],
+        "paper_passed": qualification["paper_passed"],
+        "enabled": False,
+    }
     append_journal(account, note)
     save_account(account)
     logger.info(
