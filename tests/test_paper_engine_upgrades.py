@@ -248,9 +248,10 @@ def test_expected_r_gate_unit():
 
     # p=0.6, R=2 → 0.6*2 - 0.4 = 0.8
     assert expected_r(win_prob=60, rr=2.0) == pytest.approx(0.8)
-    # p=0.5, R=1.5 → 0.75 - 0.5 = 0.25
+    # p=0.5, R=1.5 → 0.75 - 0.5 = 0.25 — below 0.35 EV floor
     assert expected_r(win_prob=50, rr=1.5) == pytest.approx(0.25)
-    assert expected_r(win_prob=50, rr=1.5) >= MIN_EXPECTED_R
+    assert expected_r(win_prob=50, rr=1.5) < MIN_EXPECTED_R
+    assert expected_r(win_prob=60, rr=2.0) >= MIN_EXPECTED_R
     # Weak: p=0.5, R=1.2 → 0.6 - 0.5 = 0.1 < floor
     assert expected_r(win_prob=50, rr=1.2) < MIN_EXPECTED_R
 

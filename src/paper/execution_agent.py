@@ -103,21 +103,24 @@ def stopped_out_today(
     trading_date: str,
     book: str | None = None,
 ) -> bool:
-    """True when this symbol/direction already took a losing EXIT today."""
+    """True when this symbol already took a losing EXIT today (any book/direction).
+
+    Same-day revenge re-entry (08-24 ARM ×3) is the failure mode. Book and
+    direction are accepted for call-site compatibility but do not narrow the
+    match — chopping the same name the other way is still blocked.
+    """
+    del direction, book
     want = (symbol or "").upper()
-    dirc = (direction or "").upper()
+    if not want:
+        return False
     for t in account.get("trades") or []:
         if t.get("voided"):
             continue
         if t.get("trading_date") != trading_date:
             continue
-        if str(t.get("action") or "").upper() != "EXIT":
+        if str(t.get("action") or "").upper() not in ("EXIT", "SCALE_OUT"):
             continue
         if (t.get("symbol") or "").upper() != want:
-            continue
-        if (t.get("direction") or "").upper() != dirc:
-            continue
-        if book and t.get("book") and t.get("book") != book:
             continue
         try:
             pnl = float(t.get("pnl")) if t.get("pnl") is not None else -1.0
@@ -460,6 +463,7 @@ def _try_entry(
     trading_date: str,
     *,
     peer_entering: bool = False,
+    blocked_symbols: set[str] | None = None,
 ) -> dict[str, Any]:
     label = BOOK_LABEL_ZH.get(book, book)
     action = picked.get("action")
@@ -489,6 +493,13 @@ def _try_entry(
     if px is None or px <= 0:
         result["action"] = "SKIP"
         result["reason"] = f"{label}有信号但无报价：{sig.get('symbol')}"
+        return result
+
+    if (sig.get("symbol") or "").upper() in (blocked_symbols or set()):
+        result["action"] = "SKIP"
+        result["reason"] = (
+            f"{label}当日刚平仓 {(sig.get('symbol') or '').upper()}，同一tick不再开仓"
+        )
         return result
 
     params = account.get("params") or {}
@@ -754,6 +765,17 @@ def decide_and_act(
         if managed:
             book_results.append(managed)
 
+    just_closed: set[str] = set()
+    for row in book_results:
+        if row.get("action") in ("EXIT", "SCALE_OUT"):
+            t = row.get("trade") or {}
+            s = (
+                (t.get("symbol") or (row.get("signal") or {}).get("symbol") or "")
+                .upper()
+            )
+            if s:
+                just_closed.add(s)
+
     # 2) Entries for empty books (skip new 短线 when session closed)
     if phase == "premarket":
         if not book_results:
@@ -841,6 +863,7 @@ def decide_and_act(
                 picked_swing,
                 trading_date,
                 peer_entering=both_enter,
+                blocked_symbols=just_closed,
             )
         )
     if picked_intra is not None:
@@ -852,6 +875,7 @@ def decide_and_act(
                 trading_date,
                 peer_entering=both_enter
                 or bool(get_position(account, BOOK_SWING)),
+                blocked_symbols=just_closed,
             )
         )
 

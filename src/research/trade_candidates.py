@@ -28,6 +28,7 @@ from src.paper.allocation import (
     expected_r as calibrated_expected_r,
 )
 from src.research.decision_transparency import (
+    MAX_UNCALIBRATED_WIN_PROB,
     add_win_prob_delta,
     build_decision_transparency,
     build_rr_display,
@@ -83,6 +84,8 @@ CANDIDATE_SYMBOLS, _STOCK_SYMBOLS, _SYMBOL_SECTION = _build_candidate_universe()
 ADVISORY_TAG = "ADVISORY — 不构成投资建议"
 FINAL_SCORE_THRESHOLD = 2.5
 EXTENDED_GAP_PCT = 4.0
+# Same-session RS already printed this large → do not chase the remainder.
+CHASE_RS_PCT = 2.5
 # Soft geometric upside floor (distance to target). Primary gate is expected_R.
 MIN_UPSIDE_PCT = MIN_GEOMETRIC_UPSIDE_PCT
 
@@ -706,8 +709,7 @@ def _relative_weakness_score(
     return round(sum(parts), 2)
 
 
-def _apply_rs_win_prob(
-    wp: dict[str, float],
+def _note_rs_context(
     why_factors: list[str],
     *,
     rs_vs_qqq: float | None,
@@ -715,47 +717,17 @@ def _apply_rs_win_prob(
     symbol: str,
     is_short: bool,
 ) -> None:
-    """Direction-aware RS adjustments — shorts reward weakness, longs reward strength."""
+    """Record same-session RS as *description*, not as a forecasted win_prob delta.
+
+    Adding today's already-printed RS into p was how 50% priors became 71–80%.
+    """
     if rs_vs_qqq is not None:
         if is_short:
-            if rs_vs_qqq < -0.5:
-                add_win_prob_delta(wp, "rs", 12)
-                why_factors.append(f"RS弱于QQQ {rs_vs_qqq:+.2f}%")
-            elif rs_vs_qqq < -0.15:
-                add_win_prob_delta(wp, "rs", 6)
-                why_factors.append(f"RS弱于QQQ {rs_vs_qqq:+.2f}%")
-            elif rs_vs_qqq > 0.5:
-                add_win_prob_delta(wp, "rs", -12)
-                why_factors.append(f"板块内相对强势 {rs_vs_qqq:+.2f}%")
-            elif rs_vs_qqq > 0.15:
-                add_win_prob_delta(wp, "rs", -6)
+            why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%（描述，不计入胜率）")
         else:
-            if rs_vs_qqq > 0.5:
-                add_win_prob_delta(wp, "rs", 12)
-                why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%")
-            elif rs_vs_qqq > 0.15:
-                add_win_prob_delta(wp, "rs", 6)
-                why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%")
-            elif rs_vs_qqq < -0.5:
-                add_win_prob_delta(wp, "rs", -10)
-                why_factors.append(f"RS 弱于 QQQ {rs_vs_qqq:+.2f}%")
-
+            why_factors.append(f"RS vs QQQ {rs_vs_qqq:+.2f}%（描述，不计入胜率）")
     if rs_vs_smh is not None and symbol in _SEMI_SYMBOLS:
-        if is_short:
-            if rs_vs_smh < -0.5:
-                add_win_prob_delta(wp, "rs", 8)
-                why_factors.append(f"RS弱于SMH {rs_vs_smh:+.2f}%")
-            elif rs_vs_smh < -0.15:
-                add_win_prob_delta(wp, "rs", 4)
-            elif rs_vs_smh > 0.5:
-                add_win_prob_delta(wp, "rs", -10)
-                why_factors.append(f"半导体内领涨 {rs_vs_smh:+.2f}%")
-        else:
-            if rs_vs_smh > 0.5:
-                add_win_prob_delta(wp, "rs", 6)
-                why_factors.append(f"RS vs SMH {rs_vs_smh:+.2f}%")
-            elif rs_vs_smh < -0.5:
-                add_win_prob_delta(wp, "rs", -6)
+        why_factors.append(f"RS vs SMH {rs_vs_smh:+.2f}%（描述，不计入胜率）")
 
 
 def _score_candidate_v2(
@@ -796,8 +768,7 @@ def _score_candidate_v2(
     why_factors: list[str] = []
 
     wp = init_win_prob_breakdown()
-    _apply_rs_win_prob(
-        wp,
+    _note_rs_context(
         why_factors,
         rs_vs_qqq=rs_vs_qqq,
         rs_vs_smh=rs_vs_smh,
@@ -805,68 +776,29 @@ def _score_candidate_v2(
         is_short=is_short,
     )
 
+    # Only facts known before today's continuation: prior-day close and risk flags.
     if prior_day_chg is not None and prior_day_chg > 2.0:
-        if gap_pct is not None and abs(gap_pct) < EXTENDED_GAP_PCT:
-            if not is_short:
-                add_win_prob_delta(wp, "trend", 10)
-                why_factors.append(f"昨日强势 {prior_day_chg:+.1f}% 今日 gap 可控")
-            else:
-                add_win_prob_delta(wp, "trend", -6)
-                why_factors.append(f"昨日强势 {prior_day_chg:+.1f}% 做空逆风")
-        elif gap_pct is not None and gap_pct >= EXTENDED_GAP_PCT and not has_news_catalyst:
-            add_win_prob_delta(wp, "trend", -8 if not is_short else 4)
-            why_factors.append(f"昨日涨后 gap 过大 {gap_pct:+.1f}%")
-
-    if prior_day_chg is not None and prior_day_chg < -2.0 and is_short:
-        if gap_pct is not None and abs(gap_pct) < EXTENDED_GAP_PCT:
-            add_win_prob_delta(wp, "trend", 8)
-            why_factors.append(f"昨日弱势 {prior_day_chg:+.1f}% 延续下行")
-
-    if gap_pct is not None:
-        if abs(gap_pct) < 1.5:
-            add_win_prob_delta(wp, "gap", 5)
-            why_factors.append("Gap 未过度延伸")
-        elif gap_pct >= EXTENDED_GAP_PCT and not has_news_catalyst:
-            if is_short and gap_pct > 0:
-                add_win_prob_delta(wp, "gap", 6)
-                why_factors.append(f"Extended gap {gap_pct:+.1f}% 回落空间")
-            else:
-                add_win_prob_delta(wp, "gap", -12)
-                why_factors.append(f"Extended gap {gap_pct:+.1f}%")
-
-    if news_count >= 1:
-        if is_short:
-            add_win_prob_delta(wp, "catalyst", -5)
-            why_factors.append(f"News {news_count} (利空做空)")
-        else:
-            add_win_prob_delta(wp, "catalyst", 5)
-            why_factors.append(f"News {news_count}")
-    if volume_ok:
-        add_win_prob_delta(wp, "volume", 4)
-        why_factors.append("Volume 信号")
-    if vix_chg is not None and vix_chg < -3:
         if not is_short:
-            add_win_prob_delta(wp, "macro", 4)
-            why_factors.append("VIX 回落")
+            add_win_prob_delta(wp, "trend", 4)
+            why_factors.append(f"昨日强势 {prior_day_chg:+.1f}%")
         else:
-            add_win_prob_delta(wp, "macro", -3)
-            why_factors.append("VIX 回落 (做空逆风)")
-    elif vix_chg is not None and vix_chg > 5:
+            add_win_prob_delta(wp, "trend", -4)
+            why_factors.append(f"昨日强势 {prior_day_chg:+.1f}% 做空逆风")
+    if prior_day_chg is not None and prior_day_chg < -2.0:
         if is_short:
-            add_win_prob_delta(wp, "macro", 6)
-            why_factors.append("VIX 走高")
+            add_win_prob_delta(wp, "trend", 4)
+            why_factors.append(f"昨日弱势 {prior_day_chg:+.1f}%")
         else:
-            add_win_prob_delta(wp, "macro", -6)
-            why_factors.append("VIX 走高")
+            add_win_prob_delta(wp, "trend", -4)
+            why_factors.append(f"昨日弱势 {prior_day_chg:+.1f}% 做多逆风")
 
-    dt = (driver_type or "").lower()
-    if dt in ("momentum", "ai") and symbol in (*_SEMI_SYMBOLS, "TSLA", "TQQQ"):
-        if is_short:
-            add_win_prob_delta(wp, "catalyst", -4)
-            why_factors.append(f"{driver_type} driver (做空逆风)")
-        else:
-            add_win_prob_delta(wp, "catalyst", 5)
-            why_factors.append(f"{driver_type} driver")
+    if gap_pct is not None and abs(gap_pct) >= EXTENDED_GAP_PCT and not has_news_catalyst:
+        add_win_prob_delta(wp, "gap", -8)
+        why_factors.append(f"Extended gap {gap_pct:+.1f}%")
+    if news_count >= 1:
+        why_factors.append(f"News {news_count}（描述，不计入胜率）")
+    if volume_ok:
+        why_factors.append("Volume 信号（描述，不计入胜率）")
 
     geo_penalty, geo_reason = _geo_context_penalty(
         symbol,
@@ -880,58 +812,35 @@ def _score_candidate_v2(
             why_factors.append(geo_reason)
 
     raw_win_prob = sum(wp.values())
-    win_prob = max(15.0, min(92.0, raw_win_prob))
+    win_prob = max(15.0, min(MAX_UNCALIBRATED_WIN_PROB, raw_win_prob))
     win_prob_breakdown = finalize_win_prob_breakdown(wp, clamped=win_prob)
 
-    mom_adj = 0.0
-    if rs_vs_qqq is not None:
-        mom_adj += (-rs_vs_qqq if is_short else rs_vs_qqq) * 0.20
-    if rs_vs_smh is not None and symbol in _SEMI_SYMBOLS:
-        mom_adj += (-rs_vs_smh if is_short else rs_vs_smh) * 0.12
-    if prior_day_chg is not None:
-        mom_adj += (-prior_day_chg if is_short else prior_day_chg) * 0.06
-    if gap_pct is not None:
-        mom_adj += (-gap_pct if is_short else gap_pct) * 0.08
+    # Target distance from a slice of prior-day range — not already-printed RS.
+    # Stop width is a tighter slice so yesterday's low cannot become a −3R stop.
+    prior_range_pct = 0.0
+    if current > 0:
+        prior_range_pct = abs(prior_high - prior_low) / current * 100.0
+    span = max(MIN_UPSIDE_PCT, min(2.5, prior_range_pct * 0.45 if prior_range_pct else 1.8))
+    stop_pct = max(0.8, min(span / MIN_RR_TO_DEPLOY, 1.6))
 
-    # Continuation: prior strength + controlled gap → today's ER not capped by yesterday alone
-    if (
-        not is_short
-        and prior_day_chg is not None
-        and prior_day_chg > 3.0
-        and gap_pct is not None
-        and abs(gap_pct) < EXTENDED_GAP_PCT
-    ):
-        mom_adj += min(prior_day_chg * 0.35, 5.0)
-    if (
-        is_short
-        and prior_day_chg is not None
-        and prior_day_chg < -3.0
-        and gap_pct is not None
-        and abs(gap_pct) < EXTENDED_GAP_PCT
-    ):
-        mom_adj += min(abs(prior_day_chg) * 0.35, 5.0)
-
-    expected_close = current * (1 + (-mom_adj if is_short else mom_adj) / 100.0)
     if is_short:
-        expected_high = max(current * (1 + max(abs(mom_adj), 0.5) / 100.0), prior_high, current)
-        expected_low = min(expected_close, prior_low, current * (1 - max(mom_adj, 0.8) / 100.0))
-        expected_return_pct = (current - expected_close) / current * 100.0
-        upside_pct = (current - expected_low) / current * 100.0
-        downside_risk_pct = (expected_high - current) / current * 100.0
+        expected_close = current * (1.0 - span / 100.0)
+        expected_low = expected_close
+        expected_high = current * (1.0 + stop_pct / 100.0)
+        expected_return_pct = span
+        upside_pct = span
+        downside_risk_pct = stop_pct
     else:
-        expected_high = max(expected_close, prior_high, current * (1 + max(mom_adj, 0.5) / 100.0))
-        expected_low = min(expected_close, prior_low, current * (1 - max(abs(mom_adj), 0.8) / 100.0))
-        expected_return_pct = (expected_close - current) / current * 100.0
-        upside_pct = (expected_high - current) / current * 100.0
-        downside_risk_pct = (current - expected_low) / current * 100.0
+        expected_close = current * (1.0 + span / 100.0)
+        expected_high = expected_close
+        expected_low = current * (1.0 - stop_pct / 100.0)
+        expected_return_pct = span
+        upside_pct = span
+        downside_risk_pct = stop_pct
 
-    if gap_pct is not None and gap_pct > 3.0:
-        if expected_return_pct < 0.5 and not has_news_catalyst:
-            expected_return_pct *= 0.3
-            why_factors.append("Gap>3% 且剩余空间小")
-        elif gap_pct > EXTENDED_GAP_PCT and not has_news_catalyst and not is_short:
-            expected_return_pct *= 0.6
-            why_factors.append("Extended gap 压缩 ER")
+    if gap_pct is not None and abs(gap_pct) >= EXTENDED_GAP_PCT and not has_news_catalyst:
+        expected_return_pct *= 0.4
+        why_factors.append("Extended gap 压缩剩余空间")
 
     if downside_risk_pct < 0.1:
         downside_risk_pct = 0.8
@@ -970,10 +879,21 @@ def _score_candidate_v2(
     score_formula = _score_formula_display(win_prob, expected_return_pct, risk_reward)
 
     ev_r = calibrated_expected_r(win_prob=win_prob, rr=risk_reward)
+    chased = (
+        (rs_vs_qqq is not None and abs(rs_vs_qqq) >= CHASE_RS_PCT)
+        or (
+            gap_pct is not None
+            and abs(gap_pct) >= EXTENDED_GAP_PCT
+            and not has_news_catalyst
+        )
+    )
     # Scoring-stage gate uses calibrated EV + soft geometric upside.
     # Hard R:R floor applies later on *planned* entry/stop/target levels
     # (see _enforce_level_invariants / paper allocation) — not on expected-range RR.
-    if ev_r is not None and ev_r < MIN_EXPECTED_R:
+    if chased:
+        trade_action = "Pass"
+        why_factors.append("当日已极端延伸，不追价")
+    elif ev_r is not None and ev_r < MIN_EXPECTED_R:
         trade_action = "Pass"
         why_factors.append(f"期望R {ev_r:.2f} < {MIN_EXPECTED_R:.2f}（EV门禁）")
     elif expected_return_pct < MIN_UPSIDE_PCT:
@@ -984,7 +904,6 @@ def _score_candidate_v2(
     elif final_score >= FINAL_SCORE_THRESHOLD:
         trade_action = "Small"
     else:
-        # EV + soft upside cleared; weak score still tradeable as Small.
         trade_action = "Small"
 
     return {
@@ -1023,11 +942,39 @@ def _score_candidate_v2(
 
 
 def _pick_direction(bias: str, total: int) -> str:
+    """Market-wide bias fallback (index label only). Do not apply to every name."""
     if "bear" in (bias or "").lower():
         return "SHORT"
     if "bull" in (bias or "").lower():
         return "LONG"
     return "LONG" if total >= 0 else "SHORT"
+
+
+def _infer_symbol_direction(
+    *,
+    prior_day_chg: float | None,
+    gap_pct: float | None,
+    rs_vs_qqq: float | None,
+) -> str | None:
+    """Per-name direction from prior-day / overnight tape — never market Bias.
+
+    Returns None when there is no independent setup or the same-session move
+    is already extreme (do not chase ARM −5% RS as a short).
+    """
+    if rs_vs_qqq is not None and abs(rs_vs_qqq) >= CHASE_RS_PCT:
+        return None
+    if gap_pct is not None and abs(gap_pct) >= EXTENDED_GAP_PCT:
+        return None
+    score = 0.0
+    if prior_day_chg is not None:
+        score += float(prior_day_chg)
+    if gap_pct is not None:
+        score += float(gap_pct) * 0.5
+    if score >= 0.8:
+        return "LONG"
+    if score <= -0.8:
+        return "SHORT"
+    return None
 
 
 def _rank_key(row: dict[str, Any]) -> float:
@@ -1306,16 +1253,17 @@ def _decision_tree(
         section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
         row = dict(row)
         row["_total_score"] = total_score
+        slot_dir = str(row.get("direction") or direction)
         row["horizon"] = _trade_horizon(
-            direction=direction,
+            direction=slot_dir,
             p9=p9,
             total=total_score,
-            instrument=_instrument(sym, direction, p9),
+            instrument=_instrument(sym, slot_dir, p9),
         )
         slot = _build_trade_slot(
             row,
             rank=rank,
-            direction=direction,
+            direction=slot_dir,
             p9=p9,
             obs=obs_by_sym.get(sym, {}),
             raw=raw,
@@ -1390,9 +1338,20 @@ def _decision_tree(
     if not picks:
         threshold_msg = "今日无任何标的达到交易阈值"
 
-    # P16 No Trade / Wait gates index exposure only — stock picks stay independent.
+    # P16 Wait / No Trade blocks index AND stocks. Cash is a valid day.
     if p16_gate in ("No Trade", "Wait"):
         index_trade = "NO TRADE"
+        gate_msg = f"P16 {p16_gate} — 今日指数与个股均不开仓"
+        threshold_msg = gate_msg
+        for t in top_trades:
+            t["trade_action"] = "Pass"
+            t["trade"] = "Pass"
+            why = list(t.get("why_factors") or [])
+            if gate_msg not in why:
+                why.insert(0, gate_msg)
+            t["why_factors"] = why[:8]
+            t["why_chain"] = " · ".join(str(x) for x in why[:4])
+        picks = []
     else:
         index_trade = _index_trade_label(ranked, edges, direction)
 
@@ -2057,6 +2016,17 @@ def compute_trade_decision(
         vol_ok = bool(q.get("volume")) or str(q.get("session_type")) == "premarket"
         has_catalyst = news_n >= 1 or bool(catalysts)
 
+        name_dir = _infer_symbol_direction(
+            prior_day_chg=prior_chg,
+            gap_pct=gap_pct,
+            rs_vs_qqq=rs,
+        )
+        if name_dir is None:
+            stub = _pass_stub_row(sym, "无独立方向或当日已极端延伸，不追价")
+            stub["direction"] = "NO TRADE"
+            ranked.append(stub)
+            continue
+
         row = _score_candidate_v2(
             sym,
             obs=obs,
@@ -2072,16 +2042,16 @@ def compute_trade_decision(
             q=q,
             qqq_pct=qqq_pct,
             edges=edges,
-            direction=direction,
+            direction=name_dir,
             macro_calendar=macro_calendar,
             driver_tree=driver_tree,
         )
+        row["direction"] = name_dir
         ranked.append(row)
 
     ranked.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
     for i, row in enumerate(ranked, start=1):
         row["rank"] = i
-        row["direction"] = direction
     if len(ranked) >= 2:
         ranked[0]["why_vs_runner_up"] = _why_vs_runner_up(ranked[0], ranked[1])
 
@@ -2110,17 +2080,19 @@ def compute_trade_decision(
         horizon=(best_trades.get("primary") or {}).get("horizon") or default_horizon,
     )
 
-    swing_trade = compute_swing_opportunity(
-        ranked,
-        bias_direction=direction,
-        total_score=total,
-        obs_by_sym=obs_by_sym,
-        quote_by_sym=quote_by_sym,
-        catalysts=catalysts,
-        raw=raw,
-    )
-    if swing_trade:
-        best_trades["swing"] = swing_trade
+    swing_trade = None
+    if p16_gate not in ("No Trade", "Wait"):
+        swing_trade = compute_swing_opportunity(
+            ranked,
+            bias_direction=direction,
+            total_score=total,
+            obs_by_sym=obs_by_sym,
+            quote_by_sym=quote_by_sym,
+            catalysts=catalysts,
+            raw=raw,
+        )
+        if swing_trade:
+            best_trades["swing"] = swing_trade
 
     gap_pct_market = None
     qqq_obs = obs_by_sym.get("QQQ", {})

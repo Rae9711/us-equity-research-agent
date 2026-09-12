@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 import yfinance as yf
 
+from src.paper.allocation import MIN_RR_TO_DEPLOY
 from src.utils.trading_calendar import ET, market_open_et, prior_trading_day
 
 ORB_MINUTES = 30
@@ -420,8 +421,11 @@ def _long_entry_candidates(
     ):
         out.append((anchors.vwap, "vwap", "Above"))
     if anchors.orb_high is not None and _anchor_near_market(anchors.orb_high, current):
-        src = "orb_high" if anchors.orb_from_minute else "prev_high"
-        out.append((anchors.orb_high, src, "Above"))
+        # Do not chase yesterday/ORB high as a long entry — that is how 0.5R
+        # "Above 258" plans appear while the target is only 261.
+        if anchors.orb_high <= current * 1.002:
+            src = "orb_high" if anchors.orb_from_minute else "prev_high"
+            out.append((anchors.orb_high, src, "Above"))
     out.append((current, "current", "Above"))
     seen: set[float] = set()
     uniq: list[tuple[float, str, str]] = []
@@ -446,8 +450,9 @@ def _short_entry_candidates(
     ):
         out.append((anchors.vwap, "vwap", "Below"))
     if anchors.orb_low is not None and _anchor_near_market(anchors.orb_low, current):
-        src = "orb_low" if anchors.orb_from_minute else "prev_low"
-        out.append((anchors.orb_low, src, "Below"))
+        if anchors.orb_low >= current * 0.998:
+            src = "orb_low" if anchors.orb_from_minute else "prev_low"
+            out.append((anchors.orb_low, src, "Below"))
     out.append((current, "current", "Below"))
     seen: set[float] = set()
     uniq: list[tuple[float, str, str]] = []
@@ -472,7 +477,9 @@ def _long_stop_candidates(
         and _anchor_near_market(anchors.orb_low, current)
     ):
         out.append((anchors.orb_low, "orb_low"))
-    if anchors.prev_low is not None and _anchor_near_market(anchors.prev_low, current):
+    if anchors.prev_low is not None and _anchor_near_market(
+        anchors.prev_low, current, max_dev_pct=3.5
+    ):
         out.append((anchors.prev_low, "prev_low"))
     out.append((expected_low, "expected_low"))
     # Soft structural stop below current if expected_low is unusable
@@ -500,7 +507,9 @@ def _short_stop_candidates(
         and _anchor_near_market(anchors.orb_high, current)
     ):
         out.append((anchors.orb_high, "orb_high"))
-    if anchors.prev_high is not None and _anchor_near_market(anchors.prev_high, current):
+    if anchors.prev_high is not None and _anchor_near_market(
+        anchors.prev_high, current, max_dev_pct=3.5
+    ):
         out.append((anchors.prev_high, "prev_high"))
     out.append((expected_high, "expected_high"))
     out.append((current * 1.008, "current"))
@@ -513,6 +522,41 @@ def _short_stop_candidates(
         seen.add(key)
         uniq.append((px, src))
     return uniq
+
+
+def _pick_rr_pair(
+    entry_cands: list[tuple[float, str, str]],
+    stop_cands: list[tuple[float, str]],
+    target_px: float,
+    *,
+    is_long: bool,
+) -> tuple[float, str, str, float, str] | None:
+    """First geometrically valid pair that clears MIN_RR; else best RR fallback."""
+    fallback: tuple[float, float, str, str, float, str] | None = None
+    for cand_stop, cand_stop_src in stop_cands:
+        for cand_px, cand_src, cand_prefix in entry_cands:
+            if is_long:
+                if not (cand_stop < cand_px <= target_px):
+                    continue
+                risk = cand_px - cand_stop
+                reward = target_px - cand_px
+            else:
+                if not (target_px <= cand_px < cand_stop):
+                    continue
+                risk = cand_stop - cand_px
+                reward = cand_px - target_px
+            if risk <= 0 or reward <= 0:
+                continue
+            rr = reward / risk
+            row = (rr, cand_px, cand_src, cand_prefix, cand_stop, cand_stop_src)
+            if fallback is None or rr > fallback[0]:
+                fallback = row
+            if rr >= MIN_RR_TO_DEPLOY:
+                return cand_px, cand_src, cand_prefix, cand_stop, cand_stop_src
+    if fallback is None:
+        return None
+    _, entry_px, entry_src, entry_prefix, stop_px, stop_src = fallback
+    return entry_px, entry_src, entry_prefix, stop_px, stop_src
 
 
 def derive_trade_levels(
@@ -543,7 +587,15 @@ def derive_trade_levels(
         "target_price": None,
         "targets": [],
         "levels_valid": False,
-        "level_anchors": anchors,
+        "level_anchors": {
+            "vwap": anchors.vwap,
+            "orb_high": anchors.orb_high,
+            "orb_low": anchors.orb_low,
+            "prev_high": anchors.prev_high,
+            "prev_low": anchors.prev_low,
+            "prior_close": anchors.prior_close,
+            "orb_from_minute": anchors.orb_from_minute,
+        },
     }
 
     if direction == "LONG":
@@ -555,18 +607,19 @@ def derive_trade_levels(
 
         entry_cands = _long_entry_candidates(anchors, current)
         stop_cands = _long_stop_candidates(anchors, current, expected_low)
-        entry_px, entry_src, entry_prefix = entry_cands[0]
-        stop_px, stop_src = stop_cands[0]
-        chosen = False
-        for cand_stop, cand_stop_src in stop_cands:
-            for cand_px, cand_src, cand_prefix in entry_cands:
-                if cand_stop < cand_px <= target_px:
-                    entry_px, entry_src, entry_prefix = cand_px, cand_src, cand_prefix
-                    stop_px, stop_src = cand_stop, cand_stop_src
-                    chosen = True
-                    break
-            if chosen:
-                break
+        picked = _pick_rr_pair(
+            entry_cands,
+            stop_cands,
+            target_px,
+            is_long=True,
+        )
+        if picked is None:
+            empty["target"] = format_tagged(target_px, target_src)
+            empty["target_source"] = target_src
+            empty["target_price"] = round(target_px, 2)
+            empty["targets"] = [empty["target"]]
+            return empty
+        entry_px, entry_src, entry_prefix, stop_px, stop_src = picked
 
     elif direction == "SHORT":
         target_px = expected_close
@@ -577,18 +630,19 @@ def derive_trade_levels(
 
         entry_cands = _short_entry_candidates(anchors, current)
         stop_cands = _short_stop_candidates(anchors, current, expected_high)
-        entry_px, entry_src, entry_prefix = entry_cands[0]
-        stop_px, stop_src = stop_cands[0]
-        chosen = False
-        for cand_stop, cand_stop_src in stop_cands:
-            for cand_px, cand_src, cand_prefix in entry_cands:
-                if target_px <= cand_px < cand_stop:
-                    entry_px, entry_src, entry_prefix = cand_px, cand_src, cand_prefix
-                    stop_px, stop_src = cand_stop, cand_stop_src
-                    chosen = True
-                    break
-            if chosen:
-                break
+        picked = _pick_rr_pair(
+            entry_cands,
+            stop_cands,
+            target_px,
+            is_long=False,
+        )
+        if picked is None:
+            empty["target"] = format_tagged(target_px, target_src)
+            empty["target_source"] = target_src
+            empty["target_price"] = round(target_px, 2)
+            empty["targets"] = [empty["target"]]
+            return empty
+        entry_px, entry_src, entry_prefix, stop_px, stop_src = picked
     else:
         return empty
 

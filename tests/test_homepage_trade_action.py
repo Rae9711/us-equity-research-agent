@@ -1,4 +1,4 @@
-"""Homepage trade badge: P16 gate closed + stock setup → Watch, not Trade."""
+"""Homepage trade badge: P16 Wait / No Trade closes stocks too → No Trade."""
 
 from __future__ import annotations
 
@@ -44,19 +44,19 @@ def test_has_stock_setup_from_primary():
     assert _has_stock_setup(_morning_p16_no_trade_with_mu()) is True
 
 
-def test_p16_no_trade_with_stock_setup_is_watch():
+def test_p16_no_trade_with_stock_setup_is_no_trade():
     morning = _morning_p16_no_trade_with_mu()
-    assert _trade_action(morning, None) == "Watch"
+    assert _trade_action(morning, None) == "No Trade"
 
 
-def test_p16_no_trade_with_step4_stock_is_watch():
+def test_p16_no_trade_with_step4_stock_is_no_trade():
     morning = _morning_p16_no_trade_with_mu()
     step4 = {
         "should_trade": True,
         "stock_trade": "SHORT MU",
         "index_trade": "NO TRADE",
     }
-    assert _trade_action(morning, step4) == "Watch"
+    assert _trade_action(morning, step4) == "No Trade"
 
 
 def test_p16_trade_with_stock_remains_trade():
@@ -67,12 +67,12 @@ def test_p16_trade_with_stock_remains_trade():
     assert _trade_action(morning, None) == "Trade"
 
 
-def test_p16_wait_with_stock_is_watch():
+def test_p16_wait_with_stock_is_no_trade():
     morning = _morning_p16_no_trade_with_mu()
     morning["best_opportunity"]["p16_gate"] = "Wait"
     morning["best_trades"]["p16_gate"] = "Wait"
     morning["parts"]["P16"]["judgment"] = "计划：Wait"
-    assert _trade_action(morning, None) == "Watch"
+    assert _trade_action(morning, None) == "No Trade"
 
 
 def test_no_setup_p16_no_trade_is_no_trade():

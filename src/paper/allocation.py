@@ -15,8 +15,8 @@ Separate (quant-research discipline):
 Sizing math (comment for the ~10%/mo ambition):
   monthly ≈ n_trades × E[R] × risk_pct
   e.g. 8 trades × 0.40 R expectancy × 3.0% risk ≈ 9.6% — *if* edge is real.
-  Raise effective risk only when rolling expectancy is positive; otherwise size
-  at min-risk (keep taking qualifying setups — a hard pause can never recover).
+  Raise effective risk only when rolling expectancy is positive; otherwise hold
+  cash (a valid day). Do not probe a statistically broken book at min-risk.
   ``expected_return_pct`` is *target distance*, not EV — do not gate on it alone.
 """
 
@@ -47,17 +47,16 @@ INTRADAY_SATELLITE_SHARE = 0.40
 
 # --- Economic gates (EV / expected R is primary; geometric upside is soft) ---
 # expected_R = p × reward_R − (1−p) × 1.0   (reward_R = R:R from levels)
-MIN_EXPECTED_R = 0.20
+MIN_EXPECTED_R = 0.35
 # Soft floor on distance-to-target (%). NOT the primary EV gate.
 MIN_GEOMETRIC_UPSIDE_PCT = 1.5
 # Enforce payoff asymmetry before entry (avg loss ≫ avg win fix starts here).
-MIN_RR_TO_DEPLOY = 1.5
+MIN_RR_TO_DEPLOY = 2.0
 MIN_WIN_PROB_TO_DEPLOY = 58.0
 # Softened companions when expected_R already clears.
 SOFT_WIN_PROB_WHEN_EV_OK = 52.0
-SOFT_RR_WHEN_EV_OK = 1.35
-# Broken rolling edge → min-risk probe, not a hard pause (no trades ⇒ edge
-# cannot recover). Daily loss circuit breaker still stops the session.
+SOFT_RR_WHEN_EV_OK = 1.80
+# Broken rolling edge → no new risk. Cash is a valid day.
 EDGE_PAUSE_MIN_TRADES = 5
 EDGE_PAUSE_MAX_PF = 0.9
 # Reject setups whose stop is so wide that one loss dominates the day.
@@ -376,8 +375,7 @@ def should_hold_cash(
 
     Primary economic gate = calibrated expected_R (and hard min R:R).
     Geometric upside (remaining_er / expected_return_pct) is a soft companion only.
-    Broken rolling edge is *not* a hold — it sizes down in ``risk_and_cap_pct``.
-    ``edge_stats`` is accepted for call-site compatibility and ignored here.
+    Broken rolling edge holds cash — do not keep probing negative expectancy.
     """
     if action in ("wait", "skip"):
         return False, ""
@@ -390,6 +388,14 @@ def should_hold_cash(
         return True, (
             f"保留现金：R:R {rr:.2f} 低于硬门槛 {MIN_RR_TO_DEPLOY:.1f}"
             f"（需先保证盈亏不对称）"
+        )
+
+    if rolling_edge_broken(edge_stats):
+        n = int((edge_stats or {}).get("n") or 0)
+        pf = float((edge_stats or {}).get("profit_factor") or 0.0)
+        return True, (
+            f"保留现金：近{n}笔滚动期望为负/PF={pf:.2f}，暂停新开仓"
+            f"（空仓是有效日，不在负期望上试错）"
         )
 
     # Primary EV gate.

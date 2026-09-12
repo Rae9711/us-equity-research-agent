@@ -284,13 +284,21 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
         or {}
     )
     top_trades = _morning_top_trades(morning)
+    p16_gate = (
+        (morning.get("best_trades") or {}).get("p16_gate")
+        or (morning.get("best_opportunity") or {}).get("p16_gate")
+    )
     primary = (morning.get("best_trades") or {}).get("primary") or morning.get(
         "best_opportunity"
     )
-    # When primary is NO TRADE / null, fall back to top_trades[0]
+    # When primary is NO TRADE / null, do NOT fall back to top_trades if the
+    # research gate is closed — that is how Wait days still got filled.
+    gate_closed = p16_gate in ("Wait", "No Trade")
     if not primary or (primary.get("direction") or "").upper() not in ("LONG", "SHORT"):
-        if top_trades:
+        if top_trades and not gate_closed:
             primary = top_trades[0]
+        else:
+            primary = None
     swing = morning.get("swing_trade") or (morning.get("best_trades") or {}).get("swing")
     session_primary = session.get("primary") if isinstance(session, dict) else None
     if session_primary and (session_primary.get("direction") or "").upper() not in (
@@ -298,6 +306,11 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
         "SHORT",
     ):
         session_primary = None
+    if gate_closed:
+        swing = None
+        session_primary = None
+        primary = None
+        top_trades = []
     return {
         "morning": morning,
         "step3": step3,

@@ -494,7 +494,7 @@ def test_allocation_cash_reserve_bounds():
     assert hold is True
     assert "保留现金" in reason
 
-    # Broken rolling edge no longer freezes the book — setup still deploys.
+    # Broken rolling edge holds cash — do not probe negative expectancy.
     pause, pause_reason = should_hold_cash(
         action="enter",
         win_prob=70,
@@ -504,8 +504,8 @@ def test_allocation_cash_reserve_bounds():
         confidence=0.8,
         edge_stats={"n": 7, "profit_factor": 0.33, "expectancy": -32.0},
     )
-    assert pause is False
-    assert pause_reason == ""
+    assert pause is True
+    assert "暂停新开仓" in pause_reason
 
     # Wide stop rejected.
     wide, wide_reason = should_hold_cash(
@@ -536,14 +536,14 @@ def test_allocation_cash_reserve_bounds():
     assert "R:R" in weak_rr_reason
 
     # Negative expected R holds cash (EV gate, not bare ER≥3%).
-    from src.paper.allocation import expected_r as _ev
+    from src.paper.allocation import MIN_EXPECTED_R, expected_r as _ev
 
-    neg_ev = _ev(win_prob=52, rr=1.5)  # 0.52*1.5 - 0.48 = 0.30 — positive
-    assert neg_ev is not None and neg_ev >= 0.15
+    mid_ev = _ev(win_prob=52, rr=1.5)  # 0.52*1.5 - 0.48 = 0.30 < 0.35
+    assert mid_ev is not None and mid_ev < MIN_EXPECTED_R
     bad_ev, bad_ev_reason = should_hold_cash(
         action="enter",
-        win_prob=45,
-        rr=1.5,  # 0.45*1.5 - 0.55 = 0.125 < 0.15
+        win_prob=40,
+        rr=2.0,  # 0.40*2.0 - 0.60 = 0.20 < 0.35
         remaining_er=3.0,
         entry_status="READY",
         confidence=0.6,
@@ -609,8 +609,8 @@ def test_allocation_sizing_respects_reserve(data_root):
     assert "现金" in alloc["reason_zh"]
 
 
-def test_broken_rolling_edge_probes_at_min_risk(data_root):
-    """Drawdown must not freeze entries; size down so the book still trades."""
+def test_broken_rolling_edge_holds_cash(data_root):
+    """Negative rolling expectancy pauses new risk. Cash is a valid day."""
     from src.paper.allocation import MIN_RISK_PCT, allocate_for_entry, risk_and_cap_pct
 
     risk, _, reasons = risk_and_cap_pct(
@@ -647,11 +647,9 @@ def test_broken_rolling_edge_probes_at_min_risk(data_root):
         quote=100.0,
         entry_status={"status": "READY"},
     )
-    assert alloc["hold_cash"] is False
+    assert alloc["hold_cash"] is True
     assert alloc["edge_broken"] is True
-    assert alloc["risk_pct"] == MIN_RISK_PCT
-    assert "轻仓试错" in alloc["reason_zh"]
-    assert "不停单" in alloc["reason_zh"]
+    assert "暂停新开仓" in alloc["reason_zh"]
 
 
 def test_hold_cash_weak_setup(data_root):

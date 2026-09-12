@@ -80,6 +80,52 @@ def test_step4_stock_primary_when_index_no_trade(mock_save, _ev, _fresh, data_ro
 @patch("src.steps.s04_decision.guard_fresh_raw", return_value=(None, None))
 @patch("src.steps.s04_decision._load_ev_inputs", return_value={"expected_return": 0.02, "expected_loss": -0.01, "risk_reward": 2.0})
 @patch("src.steps.s04_decision.save_step_result")
+def test_step4_p16_wait_blocks_stock_primary(mock_save, _ev, _fresh, data_root):
+    trading_date = "2099-01-06"
+    _write_morning(
+        trading_date,
+        {
+            "total_score": -3,
+            "bias": "Neutral",
+            "index_trade": "NO TRADE",
+            "best_opportunity": {"p16_gate": "Wait"},
+            "best_trades": {
+                "index_trade": "NO TRADE",
+                "p16_gate": "Wait",
+                "primary": {
+                    "symbol": "ARM",
+                    "direction": "LONG",
+                    "instrument": "ARM",
+                    "confidence": 71,
+                    "entry": "140",
+                    "stop": "136",
+                    "target": "148",
+                },
+                "stock_trades": [{"rank": 1, "symbol": "ARM", "direction": "LONG"}],
+            },
+        },
+    )
+    step_json_path(2, trading_date).write_text(
+        json.dumps({"market": "Mixed"}),
+        encoding="utf-8",
+    )
+
+    def _capture(_step, _d, **kwargs):
+        return {"conclusion": kwargs["conclusion"], **kwargs.get("extra", {})}
+
+    mock_save.side_effect = _capture
+
+    payload = run_step4_trade_decision(date.fromisoformat(trading_date))
+
+    assert payload["should_trade"] is False
+    assert payload["index_trade"] == "NO TRADE"
+    assert payload["stock_trade"] is None
+    assert payload["conclusion"]["judgment"] == "Should trade：NO"
+
+
+@patch("src.steps.s04_decision.guard_fresh_raw", return_value=(None, None))
+@patch("src.steps.s04_decision._load_ev_inputs", return_value={"expected_return": 0.02, "expected_loss": -0.01, "risk_reward": 2.0})
+@patch("src.steps.s04_decision.save_step_result")
 def test_step4_no_trade_without_primary(mock_save, _ev, _fresh, data_root):
     trading_date = "2099-01-05"
     _write_morning(

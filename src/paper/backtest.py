@@ -117,7 +117,7 @@ class MomentumBreakoutProvider:
         sma_period: int = 20,
         atr_period: int = 14,
         stop_atr: float = 1.5,
-        t1_atr: float = 2.25,  # ≥1.5R so proxy clears MIN_RR_TO_DEPLOY
+        t1_atr: float = 3.0,  # 3.0/1.5 = 2.0R clears MIN_RR_TO_DEPLOY
         t2_atr: float = 3.5,
         breakout_lookback: int = 10,
     ) -> None:
@@ -161,7 +161,7 @@ class MomentumBreakoutProvider:
 
         # Confidence proxy from trend strength (bounded, honest about uncertainty).
         trend_str = (prior.close - sma) / sma
-        win_prob = max(45.0, min(68.0, 52.0 + trend_str * 400.0))
+        win_prob = max(52.0, min(68.0, 52.0 + trend_str * 400.0))
         er = (t1 - entry) / entry * 100.0
         rr = round((t1 - entry) / (entry - stop), 2)
         from src.paper.allocation import expected_r

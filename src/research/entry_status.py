@@ -637,6 +637,12 @@ def attach_entry_status(
         price = _safe_float(slot.get("current_price"))
 
     anchors = slot.get("level_anchors") or {}
+    if not isinstance(anchors, dict):
+        anchors = {
+            "vwap": getattr(anchors, "vwap", None),
+            "orb_high": getattr(anchors, "orb_high", None),
+            "orb_low": getattr(anchors, "orb_low", None),
+        }
     if vwap is None:
         vwap = _safe_float(anchors.get("vwap"))
     orb_high = _safe_float(anchors.get("orb_high"))
