@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, fields
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -59,7 +59,7 @@ class StrategyConfig:
     gross_target: float = 1.0
     max_abs_net: float = 0.10
     max_name_weight: float = 0.10
-    max_sector_gross: float = 0.30
+    max_sector_gross: float = 0.15
     predicted_alpha_bps_per_score: float = 100.0
     cost_gate_multiple: float = 2.0
     default_spread_bps: float = 5.0
@@ -141,6 +141,13 @@ def _clip(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
 
+def _utc_naive(value: datetime) -> datetime:
+    """Normalize aware/naive vendor timestamps for deterministic comparison."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 class MarketNeutralLongShortStrategy:
     """Generate a constrained event-enhanced long/short portfolio."""
 
@@ -156,6 +163,8 @@ class MarketNeutralLongShortStrategy:
 
     @staticmethod
     def _before_decision_day(timestamp: datetime, as_of: datetime) -> bool:
+        timestamp = _utc_naive(timestamp)
+        as_of = _utc_naive(as_of)
         return timestamp < as_of and timestamp.date() < as_of.date()
 
     def _split_bars(
@@ -163,15 +172,17 @@ class MarketNeutralLongShortStrategy:
     ) -> Tuple[Dict[str, List[Bar]], Dict[str, Bar]]:
         history: Dict[str, List[Bar]] = {}
         intraday: Dict[str, Bar] = {}
+        cutoff = _utc_naive(as_of)
         for bar in bars:
-            if bar.timestamp > as_of:
+            timestamp = _utc_naive(bar.timestamp)
+            if timestamp > cutoff:
                 continue
             symbol = bar.symbol.upper()
-            if self._before_decision_day(bar.timestamp, as_of):
+            if self._before_decision_day(timestamp, cutoff):
                 history.setdefault(symbol, []).append(bar)
-            elif bar.timestamp.date() == as_of.date():
+            elif timestamp.date() == cutoff.date():
                 previous = intraday.get(symbol)
-                if previous is None or previous.timestamp < bar.timestamp:
+                if previous is None or _utc_naive(previous.timestamp) < timestamp:
                     intraday[symbol] = bar
         for rows in history.values():
             rows.sort(key=lambda item: item.timestamp)
@@ -194,10 +205,15 @@ class MarketNeutralLongShortStrategy:
             event
             for event in events
             if event.symbol.upper() == symbol
-            and event.timestamp <= as_of
-            and (event.available_at or event.timestamp) <= as_of
+            and _utc_naive(event.timestamp) <= _utc_naive(as_of)
+            and _utc_naive(event.available_at or event.timestamp) <= _utc_naive(as_of)
         ]
-        visible.sort(key=lambda item: (item.available_at or item.timestamp, item.timestamp))
+        visible.sort(
+            key=lambda item: (
+                _utc_naive(item.available_at or item.timestamp),
+                _utc_naive(item.timestamp),
+            )
+        )
         surprise = revision = news = pead = 0.0
         last_earnings: Optional[Event] = None
         for event in visible:
@@ -223,8 +239,9 @@ class MarketNeutralLongShortStrategy:
                 reaction = 1.0 if event.reaction is None else event.reaction
                 news += direction * reaction * _clip(event.relevance, 0.0, 1.0)
         if last_earnings is not None:
-            before = [bar for bar in rows if bar.timestamp < last_earnings.timestamp]
-            after = [bar for bar in rows if bar.timestamp >= last_earnings.timestamp]
+            event_time = _utc_naive(last_earnings.timestamp)
+            before = [bar for bar in rows if _utc_naive(bar.timestamp) < event_time]
+            after = [bar for bar in rows if _utc_naive(bar.timestamp) >= event_time]
             if before and after and before[-1].close > 0:
                 pead = after[-1].close / before[-1].close - 1.0
         return {
@@ -277,7 +294,7 @@ class MarketNeutralLongShortStrategy:
             impact = live.impact_bps if live is not None else last.impact_bps
             spread = spread if spread > 0 else cfg.default_spread_bps
             impact = impact if impact > 0 else cfg.default_impact_bps
-            cost = spread + impact + float(borrow_bps.get(symbol, cfg.default_borrow_bps))
+            execution_cost = spread + impact
             candidates.append(
                 Signal(
                     symbol=symbol,
@@ -286,13 +303,16 @@ class MarketNeutralLongShortStrategy:
                     raw_score=raw_score,
                     sector_score=0.0,
                     predicted_alpha_bps=0.0,
-                    estimated_cost_bps=cost,
+                    estimated_cost_bps=execution_cost,
                     hold_days=(cfg.min_holding_days, cfg.max_holding_days),
                     metadata={
                         "momentum_20": momentum_20,
                         "momentum_60": momentum_60,
                         "same_day_move": same_day_move,
                         "average_dollar_volume": average_dollar_volume,
+                        "borrow_bps": float(
+                            borrow_bps.get(symbol, cfg.default_borrow_bps)
+                        ),
                         **event_features,
                     },
                 )
@@ -323,6 +343,14 @@ class MarketNeutralLongShortStrategy:
                     if side < 0 and not borrow_available.get(row.symbol, False):
                         continue
                     row.side = side
+                    row.estimated_cost_bps = (
+                        row.estimated_cost_bps
+                        + (
+                            float(row.metadata.get("borrow_bps") or 0.0)
+                            if side < 0
+                            else 0.0
+                        )
+                    )
                     row.predicted_alpha_bps = (
                         abs(row.sector_score) * cfg.predicted_alpha_bps_per_score
                     )

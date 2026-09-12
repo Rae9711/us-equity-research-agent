@@ -21,7 +21,7 @@ portfolio:
   gross_target: 1.0
   max_abs_net: 0.10
   max_name_weight: 0.10
-  max_sector_gross: 0.30
+  max_sector_gross: 0.15
   beta_lookback: 60
   beta_tolerance: 0.03
   spy_symbol: SPY

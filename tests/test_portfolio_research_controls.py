@@ -8,6 +8,8 @@ from src.paper.acceptance import (
     acceptance_markdown_report,
     evaluate_backtest_acceptance,
     evaluate_paper_qualification,
+    paper_metrics_from_account,
+    promotion_record,
 )
 from src.paper.portfolio_controls import (
     ExposureLimits,
@@ -130,12 +132,30 @@ def test_backtest_acceptance_boundary_values_and_disclosures():
             "worst_month_pct": -5,
             "concentration_pct": 40,
             "monthly_returns": [12, 8, 10],
+            "pit_quality_passed": True,
         }
     )
     assert result.passed
     assert result.disclosures["avg_monthly_return_pct"] == pytest.approx(10)
     assert result.disclosures["hit_10_ratio"] == pytest.approx(2 / 3, abs=0.0001)
     assert all("guarantee" not in key for key in result.to_dict())
+
+
+def test_backtest_acceptance_requires_explicit_pit_quality_pass():
+    metrics = {
+        "oos_closed_trades": 300,
+        "max_drawdown_pct": 9,
+        "profit_factor": 1.4,
+        "sharpe": 2,
+        "worst_month_pct": -4,
+        "concentration_pct": 35,
+    }
+    missing = evaluate_backtest_acceptance(metrics)
+    failed = evaluate_backtest_acceptance({**metrics, "pit_quality_passed": False})
+    assert not missing.passed
+    assert not failed.passed
+    assert missing.failures == ("pit_quality_passed",)
+    assert failed.failures == ("pit_quality_passed",)
 
 
 def test_paper_qualification_requires_all_four_gates():
@@ -180,6 +200,7 @@ def test_markdown_report_contains_decisions_and_required_disclosures():
             "avg_monthly_return_pct": 3.25,
             "months_hit_10pct": 1,
             "months_total": 4,
+            "pit_quality_passed": True,
         }
     )
     report = acceptance_markdown_report(backtest)
@@ -187,3 +208,50 @@ def test_markdown_report_contains_decisions_and_required_disclosures():
     assert "**Result:** PASS" in report
     assert "Average monthly return: 3.25%" in report
     assert "Months at or above 10%: 1 / 4 (25.0%)" in report
+
+
+def test_promotion_record_uses_only_event_ls_paper_evidence_and_never_enables():
+    account = {
+        "params": {"slippage_bps": 5.0},
+        "trades": [
+            {
+                "strategy": "event_ls",
+                "action": "EXIT",
+                "pnl": 10,
+                "trading_date": f"2025-01-{day:02d}",
+                "slippage_bps": 4.0,
+            }
+            for day in range(1, 32)
+        ]
+        + [
+            {
+                "strategy": "legacy",
+                "action": "EXIT",
+                "pnl": 10,
+                "trading_date": "2025-02-01",
+                "slippage_bps": 1.0,
+            }
+        ],
+    }
+    paper = paper_metrics_from_account(account)
+    assert paper["trading_days"] == 31
+    assert paper["closed_trades"] == 31
+    assert paper["actual_slippage_bps"] == pytest.approx(4.0)
+
+    record = promotion_record(
+        account,
+        {
+            "oos_closed_trades": 300,
+            "oos_max_drawdown_pct": 9,
+            "oos_profit_factor": 1.4,
+            "oos_sharpe": 2,
+            "oos_worst_month_pct": -4,
+            "oos_concentration_pct": 35,
+            "pit_quality_passed": True,
+        },
+    )
+    assert record["status"] == "BACKTEST_ONLY"
+    assert record["backtest_passed"] is True
+    assert record["paper_passed"] is False
+    assert record["enabled"] is False
+    assert record["target_10pct_monthly_guaranteed"] is False

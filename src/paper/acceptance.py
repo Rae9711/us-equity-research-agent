@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 
@@ -43,7 +44,7 @@ def _int(value: Any, default: int = 0) -> int:
 
 
 def _monthly_values(metrics: Mapping[str, Any]) -> list[float]:
-    rows = metrics.get("monthly_returns") or []
+    rows = metrics.get("oos_monthly_returns") or metrics.get("monthly_returns") or []
     values = []
     for row in rows:
         value = row.get("return_pct") if isinstance(row, Mapping) else row
@@ -57,7 +58,12 @@ def _monthly_values(metrics: Mapping[str, Any]) -> list[float]:
 def _concentration(metrics: Mapping[str, Any]) -> Optional[float]:
     direct = _first(
         metrics,
-        ("concentration_pct", "max_concentration_pct", "largest_position_pct"),
+        (
+            "oos_concentration_pct",
+            "concentration_pct",
+            "max_concentration_pct",
+            "largest_position_pct",
+        ),
     )
     if direct is not None:
         return _float(direct)
@@ -123,14 +129,20 @@ def evaluate_backtest_acceptance(metrics: Mapping[str, Any]) -> AcceptanceResult
         "sharpe": sharpe is not None and sharpe >= 1.8,
         "worst_month_pct": worst_month is not None and worst_month >= -5.0,
         "concentration_pct": concentration is not None and concentration <= 40.0,
+        "pit_quality_passed": metrics.get("pit_quality_passed") is True,
     }
+    observed["pit_quality_passed"] = metrics.get("pit_quality_passed") is True
 
-    average_monthly = _first(metrics, ("avg_monthly_return_pct", "oos_avg_monthly_return_pct"))
+    average_monthly = _first(metrics, ("oos_avg_monthly_return_pct", "avg_monthly_return_pct"))
     if average_monthly is None:
         average_monthly = sum(monthly) / len(monthly) if monthly else 0.0
-    hit_count = _int(_first(metrics, ("months_hit_10pct", "oos_months_hit_10pct")))
-    month_count = _int(_first(metrics, ("months_total", "oos_months_total"), len(monthly)))
-    if monthly and "months_hit_10pct" not in metrics and "oos_months_hit_10pct" not in metrics:
+    hit_count = _int(_first(metrics, ("oos_months_hit_10pct", "months_hit_10pct")))
+    month_count = _int(_first(metrics, ("oos_months_total", "months_total"), len(monthly)))
+    if (
+        monthly
+        and "oos_months_hit_10pct" not in metrics
+        and "months_hit_10pct" not in metrics
+    ):
         hit_count = sum(value >= 10.0 for value in monthly)
     disclosures = {
         "avg_monthly_return_pct": round(_float(average_monthly), 4),
@@ -232,6 +244,111 @@ def acceptance_markdown_report(
     if paper is not None:
         lines.extend(["", *section("Paper qualification", paper)])
     return "\n".join(lines) + "\n"
+
+
+def paper_metrics_from_account(
+    account: Mapping[str, Any],
+    *,
+    strategy: str = "event_ls",
+) -> dict[str, Any]:
+    """Build qualification metrics from persisted fills, without inventing data."""
+    trades = [
+        row
+        for row in (account.get("trades") or [])
+        if not row.get("voided")
+        and (
+            row.get("strategy") == strategy
+            or row.get("book") == strategy
+        )
+    ]
+    closed = [
+        row
+        for row in trades
+        if row.get("action") in ("EXIT", "SCALE_OUT")
+        and row.get("pnl") is not None
+    ]
+    observed_dates = {
+        str(row.get("trading_date"))[:10]
+        for row in trades
+        if row.get("trading_date")
+    }
+    slippages = [
+        abs(_float(row.get("slippage_bps")))
+        for row in trades
+        if row.get("slippage_bps") is not None
+    ]
+    assumed = _float(
+        (account.get("params") or {}).get("slippage_bps"),
+        default=0.0,
+    )
+    return {
+        "trading_days": len(observed_dates),
+        "closed_trades": len(closed),
+        "actual_slippage_bps": (
+            sum(slippages) / len(slippages) if slippages else None
+        ),
+        "assumed_slippage_bps": assumed,
+    }
+
+
+def promotion_record(
+    account: Mapping[str, Any],
+    backtest_metrics: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return an auditable promotion record; never enables trading by itself."""
+    backtest = evaluate_backtest_acceptance(backtest_metrics)
+    paper_metrics = paper_metrics_from_account(account)
+    paper = evaluate_paper_qualification(
+        paper_metrics,
+        backtest_pass=backtest.passed,
+    )
+    if paper.passed:
+        status = "PAPER_QUALIFIED"
+        reason = "Eligible for explicit small-capital review; not auto-enabled"
+    elif backtest.passed:
+        status = "BACKTEST_ONLY"
+        reason = "OOS passed; requires 63 paper days and 100 closed trades"
+    else:
+        status = "NOT_READY"
+        reason = "Out-of-sample acceptance criteria not met"
+    return {
+        "status": status,
+        "backtest_passed": backtest.passed,
+        "paper_passed": paper.passed,
+        "enabled": False,
+        "reason": reason,
+        "backtest": backtest.to_dict(),
+        "paper": paper.to_dict(),
+        "target_10pct_monthly_guaranteed": False,
+    }
+
+
+def refresh_event_ls_qualification(account: dict[str, Any]) -> dict[str, Any]:
+    """Recompute and persist the research-only promotion state on an account."""
+    qualifications = account.setdefault("strategy_qualification", {})
+    previous = qualifications.get("event_ls") or {}
+    metrics = previous.get("backtest_metrics") or {}
+    record = promotion_record(account, metrics)
+    if metrics:
+        record["backtest_metrics"] = metrics
+    qualifications["event_ls"] = record
+    # Promotion never silently turns on an execution path.
+    account.setdefault("params", {})["event_ls_enabled"] = False
+    return record
+
+
+def write_acceptance_report(
+    path: Path,
+    backtest: AcceptanceResult,
+    paper: Optional[AcceptanceResult] = None,
+) -> Path:
+    """Persist a human-readable gate report for review."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        acceptance_markdown_report(backtest, paper),
+        encoding="utf-8",
+    )
+    return path
 
 
 evaluate_acceptance = evaluate_backtest_acceptance
