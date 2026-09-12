@@ -97,6 +97,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             config=config,
             borrow_available=payload.get("borrow_available"),
             borrow_rates=payload.get("borrow_rates"),
+            ssr_restricted=payload.get("ssr_restricted"),
+            forced_cover=payload.get("forced_cover"),
         )
         encoded = json.dumps(
             result.to_dict(),

@@ -134,10 +134,14 @@ def test_short_candidate_requires_borrow_fields_but_long_does_not():
     assert [issue.field for issue in borrow_issues] == [
         "borrow_available",
         "borrow_fee_rate",
+        "ssr_restricted",
+        "forced_cover",
     ]
 
     short["borrow_available"] = False
     short["borrow_fee_rate"] = 0.125
+    short["ssr_restricted"] = False
+    short["forced_cover"] = False
     assert audit_rows([short], DECISION).ok
 
 

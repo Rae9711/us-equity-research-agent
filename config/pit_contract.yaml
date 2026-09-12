@@ -44,6 +44,8 @@ short_candidate:
   required_borrow_fields:
     - borrow_available
     - borrow_fee_rate
+    - ssr_restricted
+    - forced_cover
 
 storage:
   environment_root: PIT_DATA_ROOT

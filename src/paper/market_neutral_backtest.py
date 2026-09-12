@@ -12,6 +12,7 @@ import statistics
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo
 
 from src.paper.acceptance import acceptance_markdown_report, evaluate_backtest_acceptance
 from src.paper.portfolio_controls import drawdown_throttle, exposure_snapshot
@@ -21,6 +22,8 @@ from src.strategies.market_neutral_ls import (
     Event,
     MarketNeutralLongShortStrategy,
 )
+
+_ET = ZoneInfo("America/New_York")
 
 
 def _date(value: Any) -> date:
@@ -33,14 +36,18 @@ def _date(value: Any) -> date:
 
 def _datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
-        return value
-    if isinstance(value, date):
-        return datetime.combine(value, time())
-    text = str(value).replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(text)
-    # Strategy comparisons must not mix aware and naive timestamps.  Wall-clock
-    # dates are sufficient for daily bars, so normalize to naive UTC-like time.
-    return parsed.replace(tzinfo=None)
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, time())
+    else:
+        text = str(value).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+    # The engine's opening decision is 09:30 New York time. Normalize every
+    # aware vendor timestamp to that wall clock before dropping the timezone;
+    # naive inputs are documented as New York local time.
+    if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+        return parsed.astimezone(_ET).replace(tzinfo=None)
+    return parsed
 
 
 def _finite(value: float, name: str) -> float:
@@ -48,6 +55,23 @@ def _finite(value: float, name: str) -> float:
     if not math.isfinite(result):
         raise ValueError("{} must be finite".format(name))
     return result
+
+
+def _dated_values(
+    values: Optional[Mapping[str, Any]],
+    day: date,
+) -> Tuple[Dict[str, Any], bool]:
+    """Resolve a dated symbol map and report whether it is point-in-time keyed."""
+    if not values:
+        return {}, False
+    dated = values.get(day.isoformat())
+    if dated is None:
+        dated = values.get(day)  # type: ignore[arg-type]
+    if isinstance(dated, Mapping):
+        return {str(key).upper(): value for key, value in dated.items()}, True
+    if any(isinstance(value, Mapping) for value in values.values()):
+        return {}, False
+    return {str(key).upper(): value for key, value in values.items()}, False
 
 
 @dataclass(frozen=True)
@@ -404,8 +428,10 @@ class MarketNeutralBacktester:
         bars: Iterable[DailyBar],
         events: Iterable[Event] = (),
         *,
-        borrow_available: Optional[Mapping[str, bool]] = None,
-        borrow_rates: Optional[Mapping[str, float]] = None,
+        borrow_available: Optional[Mapping[str, Any]] = None,
+        borrow_rates: Optional[Mapping[str, Any]] = None,
+        ssr_restricted: Optional[Mapping[str, Any]] = None,
+        forced_cover: Optional[Mapping[str, Any]] = None,
     ) -> BacktestResult:
         cfg = self.config
         rows = sorted(list(bars), key=lambda row: (row.date, row.symbol))
@@ -426,13 +452,6 @@ class MarketNeutralBacktester:
             if row.beta is not None:
                 explicit_betas[row.symbol] = row.beta
         days = sorted(by_day)
-        borrowable = {
-            key.upper(): bool(value) for key, value in (borrow_available or {}).items()
-        }
-        for symbol in {row.symbol for row in rows}:
-            borrowable.setdefault(symbol, True)
-        rates = {key.upper(): float(value) for key, value in (borrow_rates or {}).items()}
-
         cash = cfg.initial_cash
         positions: Dict[str, Position] = {}
         snapshots: List[DailySnapshot] = []
@@ -442,9 +461,44 @@ class MarketNeutralBacktester:
         previous_closes: Dict[str, float] = {}
         permanently_halted = False
         capacity_samples: List[float] = []
+        dated_borrow_complete = bool(
+            borrow_available and borrow_rates and ssr_restricted and forced_cover
+        )
 
         for day_index, day in enumerate(days):
             market = by_day[day]
+            availability_values, availability_is_dated = _dated_values(
+                borrow_available, day
+            )
+            rate_values, rates_are_dated = _dated_values(borrow_rates, day)
+            ssr_values, ssr_is_dated = _dated_values(ssr_restricted, day)
+            forced_cover_values, forced_cover_is_dated = _dated_values(
+                forced_cover, day
+            )
+            dated_borrow_complete = (
+                dated_borrow_complete
+                and availability_is_dated
+                and rates_are_dated
+                and ssr_is_dated
+                and forced_cover_is_dated
+            )
+            rates = {
+                symbol: float(value)
+                for symbol, value in rate_values.items()
+                if value is not None
+            }
+            # A locate without its contemporaneous fee is incomplete and cannot
+            # support a short return. Missing data always means unavailable.
+            borrowable = {
+                symbol: bool(value) and symbol in rates
+                for symbol, value in availability_values.items()
+            }
+            short_entry_allowed = {
+                symbol: allowed
+                and not bool(ssr_values.get(symbol, False))
+                and not bool(forced_cover_values.get(symbol, False))
+                for symbol, allowed in borrowable.items()
+            }
             open_equity = cash + sum(
                 position.shares * (
                     market[symbol].open
@@ -475,7 +529,7 @@ class MarketNeutralBacktester:
                     history,
                     visible_events,
                     datetime.combine(day, time(9, 30)),
-                    borrowable,
+                    short_entry_allowed,
                     {symbol: (
                         rates.get(symbol, cfg.annual_borrow_rate)
                         * 10_000.0 * cfg.max_hold_days
@@ -505,6 +559,14 @@ class MarketNeutralBacktester:
                         or target * current.shares <= 0
                     )
                     if permanently_halted:
+                        target = 0.0
+                        forced_symbols.add(symbol)
+                    elif current.shares < 0 and not borrowable.get(symbol, False):
+                        target = 0.0
+                        forced_symbols.add(symbol)
+                    elif current.shares < 0 and bool(
+                        forced_cover_values.get(symbol, False)
+                    ):
                         target = 0.0
                         forced_symbols.add(symbol)
                     elif held >= cfg.max_hold_days:
@@ -548,6 +610,13 @@ class MarketNeutralBacktester:
                     continue
                 if requested < 0 and current_shares + requested < 0 and not borrowable.get(symbol, False):
                     blocked[symbol] = "borrow_unavailable"
+                    continue
+                if (
+                    requested < 0
+                    and current_shares + requested < min(current_shares, 0.0)
+                    and bool(ssr_values.get(symbol, False))
+                ):
+                    blocked[symbol] = "ssr_restricted"
                     continue
                 max_fill = bar.volume * cfg.volume_participation
                 fill_shares = math.copysign(min(abs(requested), max_fill), requested)
@@ -697,7 +766,8 @@ class MarketNeutralBacktester:
             snapshots, trades, cfg.initial_cash, capacity_samples,
             cfg.trading_days_per_year,
         )
-        metrics["pit_quality_passed"] = all(
+        metrics["borrow_data_complete"] = dated_borrow_complete
+        metrics["pit_quality_passed"] = dated_borrow_complete and all(
             row.known_at is not None
             and row.member_from is not None
             and row.member_to is not None
@@ -878,8 +948,10 @@ def run_market_neutral_backtest(
     *,
     strategy: Optional[MarketNeutralLongShortStrategy] = None,
     config: Optional[BacktestConfig] = None,
-    borrow_available: Optional[Mapping[str, bool]] = None,
-    borrow_rates: Optional[Mapping[str, float]] = None,
+    borrow_available: Optional[Mapping[str, Any]] = None,
+    borrow_rates: Optional[Mapping[str, Any]] = None,
+    ssr_restricted: Optional[Mapping[str, Any]] = None,
+    forced_cover: Optional[Mapping[str, Any]] = None,
 ) -> BacktestResult:
     """Convenience API for callers that do not need to retain engine state."""
 
@@ -890,4 +962,6 @@ def run_market_neutral_backtest(
         events,
         borrow_available=borrow_available,
         borrow_rates=borrow_rates,
+        ssr_restricted=ssr_restricted,
+        forced_cover=forced_cover,
     )

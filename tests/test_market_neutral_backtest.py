@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 
@@ -83,6 +83,27 @@ def _events(flip=False):
     return rows
 
 
+def _run(engine, bars, events, *, pit_borrow=False, borrow_rate=0.0):
+    availability = {"AAA": True, "BBB": True, "SPY": True}
+    rates = {"AAA": borrow_rate, "BBB": borrow_rate, "SPY": borrow_rate}
+    ssr = {"AAA": False, "BBB": False, "SPY": False}
+    forced = {"AAA": False, "BBB": False, "SPY": False}
+    if pit_borrow:
+        days = sorted({row.date for row in bars})
+        availability = {day.isoformat(): dict(availability) for day in days}
+        rates = {day.isoformat(): dict(rates) for day in days}
+        ssr = {day.isoformat(): dict(ssr) for day in days}
+        forced = {day.isoformat(): dict(forced) for day in days}
+    return engine.run(
+        bars,
+        events,
+        borrow_available=availability,
+        borrow_rates=rates,
+        ssr_restricted=ssr,
+        forced_cover=forced,
+    )
+
+
 def _config(**changes):
     base = BacktestConfig(
         default_spread_bps=0.0,
@@ -104,7 +125,7 @@ def _snapshot(result, offset):
 def test_open_decision_uses_strictly_prior_day_features_and_trades_both_sides():
     bars = _bars()
     engine = MarketNeutralBacktester(_strategy(), _config())
-    baseline = engine.run(bars, _events())
+    baseline = _run(engine, bars, _events())
 
     changed = list(bars)
     index = next(
@@ -118,7 +139,7 @@ def test_open_decision_uses_strictly_prior_day_features_and_trades_both_sides():
         "news",
         sentiment=100.0,
     )
-    contaminated = engine.run(changed, _events() + [future_news])
+    contaminated = _run(engine, changed, _events() + [future_news])
 
     decision = _snapshot(baseline, 61)
     contaminated_decision = _snapshot(contaminated, 61)
@@ -128,29 +149,116 @@ def test_open_decision_uses_strictly_prior_day_features_and_trades_both_sides():
     assert decision.positions["BBB"] < 0
 
 
-def test_spread_slippage_impact_and_short_borrow_reduce_equity():
-    frictionless = MarketNeutralBacktester(_strategy(), _config()).run(
-        _bars(), _events()
+def test_utc_event_timestamps_are_compared_to_new_york_open():
+    day = START + timedelta(days=61)
+    before = Event(
+        "AAA", datetime.combine(day, time(14, 29), timezone.utc), "news"
     )
-    costly = MarketNeutralBacktester(
-        _strategy(),
-        _config(
-            default_spread_bps=10.0,
-            slippage_bps=8.0,
-            default_impact_bps=7.0,
-            impact_curve_bps=25.0,
-            annual_borrow_rate=0.252,
+    after = Event(
+        "BBB", datetime.combine(day, time(14, 31), timezone.utc), "news"
+    )
+    visible = MarketNeutralBacktester._visible_events([before, after], day)
+    assert visible == [before]
+
+
+def test_spread_slippage_impact_and_short_borrow_reduce_equity():
+    frictionless = _run(
+        MarketNeutralBacktester(_strategy(), _config()), _bars(), _events()
+    )
+    costly = _run(
+        MarketNeutralBacktester(
+            _strategy(),
+            _config(
+                default_spread_bps=10.0,
+                slippage_bps=8.0,
+                default_impact_bps=7.0,
+                impact_curve_bps=25.0,
+                annual_borrow_rate=0.252,
+            ),
         ),
-    ).run(_bars(), _events())
+        _bars(),
+        _events(),
+        borrow_rate=0.252,
+    )
     assert costly.metrics["ending_equity"] < frictionless.metrics["ending_equity"]
     assert costly.metrics["transaction_cost"] > 0
     assert costly.metrics["borrow_cost"] > 0
 
 
+def test_missing_borrow_fee_blocks_short_and_fails_data_quality():
+    bars = _bars()
+    result = MarketNeutralBacktester(_strategy(), _config()).run(
+        bars,
+        _events(),
+        borrow_available={"AAA": True, "BBB": True},
+        borrow_rates={"AAA": 0.01},
+    )
+    decision = _snapshot(result, 61)
+    assert "BBB" not in decision.positions
+    assert result.metrics["borrow_data_complete"] is False
+    assert result.metrics["pit_quality_passed"] is False
+
+
+def test_ssr_blocks_new_short_and_forced_cover_exits_existing_short():
+    bars = _bars(days=65)
+    days = sorted({row.date for row in bars})
+    availability = {
+        day.isoformat(): {"AAA": True, "BBB": True, "SPY": True}
+        for day in days
+    }
+    rates = {
+        day.isoformat(): {"AAA": 0.0, "BBB": 0.0, "SPY": 0.0}
+        for day in days
+    }
+    ssr = {
+        day.isoformat(): {"AAA": False, "BBB": False, "SPY": False}
+        for day in days
+    }
+    forced = {
+        day.isoformat(): {"AAA": False, "BBB": False, "SPY": False}
+        for day in days
+    }
+    entry_day = START + timedelta(days=61)
+    ssr[entry_day.isoformat()]["BBB"] = True
+    ssr_result = MarketNeutralBacktester(_strategy(), _config()).run(
+        bars,
+        _events(),
+        borrow_available=availability,
+        borrow_rates=rates,
+        ssr_restricted=ssr,
+        forced_cover=forced,
+    )
+    assert "BBB" not in _snapshot(ssr_result, 61).positions
+    ssr[entry_day.isoformat()]["BBB"] = False
+
+    forced_day = START + timedelta(days=62)
+    forced[forced_day.isoformat()]["BBB"] = True
+    result = MarketNeutralBacktester(
+        _strategy(), _config(min_hold_days=10)
+    ).run(
+        bars,
+        _events(),
+        borrow_available=availability,
+        borrow_rates=rates,
+        ssr_restricted=ssr,
+        forced_cover=forced,
+    )
+    assert _snapshot(result, 61).positions["BBB"] < 0
+    assert "BBB" not in _snapshot(result, 62).positions
+    assert any(
+        fill.symbol == "BBB" and fill.reason == "forced_exit"
+        for fill in _snapshot(result, 62).fills
+    )
+
+
 def test_minimum_hold_blocks_early_flip_and_maximum_hold_forces_exit():
-    flip_result = MarketNeutralBacktester(
-        _strategy(), _config(min_hold_days=2, max_hold_days=10)
-    ).run(_bars(), _events(flip=True))
+    flip_result = _run(
+        MarketNeutralBacktester(
+            _strategy(), _config(min_hold_days=2, max_hold_days=10)
+        ),
+        _bars(),
+        _events(flip=True),
+    )
     first = _snapshot(flip_result, 61)
     too_early = _snapshot(flip_result, 62)
     allowed = _snapshot(flip_result, 63)
@@ -159,9 +267,13 @@ def test_minimum_hold_blocks_early_flip_and_maximum_hold_forces_exit():
     assert not any(fill.symbol == "AAA" for fill in too_early.fills)
     assert allowed.positions["AAA"] < 0
 
-    forced = MarketNeutralBacktester(
-        _strategy(), _config(min_hold_days=0, max_hold_days=3)
-    ).run(_bars(days=66), _events())
+    forced = _run(
+        MarketNeutralBacktester(
+            _strategy(), _config(min_hold_days=0, max_hold_days=3)
+        ),
+        _bars(days=66),
+        _events(),
+    )
     assert any(
         fill.reason == "forced_exit"
         for row in forced.snapshots
@@ -177,9 +289,11 @@ def test_drawdown_throttle_scales_daily_target():
         if row.date == shock_day and row.symbol == "AAA" else row
         for row in bars
     ]
-    result = MarketNeutralBacktester(
-        _strategy(), _config(min_hold_days=0)
-    ).run(shocked, _events())
+    result = _run(
+        MarketNeutralBacktester(_strategy(), _config(min_hold_days=0)),
+        shocked,
+        _events(),
+    )
     shock = _snapshot(result, 62)
     assert 4.0 <= shock.drawdown_pct < 6.0
     assert shock.throttle == 0.75
@@ -194,9 +308,11 @@ def test_one_percent_daily_loss_blocks_new_risk_on_next_session():
         if row.date == shock_day and row.symbol == "AAA" else row
         for row in bars
     ]
-    result = MarketNeutralBacktester(
-        _strategy(), _config(min_hold_days=0)
-    ).run(shocked, _events())
+    result = _run(
+        MarketNeutralBacktester(_strategy(), _config(min_hold_days=0)),
+        shocked,
+        _events(),
+    )
     loss_day = _snapshot(result, 62)
     following = _snapshot(result, 63)
     assert loss_day.daily_return <= -0.01
@@ -217,9 +333,11 @@ def test_ten_percent_drawdown_liquidates_and_permanently_halts():
         if row.date == shock_day and row.symbol == "AAA" else row
         for row in bars
     ]
-    result = MarketNeutralBacktester(
-        _strategy(), _config(min_hold_days=10)
-    ).run(shocked, _events())
+    result = _run(
+        MarketNeutralBacktester(_strategy(), _config(min_hold_days=10)),
+        shocked,
+        _events(),
+    )
     shock = _snapshot(result, 62)
     following = _snapshot(result, 63)
     assert shock.halted
@@ -230,8 +348,10 @@ def test_ten_percent_drawdown_liquidates_and_permanently_halts():
 
 
 def test_thin_sample_acceptance_stays_failed():
-    result = MarketNeutralBacktester(_strategy(), _config()).run(
-        _bars(days=65), _events()
+    result = _run(
+        MarketNeutralBacktester(_strategy(), _config()),
+        _bars(days=65),
+        _events(),
     )
     assert result.acceptance["passed"] is False
     assert result.metrics["oos_closed_trades"] == 0
@@ -241,8 +361,11 @@ def test_thin_sample_acceptance_stays_failed():
 
 
 def test_complete_bar_metadata_passes_pit_quality_gate():
-    result = MarketNeutralBacktester(_strategy(), _config()).run(
-        _bars(days=65, pit=True), _events()
+    result = _run(
+        MarketNeutralBacktester(_strategy(), _config()),
+        _bars(days=65, pit=True),
+        _events(),
+        pit_borrow=True,
     )
     assert result.metrics["pit_quality_passed"] is True
     assert "pit_quality_passed" not in result.acceptance["failures"]

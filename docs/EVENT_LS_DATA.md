@@ -34,5 +34,12 @@ Required categories:
 5. Backtests must set `pit_quality_passed=true`; otherwise the acceptance gate
    remains failed regardless of returns.
 
+The backtest JSON must provide date-keyed `borrow_available`, `borrow_rates`,
+`ssr_restricted`, and `forced_cover` maps. Static symbol maps may be used for
+diagnostics, but they deliberately fail PIT acceptance because they cannot
+prove what was known on each historical date. Missing fees block the affected
+short; SSR blocks new or increased shorts; forced-cover flags liquidate an
+existing short even during its minimum holding period.
+
 The strategy never backfills missing values with future revisions, current
 index members, or current borrow availability.
