@@ -13,6 +13,7 @@ from src.paper.market_neutral_backtest import (
 )
 from src.jobs.market_neutral_backtest import main as backtest_main
 from src.strategies.market_neutral_ls import (
+    Bar as StrategyBar,
     Event,
     MarketNeutralLongShortStrategy,
     StrategyConfig,
@@ -186,6 +187,32 @@ def test_open_decision_uses_strictly_prior_day_features_and_trades_both_sides():
     assert decision.feature_cutoff == START + timedelta(days=60)
     assert decision.positions["AAA"] > 0
     assert decision.positions["BBB"] < 0
+
+
+def test_point_in_time_market_regime_classification_covers_required_states():
+    engine = MarketNeutralBacktester(_strategy(), _config())
+
+    def history(returns):
+        price = 100.0
+        rows = [StrategyBar("SPY", datetime(2025, 1, 1, 16), price, 1_000)]
+        for index, value in enumerate(returns, start=1):
+            price *= 1.0 + value
+            rows.append(
+                StrategyBar(
+                    "SPY",
+                    datetime(2025, 1, 1, 16) + timedelta(days=index),
+                    price,
+                    1_000,
+                )
+            )
+        return rows
+
+    assert engine._market_regime(history([0.002] * 60)) == "bull"
+    assert engine._market_regime(history([-0.002] * 60)) == "bear"
+    assert engine._market_regime(
+        history([0.03 if index % 2 else -0.03 for index in range(60)])
+    ) == "high_volatility"
+    assert engine._market_regime(history([0.0] * 60)) == "sideways"
 
 
 def test_future_sector_beta_and_completed_daily_volume_cannot_change_open_fill():
@@ -583,6 +610,9 @@ def test_walk_forward_folds_reset_state_and_freeze_parameters():
     assert all(fold["ending_positions_flat"] for fold in result.walk_forward)
     assert result.metrics["oos_liquidation_complete"] is True
     assert result.metrics["oos_closed_trades"] > 0
+    report = result.markdown_report()
+    assert "| Calmar |" in report
+    assert "Out-of-sample regime contribution" in report
 
 
 def test_cli_rejects_unknown_control_keys(tmp_path, capsys):

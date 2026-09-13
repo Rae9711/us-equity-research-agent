@@ -52,5 +52,10 @@ Qualification evidence is imported only by an explicit
 different metrics is rejected. Passing OOS evidence merely opens the paper
 observation stage; it never enables execution.
 
+The OOS report includes monthly returns, drawdown, Sharpe, Calmar, profit
+factor, turnover, capacity, long/short contribution, and PIT-classified bull,
+bear, high-volatility, and sideways contribution. Missing any required regime
+fails candidate acceptance; it is not repaired by retuning the test period.
+
 The strategy never backfills missing values with future revisions, current
 index members, or current borrow availability.

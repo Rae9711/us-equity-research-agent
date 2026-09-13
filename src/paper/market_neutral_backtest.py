@@ -206,6 +206,8 @@ class BacktestConfig:
     walk_forward_train_months: int = 24
     walk_forward_validation_months: int = 3
     walk_forward_test_months: int = 3
+    high_volatility_annualized: float = 0.25
+    bull_bear_lookback_return: float = 0.05
 
     def __post_init__(self) -> None:
         if self.initial_cash <= 0:
@@ -224,11 +226,17 @@ class BacktestConfig:
             "default_impact_bps",
             "impact_curve_bps",
             "annual_borrow_rate",
+            "high_volatility_annualized",
+            "bull_bear_lookback_return",
         ):
             value = _finite(getattr(self, name), name)
             object.__setattr__(self, name, value)
             if value < 0:
                 raise ValueError("{} cannot be negative".format(name))
+        if self.high_volatility_annualized <= 0:
+            raise ValueError("high_volatility_annualized must be positive")
+        if self.bull_bear_lookback_return <= 0:
+            raise ValueError("bull_bear_lookback_return must be positive")
         if self.trading_days_per_year <= 0:
             raise ValueError("trading_days_per_year must be positive")
 
@@ -305,11 +313,13 @@ class DailySnapshot:
     borrow_cost: float
     long_pnl: float
     short_pnl: float
+    capacity_usd: float = 0.0
     target_weights: Dict[str, float] = field(default_factory=dict)
     positions: Dict[str, float] = field(default_factory=dict)
     fills: List[Fill] = field(default_factory=list)
     blocked_orders: Dict[str, str] = field(default_factory=dict)
     feature_cutoff: Optional[date] = None
+    market_regime: str = "insufficient_history"
     halted: bool = False
     new_entries_halted: bool = False
 
@@ -353,18 +363,65 @@ class BacktestResult:
             "| Total return | {:.2f}% |".format(metrics["total_return_pct"]),
             "| Sharpe | {:.3f} |".format(metrics["sharpe"]),
             "| Maximum drawdown | {:.2f}% |".format(metrics["max_drawdown_pct"]),
+            "| Calmar | {:.3f} |".format(metrics["calmar"]),
             "| Profit factor | {:.3f} |".format(metrics["profit_factor"]),
             "| Closed trades | {} |".format(metrics["closed_trades"]),
             "| Annualized turnover | {:.2f}x |".format(metrics["annualized_turnover"]),
             "| Capacity estimate | ${:,.0f} |".format(metrics["capacity_estimate_usd"]),
+            "| Long contribution | ${:,.2f} |".format(metrics["long_contribution"]),
+            "| Short contribution | ${:,.2f} |".format(metrics["short_contribution"]),
             "",
-            "## Monthly returns",
+            "## Out-of-sample summary",
+            "",
+            "| Metric | Value |",
+            "|---|---:|",
+            "| Trades | {} |".format(metrics.get("oos_closed_trades", 0)),
+            "| Maximum drawdown | {:.2f}% |".format(
+                metrics.get("oos_max_drawdown_pct", 0.0)
+            ),
+            "| Sharpe | {:.3f} |".format(metrics.get("oos_sharpe", 0.0)),
+            "| Calmar | {:.3f} |".format(metrics.get("oos_calmar", 0.0)),
+            "| Profit factor | {:.3f} |".format(
+                metrics.get("oos_profit_factor", 0.0)
+            ),
+            "| Annualized turnover | {:.2f}x |".format(
+                metrics.get("oos_annualized_turnover", 0.0)
+            ),
+            "| Capacity estimate | ${:,.0f} |".format(
+                metrics.get("oos_capacity_estimate_usd", 0.0)
+            ),
+            "| Long contribution | ${:,.2f} |".format(
+                metrics.get("oos_long_contribution", 0.0)
+            ),
+            "| Short contribution | ${:,.2f} |".format(
+                metrics.get("oos_short_contribution", 0.0)
+            ),
+            "",
+            "## Out-of-sample monthly returns",
             "",
             "| Month | Return |",
             "|---|---:|",
         ]
-        for row in metrics["monthly_returns"]:
+        for row in metrics.get("oos_monthly_returns", []):
             lines.append("| {} | {:.2f}% |".format(row["month"], row["return_pct"]))
+        lines.extend([
+            "",
+            "## Out-of-sample regime contribution",
+            "",
+            "| Regime | Trading days | Contribution |",
+            "|---|---:|---:|",
+        ])
+        regime_days = metrics.get("oos_regime_days") or {}
+        regime_contribution = metrics.get("oos_regime_contribution") or {}
+        for regime in (
+            "bull", "bear", "high_volatility", "sideways",
+            "insufficient_history",
+        ):
+            lines.append("| {} | {} | ${:,.2f} |".format(
+                regime,
+                regime_days.get(regime, 0),
+                regime_contribution.get(regime, 0.0),
+            ))
         lines.extend(["", acceptance_markdown_report(
             evaluate_backtest_acceptance(metrics)
         ).rstrip()])
@@ -429,6 +486,32 @@ class MarketNeutralBacktester:
             by_symbol.setdefault(row.symbol, []).append(row)
         calculated = (strategy or self.strategy)._rolling_betas(by_symbol)
         return {symbol: calculated.get(symbol, 1.0) for symbol in symbols}
+
+    def _market_regime(self, history: Sequence[Bar]) -> str:
+        spy = sorted(
+            (row for row in history if row.symbol == "SPY"),
+            key=lambda row: row.timestamp,
+        )
+        if len(spy) < 61:
+            return "insufficient_history"
+        recent_returns = [
+            current.close / previous.close - 1.0
+            for previous, current in zip(spy[-21:-1], spy[-20:])
+            if previous.close > 0
+        ]
+        volatility = (
+            statistics.stdev(recent_returns)
+            * math.sqrt(self.config.trading_days_per_year)
+            if len(recent_returns) > 1 else 0.0
+        )
+        if volatility >= self.config.high_volatility_annualized:
+            return "high_volatility"
+        lookback_return = spy[-1].close / spy[-61].close - 1.0
+        if lookback_return >= self.config.bull_bear_lookback_return:
+            return "bull"
+        if lookback_return <= -self.config.bull_bear_lookback_return:
+            return "bear"
+        return "sideways"
 
     def _constrain_weights(
         self,
@@ -631,6 +714,7 @@ class MarketNeutralBacktester:
             )
 
             history = self._strategy_bars(rows, day)
+            market_regime = self._market_regime(history)
             visible_events = self._visible_events(event_rows, day)
             target_weights: Dict[str, float] = {}
             betas = self._betas(
@@ -733,6 +817,7 @@ class MarketNeutralBacktester:
             day_turnover = 0.0
             day_long_pnl = 0.0
             day_short_pnl = 0.0
+            day_capacity_samples: List[float] = []
             opening_shares = {
                 symbol: position.shares for symbol, position in positions.items()
             }
@@ -864,9 +949,9 @@ class MarketNeutralBacktester:
                     day, symbol, requested, fill_shares, execution_price, bar.open,
                     cost, reason, abs(fill_shares) + 1e-10 < abs(requested),
                 ))
-                capacity_samples.append(
-                    bar.open * bar.open_volume * cfg.volume_participation
-                )
+                capacity = bar.open * bar.open_volume * cfg.volume_participation
+                capacity_samples.append(capacity)
+                day_capacity_samples.append(capacity)
 
             # Existing shares earn the overnight move; post-rebalance shares
             # earn only the opening-to-close move.
@@ -946,10 +1031,12 @@ class MarketNeutralBacktester:
                 gross, net, beta_exposure, sector_exposure,
                 day_turnover / decision_equity if decision_equity > 0 else 0.0,
                 day_cost, borrow_cost, day_long_pnl, day_short_pnl,
+                min(day_capacity_samples) if day_capacity_samples else 0.0,
                 target_weights=dict(sorted(target_weights.items())),
                 positions={symbol: position.shares for symbol, position in sorted(positions.items())},
                 fills=fills, blocked_orders=blocked,
                 feature_cutoff=max((row.date for row in rows if row.date < day), default=None),
+                market_regime=market_regime,
                 halted=permanently_halted,
                 new_entries_halted=new_entries_halted,
             ))
@@ -1101,13 +1188,14 @@ class MarketNeutralBacktester:
             oos_metrics = _performance_metrics(
                 oos_rows, oos_trades,
                 oos_rows[0].equity / (1 + oos_rows[0].daily_return),
-                capacity_samples, cfg.trading_days_per_year,
+                (), cfg.trading_days_per_year,
             )
             metrics.update({
                 "oos_closed_trades": oos_metrics["closed_trades"],
                 "oos_max_drawdown_pct": oos_metrics["max_drawdown_pct"],
                 "oos_profit_factor": oos_metrics["profit_factor"],
                 "oos_sharpe": oos_metrics["sharpe"],
+                "oos_calmar": oos_metrics["calmar"],
                 "oos_worst_month_pct": oos_metrics["worst_month_pct"],
                 "oos_concentration_pct": oos_metrics["concentration_pct"],
                 "oos_monthly_returns": oos_metrics["monthly_returns"],
@@ -1117,12 +1205,21 @@ class MarketNeutralBacktester:
                 "oos_liquidation_complete": oos_liquidation_complete,
                 "oos_portfolio_controls_passed": oos_portfolio_controls_passed,
                 "oos_drawdown_throttle_passed": oos_drawdown_throttle_passed,
+                "oos_turnover": oos_metrics["turnover"],
+                "oos_annualized_turnover": oos_metrics["annualized_turnover"],
+                "oos_capacity_estimate_usd": oos_metrics["capacity_estimate_usd"],
+                "oos_long_contribution": oos_metrics["long_contribution"],
+                "oos_short_contribution": oos_metrics["short_contribution"],
+                "oos_regime_days": oos_metrics["regime_days"],
+                "oos_regime_contribution": oos_metrics["regime_contribution"],
+                "oos_regime_coverage_passed": oos_metrics["regime_coverage_passed"],
             })
         else:
             metrics["oos_closed_trades"] = 0
             metrics["oos_liquidation_complete"] = False
             metrics["oos_portfolio_controls_passed"] = False
             metrics["oos_drawdown_throttle_passed"] = False
+            metrics["oos_regime_coverage_passed"] = False
         acceptance = evaluate_backtest_acceptance(metrics).to_dict()
         return BacktestResult(cfg, snapshots, trades, metrics, walk_forward, acceptance)
 
@@ -1149,6 +1246,11 @@ def _performance_metrics(
     mean = statistics.mean(returns) if returns else 0.0
     deviation = statistics.stdev(returns) if len(returns) > 1 else 0.0
     sharpe = mean / deviation * math.sqrt(annualization) if deviation > 0 else 0.0
+    compounded_return = math.prod(1.0 + value for value in returns) - 1.0
+    annualized_return = (
+        (1.0 + compounded_return) ** (annualization / len(returns)) - 1.0
+        if returns and compounded_return > -1.0 else -1.0
+    )
     wins = sum(max(trade.pnl, 0.0) for trade in trades)
     losses = abs(sum(min(trade.pnl, 0.0) for trade in trades))
     if losses > 0:
@@ -1191,12 +1293,36 @@ def _performance_metrics(
         default=0.0,
     ) * 100.0
     total_turnover = sum(row.turnover for row in snapshots)
+    snapshot_capacity = [
+        row.capacity_usd for row in snapshots if row.capacity_usd > 0
+    ]
+    effective_capacity = snapshot_capacity or list(capacity_samples)
+    calmar = (
+        annualized_return / (local_max_drawdown / 100.0)
+        if local_max_drawdown > 0 else (999.0 if annualized_return > 0 else 0.0)
+    )
+    regime_days: Dict[str, int] = {}
+    regime_profit: Dict[str, float] = {}
+    for row in snapshots:
+        regime_days[row.market_regime] = regime_days.get(row.market_regime, 0) + 1
+        prior_equity = (
+            row.equity / (1.0 + row.daily_return)
+            if row.daily_return > -1.0 else 0.0
+        )
+        regime_profit[row.market_regime] = (
+            regime_profit.get(row.market_regime, 0.0)
+            + row.daily_return * prior_equity
+        )
+    required_regimes = {"bull", "bear", "high_volatility", "sideways"}
+    regime_coverage_passed = all(regime_days.get(name, 0) > 0 for name in required_regimes)
     return {
         "starting_equity": round(initial_equity, 6),
         "ending_equity": round(ending, 6),
         "total_return_pct": round((ending / initial_equity - 1.0) * 100.0, 6)
         if initial_equity else 0.0,
         "sharpe": round(sharpe, 6),
+        "annualized_return_pct": round(annualized_return * 100.0, 6),
+        "calmar": round(calmar, 6),
         "max_drawdown_pct": round(local_max_drawdown, 6),
         "profit_factor": round(profit_factor, 6),
         "closed_trades": len(trades),
@@ -1222,14 +1348,20 @@ def _performance_metrics(
         "annualized_turnover": round(
             total_turnover * annualization / len(snapshots), 6
         ) if snapshots else 0.0,
-        "capacity_estimate_usd": round(min(capacity_samples), 2)
-        if capacity_samples else 0.0,
+        "capacity_estimate_usd": round(min(effective_capacity), 2)
+        if effective_capacity else 0.0,
         "avg_monthly_return_pct": round(
             statistics.mean(month_values) if month_values else 0.0, 6
         ),
         "months_hit_10pct": sum(value >= 10.0 for value in month_values),
         "months_total": len(month_values),
         "target_10pct_monthly_guaranteed": False,
+        "regime_days": dict(sorted(regime_days.items())),
+        "regime_contribution": {
+            key: round(value, 6)
+            for key, value in sorted(regime_profit.items())
+        },
+        "regime_coverage_passed": regime_coverage_passed,
     }
 
 

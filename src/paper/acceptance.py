@@ -19,6 +19,7 @@ BACKTEST_THRESHOLDS = {
     "portfolio_controls_passed": True,
     "oos_liquidation_complete": True,
     "drawdown_throttle_passed": True,
+    "regime_coverage_passed": True,
 }
 
 PAPER_THRESHOLDS = {
@@ -127,6 +128,7 @@ def evaluate_backtest_acceptance(metrics: Mapping[str, Any]) -> AcceptanceResult
         "portfolio_controls_passed": metrics.get("oos_portfolio_controls_passed") is True,
         "oos_liquidation_complete": metrics.get("oos_liquidation_complete") is True,
         "drawdown_throttle_passed": metrics.get("oos_drawdown_throttle_passed") is True,
+        "regime_coverage_passed": metrics.get("oos_regime_coverage_passed") is True,
     }
     criteria = {
         "oos_closed_trades": trades >= 300,
@@ -139,6 +141,7 @@ def evaluate_backtest_acceptance(metrics: Mapping[str, Any]) -> AcceptanceResult
         "portfolio_controls_passed": metrics.get("oos_portfolio_controls_passed") is True,
         "oos_liquidation_complete": metrics.get("oos_liquidation_complete") is True,
         "drawdown_throttle_passed": metrics.get("oos_drawdown_throttle_passed") is True,
+        "regime_coverage_passed": metrics.get("oos_regime_coverage_passed") is True,
     }
 
     average_monthly = _first(metrics, ("oos_avg_monthly_return_pct", "avg_monthly_return_pct"))

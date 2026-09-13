@@ -139,6 +139,7 @@ def test_backtest_acceptance_boundary_values_and_disclosures():
                 "oos_portfolio_controls_passed": True,
                 "oos_liquidation_complete": True,
                 "oos_drawdown_throttle_passed": True,
+                "oos_regime_coverage_passed": True,
         }
     )
     assert result.passed
@@ -158,6 +159,7 @@ def test_backtest_acceptance_requires_explicit_pit_quality_pass():
         "oos_portfolio_controls_passed": True,
         "oos_liquidation_complete": True,
         "oos_drawdown_throttle_passed": True,
+        "oos_regime_coverage_passed": True,
     }
     missing = evaluate_backtest_acceptance(metrics)
     failed = evaluate_backtest_acceptance({**metrics, "pit_quality_passed": False})
@@ -230,6 +232,7 @@ def test_markdown_report_contains_decisions_and_required_disclosures():
                 "oos_portfolio_controls_passed": True,
                 "oos_liquidation_complete": True,
                 "oos_drawdown_throttle_passed": True,
+                "oos_regime_coverage_passed": True,
         }
     )
     report = acceptance_markdown_report(backtest)
@@ -309,6 +312,7 @@ def test_promotion_record_uses_only_event_ls_paper_evidence_and_never_enables():
             "oos_portfolio_controls_passed": True,
             "oos_liquidation_complete": True,
             "oos_drawdown_throttle_passed": True,
+            "oos_regime_coverage_passed": True,
         },
     )
     assert record["status"] == "BACKTEST_ONLY"
@@ -331,6 +335,7 @@ def test_backtest_evidence_import_and_zero_fill_sessions_are_auditable():
         "oos_portfolio_controls_passed": True,
         "oos_liquidation_complete": True,
         "oos_drawdown_throttle_passed": True,
+        "oos_regime_coverage_passed": True,
     }
     record = record_event_ls_backtest(
         account, metrics, evidence_id="sha256:example"
