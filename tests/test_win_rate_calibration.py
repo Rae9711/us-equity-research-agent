@@ -57,7 +57,7 @@ def test_calibrate_win_prob_rules_fallback():
     out = calibrate_win_prob(sig, rules_win_prob=65.0)
     assert out["source"] == "rules_fallback"
     assert out["win_prob_source"] == "rules"
-    assert out["calibrated_win_prob"] == 65.0
+    assert out["calibrated_win_prob"] == 52.0
     assert out["disclaimer"]
 
 

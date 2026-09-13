@@ -1,0 +1,68 @@
+# Static classification used for within-sector ranking and neutralization.
+symbols:
+  AAPL: Technology
+  MSFT: Technology
+  NVDA: Technology
+  AMD: Technology
+  AVGO: Technology
+  ORCL: Technology
+  JPM: Financials
+  BAC: Financials
+  GS: Financials
+  MS: Financials
+  WFC: Financials
+  C: Financials
+  XOM: Energy
+  CVX: Energy
+  COP: Energy
+  SLB: Energy
+  EOG: Energy
+  OXY: Energy
+  JNJ: Health Care
+  PFE: Health Care
+  MRK: Health Care
+  LLY: Health Care
+  ABBV: Health Care
+  UNH: Health Care
+  AMZN: Consumer Discretionary
+  TSLA: Consumer Discretionary
+  HD: Consumer Discretionary
+  LOW: Consumer Discretionary
+  NKE: Consumer Discretionary
+  MCD: Consumer Discretionary
+  PG: Consumer Staples
+  KO: Consumer Staples
+  PEP: Consumer Staples
+  WMT: Consumer Staples
+  COST: Consumer Staples
+  CL: Consumer Staples
+  CAT: Industrials
+  DE: Industrials
+  HON: Industrials
+  GE: Industrials
+  UPS: Industrials
+  RTX: Industrials
+  META: Communication Services
+  GOOGL: Communication Services
+  NFLX: Communication Services
+  DIS: Communication Services
+  T: Communication Services
+  VZ: Communication Services
+  NEE: Utilities
+  DUK: Utilities
+  SO: Utilities
+  AEP: Utilities
+  EXC: Utilities
+  SRE: Utilities
+  LIN: Materials
+  APD: Materials
+  FCX: Materials
+  NEM: Materials
+  NUE: Materials
+  DOW: Materials
+  PLD: Real Estate
+  AMT: Real Estate
+  EQIX: Real Estate
+  SPG: Real Estate
+  O: Real Estate
+  WELL: Real Estate

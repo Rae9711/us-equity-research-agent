@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.paper.account import ensure_positions, load_account, open_positions
+from src.paper.account import ensure_positions, load_account, mark_to_market, open_positions
 from src.paper.allocation import portfolio_allocation_snapshot
 from src.paper.signals import load_candidate_signals
+from src.paper.trade_report import build_trade_cards
 from src.research.entry_status import infer_session_phase
 from src.utils.trading_calendar import today_et
 
@@ -18,6 +19,17 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
     date_str = trading_date or today_et().isoformat()
     account = load_account()
     ensure_positions(account)
+    # Refresh marks + sync closed-only cumulative metrics for the UI.
+    px_map: dict[str, float] = {}
+    for _book, pos in open_positions(account):
+        sym = str(pos.get("symbol") or "").upper()
+        try:
+            px = float(pos["last_price"]) if pos.get("last_price") is not None else None
+        except (TypeError, ValueError):
+            px = None
+        if sym and px is not None and px > 0:
+            px_map[sym] = px
+    mark_to_market(account, price_by_symbol=px_map or None)
     phase = infer_session_phase(date_str)
     signals = load_candidate_signals(date_str)
     portfolio = portfolio_allocation_snapshot(account)
@@ -49,9 +61,16 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
             "book": book,
             "book_zh": "短线" if book == "intraday" else "长线",
             **pos,
+            "qty_label": (
+                f"{pos.get('contracts') or pos.get('shares')} 张"
+                if (pos.get("asset_class") or "") == "option"
+                else f"{pos.get('shares')} 股"
+            ),
         }
         for book, pos in open_positions(account)
     ]
+
+    trade_cards = build_trade_cards(account, trading_date=date_str, limit=40)
 
     return {
         "trading_date": date_str,
@@ -68,9 +87,21 @@ def build_paper_page(trading_date: str | None = None) -> dict[str, Any]:
         "position_pct": portfolio.get("position_pct"),
         "allocation_reason": portfolio.get("allocation_reason"),
         "allocation_notes": allocation_notes,
+        "event_ls_qualification": (
+            (account.get("strategy_qualification") or {}).get("event_ls")
+            or {
+                "status": "NOT_READY",
+                "backtest_passed": False,
+                "paper_passed": False,
+                "enabled": False,
+                "requested_enabled": False,
+                "effective_enabled": False,
+            }
+        ),
         "decisions": decisions,
         "today_decisions": today_decisions,
         "trades": trades,
+        "trade_cards": trade_cards,
         "journal": journal,
         "equity_curve": curve[-60:],
         "signal_preview": {

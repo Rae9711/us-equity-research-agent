@@ -221,35 +221,31 @@ def _has_stock_setup(morning: dict[str, Any], step4: dict[str, Any] | None = Non
 
 
 def _trade_action(morning: dict[str, Any], step4: dict[str, Any] | None) -> str:
-    """Homepage badge: Trade | Wait | Watch | No Trade.
+    """Homepage badge: Trade | Wait | No Trade.
 
-    P16 No Trade / Wait gates *index* exposure only — stock setups may still exist.
-    When the index gate is closed but a stock setup is present, badge is Watch
-    (setup found, gate closed) — not Trade.
+    P16 Wait / No Trade closes the whole book (index and stocks). Cash is a
+    valid day — do not badge Watch and imply a stock fill is still on.
     """
     p16_gate = _resolve_p16_gate(morning)
-    stock_setup = _has_stock_setup(morning, step4)
+    if p16_gate in ("No Trade", "Wait"):
+        return "No Trade"
 
     if step4 is not None:
         index_open = bool(
             step4.get("index_trade") and step4.get("index_trade") != "NO TRADE"
         )
         if step4.get("should_trade") or step4.get("stock_trade") or index_open:
-            if p16_gate in ("No Trade", "Wait") and stock_setup and not index_open:
-                return "Watch"
             return "Trade"
         return "No Trade"
 
     primary = (morning.get("best_trades") or {}).get("primary")
     if primary and primary.get("direction") in ("LONG", "SHORT"):
-        if p16_gate in ("No Trade", "Wait"):
-            return "Watch"
         return "Trade"
 
     parts = morning.get("parts") or {}
     p16_text = _part_text(parts.get("P16")).lower()
     if any(w in p16_text for w in ("不交易", "放弃", "不追", "no trade", "hold off")):
-        return "No Trade" if not stock_setup else "Watch"
+        return "No Trade"
     if any(w in p16_text for w in ("买", "call", "做多", "trade", "入场")):
         return "Trade"
 
@@ -387,17 +383,19 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
             best_trades=best_trades,
         )
 
-    # Trade action: stock setup may exist under a closed P16 index gate → Watch
+    # P16 Wait / No Trade always wins over a leftover stock primary.
     trade_action = _trade_action(morning, step4)
     p16_gate = _resolve_p16_gate(morning)
-    if primary and primary.get("direction") in ("LONG", "SHORT"):
-        trade_action = "Watch" if p16_gate in ("No Trade", "Wait") else "Trade"
+    if p16_gate in ("No Trade", "Wait"):
+        trade_action = "No Trade"
+    elif primary and primary.get("direction") in ("LONG", "SHORT"):
+        trade_action = "Trade"
     elif best_trades.get("threshold_message"):
         trade_action = "Wait"
     elif best.get("direction") == "NO TRADE" and not primary:
         trade_action = "No Trade"
     elif best.get("direction") in ("LONG", "SHORT") and trade_action == "Wait":
-        trade_action = "Watch" if p16_gate in ("No Trade", "Wait") else "Trade"
+        trade_action = "Trade"
 
     transparency = morning.get("transparency") or {}
     index_trade = morning.get("index_trade") or best_trades.get("index_trade")
@@ -431,6 +429,12 @@ def build_decision_card(trading_date: str) -> dict[str, Any] | None:
     primary_sym = (primary or {}).get("symbol") or best.get("symbol")
     live_price = resolve_symbol_last(str(primary_sym or ""), trading_date) if primary_sym else None
     anchors = (primary or {}).get("level_anchors") or {}
+    if not isinstance(anchors, dict):
+        anchors = {
+            "vwap": getattr(anchors, "vwap", None),
+            "orb_high": getattr(anchors, "orb_high", None),
+            "orb_low": getattr(anchors, "orb_low", None),
+        }
     target_price = (
         exec_sum.get("target_price")
         or (primary or {}).get("target_price")

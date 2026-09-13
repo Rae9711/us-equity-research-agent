@@ -292,17 +292,24 @@ def calibrate_win_prob(
             "disclaimer": None,
         }
 
+    from src.research.decision_transparency import MAX_UNCALIBRATED_WIN_PROB
+
+    capped = min(float(rules_win_prob), MAX_UNCALIBRATED_WIN_PROB)
     return {
-        "calibrated_win_prob": rules_win_prob,
+        "calibrated_win_prob": capped,
         "sample_size": n,
         "confidence_interval": None,
         "source": "rules_fallback",
         "match_quality": "insufficient",
         "win_prob_source": "rules",
         "disclaimer": (
-            f"Historical sample n={n} < {min_sample}; using rules breakdown"
+            f"Historical sample n={n} < {min_sample}; uncalibrated prior "
+            f"capped at {MAX_UNCALIBRATED_WIN_PROB:.0f}% (not a forecast)"
             if n > 0
-            else "No historical matches; using rules breakdown"
+            else (
+                f"No historical matches; uncalibrated prior capped at "
+                f"{MAX_UNCALIBRATED_WIN_PROB:.0f}% (not a forecast)"
+            )
         ),
     }
 

@@ -109,9 +109,9 @@ def _bullish_raw() -> dict:
 
 
 def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  # noqa: ARG001
-    section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
-        "sector" if symbol == "SMH" else "stocks"
-    )
+    from src.research.trade_candidates import _SYMBOL_SECTION
+
+    section = _SYMBOL_SECTION.get(symbol.upper(), "stocks")
     q = ((raw.get(section) or {}).get("quotes") or {}).get(symbol) or {}
     if not q:
         return {"ticker": symbol, "error": "no quote"}
@@ -131,14 +131,31 @@ def _mock_obs(symbol: str, raw: dict, prior_raw: dict, trading_day, **kwargs):  
     }
 
 
-def test_candidate_symbols_includes_semis():
-    assert CANDIDATE_SYMBOLS[0] == "TSLA"
+def test_candidate_symbols_covers_tracked_universe():
+    """Mag7 + liquid semis + equity indexes/ETFs from symbols.yaml (not futures/rates)."""
     assert "NVDA" in CANDIDATE_SYMBOLS
+    assert "MSFT" in CANDIDATE_SYMBOLS
+    assert "AAPL" in CANDIDATE_SYMBOLS
+    assert "AMZN" in CANDIDATE_SYMBOLS
+    assert "META" in CANDIDATE_SYMBOLS
+    assert "GOOGL" in CANDIDATE_SYMBOLS
+    assert "TSLA" in CANDIDATE_SYMBOLS
     assert "AMD" in CANDIDATE_SYMBOLS
     assert "MU" in CANDIDATE_SYMBOLS
     assert "AVGO" in CANDIDATE_SYMBOLS
-    assert "META" in CANDIDATE_SYMBOLS
     assert "ARM" in CANDIDATE_SYMBOLS
+    assert "QQQ" in CANDIDATE_SYMBOLS
+    assert "SPY" in CANDIDATE_SYMBOLS
+    assert "TQQQ" in CANDIDATE_SYMBOLS
+    assert "DIA" in CANDIDATE_SYMBOLS
+    assert "SMH" in CANDIDATE_SYMBOLS
+    assert "XLK" in CANDIDATE_SYMBOLS
+    assert "XLF" in CANDIDATE_SYMBOLS
+    assert "XLE" in CANDIDATE_SYMBOLS
+    # Context-only market keys stay out of the tradeable candidate list.
+    assert "VIX" not in CANDIDATE_SYMBOLS
+    assert "ES" not in CANDIDATE_SYMBOLS
+    assert CANDIDATE_SYMBOLS[0] == "NVDA"  # config/stocks order
 
 
 def test_short_weak_rs_beats_strong_nvda():
@@ -178,8 +195,8 @@ def test_short_weak_rs_beats_strong_nvda():
     assert (mu.get("relative_weakness_score") or 0) > (nvda.get("relative_weakness_score") or 0)
 
 
-def test_long_still_rewards_positive_rs():
-    """LONG direction should still favor relative strength."""
+def test_long_does_not_inflate_win_prob_with_same_session_rs():
+    """Same-session RS is descriptive only; prior-day trend still moves win_prob."""
     strong = _score_candidate_v2(
         "NVDA",
         obs={"last": 140.0, "prev_close": 138.0, "gap_pct": 1.0},
@@ -210,7 +227,10 @@ def test_long_still_rewards_positive_rs():
         q={"high": 103, "low": 98},
         direction="LONG",
     )
-    assert strong["final_score"] > weak["final_score"]
+    components = (strong.get("win_prob_breakdown") or {}).get("components") or []
+    assert all(c.get("key") != "rs" for c in components)
+    assert strong["win_prob"] <= 52
+    assert strong["win_prob"] > weak["win_prob"]
 
 
 def test_split_edges_four_fields():
@@ -282,8 +302,9 @@ def test_tsla_ranks_high_with_prior_momentum_and_gap():
         has_news_catalyst=True,
         q={"high": 258, "low": 238},
     )
-    assert row["expected_return_pct"] >= 3.0
-    assert row["win_prob"] >= 55
+    assert row["expected_return_pct"] >= 2.0
+    assert row["win_prob"] <= 52
+    assert row["win_prob"] >= 48
     assert row["trade_action"] in ("BUY", "Small")
     assert row["final_score"] > 1.0
 
@@ -344,7 +365,7 @@ def test_bullish_momentum_picks_primary(_prior, _obs):
     assert primary is not None
     assert primary["symbol"] == "TSLA"
     assert best["direction"] == "LONG"
-    assert best["confidence"] >= 55
+    assert best["confidence"] >= 48
     assert len(ranked) == len(CANDIDATE_SYMBOLS)
     transparency = result.get("transparency") or {}
     assert transparency.get("todays_opportunities")
@@ -395,8 +416,8 @@ def test_macro_no_index_no_still_trades_on_stock_edge(_prior, _obs):
 
 @patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
 @patch("src.research.trade_candidates._load_prior_raw")
-def test_p16_no_trade_still_picks_stock_on_stock_edge(_prior, _obs):
-    """P16 No Trade gates index only — stock primary still populated when stock_edge YES."""
+def test_p16_no_trade_blocks_stocks_and_index(_prior, _obs):
+    """P16 No Trade / Wait closes the whole book — cash is a valid day."""
     _prior.return_value = {
         "stocks": {"quotes": {"TSLA": {"change_pct": 6.0, "close": 240.0}}},
     }
@@ -431,11 +452,10 @@ def test_p16_no_trade_still_picks_stock_on_stock_edge(_prior, _obs):
         edges=edges,
     )
     primary = result["best_trades"]["primary"]
-    assert primary is not None
-    assert primary["symbol"] == "TSLA"
+    assert primary is None
     assert result["best_trades"]["index_trade"] == "NO TRADE"
-    assert result["best_opportunity"]["direction"] == "LONG"
-    assert result["best_opportunity"]["symbol"] == "TSLA"
+    assert result["best_opportunity"]["direction"] == "NO TRADE"
+    assert "P16" in (result["best_trades"].get("threshold_message") or "")
 
 
 @patch("src.research.trade_candidates._observation", side_effect=_mock_obs)
@@ -599,8 +619,8 @@ def test_compute_trade_decision_top5_and_watchlist():
     assert "transparency" in result
     assert "top_trades" in result["transparency"]
 
-def test_trade_candidates_direction_from_bias():
-    """Every ranked trade_candidates row carries bias-picked LONG/SHORT."""
+def test_trade_candidates_direction_is_per_symbol_not_market_bias():
+    """Per-name tape sets direction; market Bias must not flip every symbol."""
     raw = _bullish_raw()
     rule_bundle = {
         "bias": "Bullish Bias",
@@ -617,16 +637,15 @@ def test_trade_candidates_direction_from_bias():
     }
     with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
         result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
-    for row in result["trade_candidates"]:
-        assert row.get("direction") == "LONG"
-    for slot in result["top_trades"]:
-        assert slot.get("direction") == "LONG"
+    bull_tsla = next(r for r in result["trade_candidates"] if r["symbol"] == "TSLA")
+    assert bull_tsla.get("direction") in ("LONG", "NO TRADE")
 
     bear_bundle = {**rule_bundle, "bias": "Bearish Bias", "total": -3}
     with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
         bear = compute_trade_decision(raw, rule_bundle=bear_bundle, parts=parts)
-    for row in bear["trade_candidates"]:
-        assert row.get("direction") == "SHORT"
+    bear_tsla = next(r for r in bear["trade_candidates"] if r["symbol"] == "TSLA")
+    assert bear_tsla.get("direction") == bull_tsla.get("direction")
+    assert not all(r.get("direction") == "SHORT" for r in bear["trade_candidates"])
 
 
 def test_enforce_rejects_long_with_target_below_entry():
@@ -677,9 +696,11 @@ def test_enforce_keeps_valid_long():
         "trade": "BUY",
         "entry_price": 100.0,
         "stop_price": 95.0,
-        "target_price": 105.0,
+        "target_price": 110.0,  # 2R — hard R:R floor applies to planned levels
         "entry_zone": {"low": 99.0, "high": 101.0, "mid": 100.0},
         "expected_return_pct": 5.0,
+        "win_prob": 60.0,
+        "risk_reward": 2.0,
         "why_factors": [],
         "levels_valid": True,
     }
@@ -737,8 +758,8 @@ def test_no_quote_pass_stubs_include_current_price_key():
     KeyError when filling top_trades transparency.
     """
     raw = _bullish_raw()
-    # Leave AMD/MU/AVGO/META/ARM without quotes (typical PIT partial universe).
-    assert "AMD" not in ((raw.get("stocks") or {}).get("quotes") or {})
+    # Leave Mag7 names beyond TSLA/NVDA without quotes (typical PIT partial universe).
+    assert "MSFT" not in ((raw.get("stocks") or {}).get("quotes") or {})
 
     rule_bundle = {
         "bias": "Bullish Bias",
@@ -755,9 +776,9 @@ def test_no_quote_pass_stubs_include_current_price_key():
     }
 
     def _obs_partial(symbol: str, raw_in: dict, prior_raw: dict, trading_day, **kwargs):
-        section = "market" if symbol in ("QQQ", "SPY", "TQQQ") else (
-            "sector" if symbol == "SMH" else "stocks"
-        )
+        from src.research.trade_candidates import _SYMBOL_SECTION
+
+        section = _SYMBOL_SECTION.get(symbol.upper(), "stocks")
         q = ((raw_in.get(section) or {}).get("quotes") or {}).get(symbol) or {}
         if not q:
             return {"ticker": symbol, "error": "no quote"}
@@ -946,7 +967,7 @@ def test_compute_swing_opportunity_independent_of_intraday(mock_ctx):
 @patch("src.research.trade_candidates._load_prior_raw")
 @patch("src.research.trade_candidates._fetch_swing_context")
 def test_swing_attached_when_intraday_no_trade(mock_ctx, _prior, _obs):
-    """Swing pick can still appear when P16 No Trade / no primary."""
+    """P16 No Trade also blocks swing — cash is a valid day."""
     from src.research.trade_candidates import compute_trade_decision
 
     mock_ctx.return_value = {
@@ -996,8 +1017,5 @@ def test_swing_attached_when_intraday_no_trade(mock_ctx, _prior, _obs):
     )
     assert result["best_trades"].get("p16_gate") == "No Trade"
     swing = result.get("swing_trade") or result["best_trades"].get("swing")
-    # Preferred liquid + mocked 5d momentum should clear quality floor
-    assert swing is not None
-    assert swing["horizon"] == "Swing"
-    assert swing["symbol"] in ("TSLA", "NVDA", "META", "QQQ", "AVGO", "AMD", "SMH", "SPY")
+    assert swing is None
 

@@ -82,11 +82,14 @@ def normalize_slot(slot: dict[str, Any], *, source: str, horizon: str) -> dict[s
         "win_prob": slot.get("win_prob"),
         "risk_reward": slot.get("risk_reward") or slot.get("rr"),
         "horizon": horizon or slot.get("horizon") or "Intraday",
+        "instrument": slot.get("instrument"),
         "source": source,
         "trade_action": slot.get("trade_action"),
         "level_anchors": slot.get("level_anchors"),
         "rank": slot.get("rank"),
         "raw_slot": slot,
+        # Tests / paper ticks may inject a chain quote without network.
+        "forced_option_quote": slot.get("forced_option_quote"),
     }
 
 
@@ -97,35 +100,41 @@ def resolve_quote(
     raw: dict[str, Any] | None = None,
     prefer_live: bool = True,
 ) -> tuple[float | None, str]:
-    """Best-effort last price. Prefer live yfinance when market may be open; else raw."""
+    """Best-effort last price.
+
+    Prefer DATA_ROOT raw/snapshot (same feed as live research) first so paper
+    mirrors real collected prices; fall back to live yfinance when open/stale.
+    """
     from src.research.entry_status import infer_session_phase
 
     phase = infer_session_phase(trading_date)
     px = None
     source = "none"
 
-    if prefer_live and phase == "open":
+    # 1) Point-in-time raw / snapshot from DATA_ROOT (preferred for paper↔live parity)
+    px = resolve_symbol_last(symbol, trading_date, raw=raw)
+    if px is not None:
+        source = "raw_snapshot"
+
+    # 2) Live quote when session is open and raw is missing/stale
+    if (px is None or (prefer_live and phase == "open")) and prefer_live:
         try:
             from src.collectors.yfinance_client import fetch_quote
 
             q = fetch_quote(symbol)
-            px = _safe_float(
+            live = _safe_float(
                 (q or {}).get("last")
                 or (q or {}).get("price")
                 or (q or {}).get("close")
             )
-            if px:
-                source = "yfinance_live"
+            if live:
+                # Prefer live only when raw missing, or when open (fresher tick).
+                if px is None or phase == "open":
+                    px, source = live, "yfinance_live"
         except Exception:
             logger.debug("yfinance live quote failed for %s", symbol, exc_info=True)
 
-    if px is None:
-        px = resolve_symbol_last(symbol, trading_date, raw=raw)
-        if px is not None:
-            source = "raw_snapshot"
-
     if px is None and prefer_live:
-        # Last resort even when closed (demo / after hours)
         try:
             from src.collectors.yfinance_client import fetch_quote
 
@@ -141,6 +150,107 @@ def resolve_quote(
             pass
 
     return px, source
+
+
+def resolve_session_bar(
+    symbol: str,
+    trading_date: str,
+    *,
+    raw: dict[str, Any] | None = None,
+) -> dict[str, float | None]:
+    """OHLC-ish session bar from DATA_ROOT raw quotes when available.
+
+    Used so stop/target can fire on the high/low path between ticks, not only
+    on the last print. Missing fields are None (caller falls back to last).
+    """
+    from src.utils.paths import raw_data_path
+
+    sym = (symbol or "").upper()
+    out: dict[str, float | None] = {
+        "open": None, "high": None, "low": None, "last": None, "close": None,
+    }
+    if not sym:
+        return out
+
+    payload = raw
+    if payload is None:
+        path = raw_data_path(trading_date)
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        last, _ = resolve_quote(sym, trading_date, raw=raw, prefer_live=False)
+        out["last"] = last
+        return out
+
+    section = "market"
+    if sym in ("SMH", "XLK", "XLF", "XLE"):
+        section = "sector"
+    elif sym not in ("QQQ", "SPY", "DIA", "TQQQ"):
+        section = "stocks"
+    quotes = ((payload.get(section) or {}).get("quotes") or {})
+    q = quotes.get(sym) or {}
+    if not q:
+        for ticker, row in quotes.items():
+            if str(ticker).upper() == sym:
+                q = row
+                break
+    out["open"] = _safe_float(q.get("open"))
+    out["high"] = _safe_float(q.get("high") or q.get("day_high") or q.get("h"))
+    out["low"] = _safe_float(q.get("low") or q.get("day_low") or q.get("l"))
+    out["close"] = _safe_float(q.get("close"))
+    out["last"] = (
+        _safe_float(q.get("last") or q.get("current_price") or q.get("close"))
+        or resolve_symbol_last(sym, trading_date, raw=payload)
+    )
+    # Sanity: if high/low missing but last known, treat last as both extremes.
+    if out["last"] is not None:
+        if out["high"] is None:
+            out["high"] = out["last"]
+        if out["low"] is None:
+            out["low"] = out["last"]
+    return out
+
+
+def bar_path_prices(
+    *,
+    direction: str,
+    last: float,
+    high: float | None,
+    low: float | None,
+    from_price: float | None = None,
+) -> list[float]:
+    """Path since the last mark (or entry), adverse extreme first.
+
+    Session high/low from the raw day bar can include prints *before* we
+    entered. Walking those as if they just happened fills stops at the
+    day's extreme (e.g. ARM short @ 237 exiting at day-high 243 = −3R)
+    instead of at the plan stop. Clamp H/L to the range since ``from_price``.
+    """
+    last_f = float(last)
+    start = float(from_price) if from_price is not None else last_f
+    tick_lo = min(start, last_f)
+    tick_hi = max(start, last_f)
+    hi = float(high) if high is not None else tick_hi
+    lo = float(low) if low is not None else tick_lo
+    hi = min(max(hi, tick_lo), tick_hi)
+    lo = min(max(lo, tick_lo), tick_hi)
+    d = (direction or "LONG").upper()
+    if d == "LONG":
+        # Stop checked via low first; target via high.
+        path = [lo, hi, last_f]
+    else:
+        path = [hi, lo, last_f]
+    # Dedupe while preserving order
+    out: list[float] = []
+    for p in path:
+        if p is None:
+            continue
+        if not out or abs(out[-1] - float(p)) > 1e-9:
+            out.append(float(p))
+    return out or [float(last)]
 
 
 def _morning_top_trades(morning: dict[str, Any]) -> list[dict[str, Any]]:
@@ -174,13 +284,21 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
         or {}
     )
     top_trades = _morning_top_trades(morning)
+    p16_gate = (
+        (morning.get("best_trades") or {}).get("p16_gate")
+        or (morning.get("best_opportunity") or {}).get("p16_gate")
+    )
     primary = (morning.get("best_trades") or {}).get("primary") or morning.get(
         "best_opportunity"
     )
-    # When primary is NO TRADE / null, fall back to top_trades[0]
+    # When primary is NO TRADE / null, do NOT fall back to top_trades if the
+    # research gate is closed — that is how Wait days still got filled.
+    gate_closed = p16_gate in ("Wait", "No Trade")
     if not primary or (primary.get("direction") or "").upper() not in ("LONG", "SHORT"):
-        if top_trades:
+        if top_trades and not gate_closed:
             primary = top_trades[0]
+        else:
+            primary = None
     swing = morning.get("swing_trade") or (morning.get("best_trades") or {}).get("swing")
     session_primary = session.get("primary") if isinstance(session, dict) else None
     if session_primary and (session_primary.get("direction") or "").upper() not in (
@@ -188,6 +306,11 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
         "SHORT",
     ):
         session_primary = None
+    if gate_closed:
+        swing = None
+        session_primary = None
+        primary = None
+        top_trades = []
     return {
         "morning": morning,
         "step3": step3,
@@ -246,7 +369,9 @@ def _evaluate_slot(
 
 
 def _candidate_edge_score(row: dict[str, Any]) -> float:
-    """Higher = better executable setup (not just board rank)."""
+    """Higher = better executable setup (calibrated EV / expected R, not ER alone)."""
+    from src.paper.allocation import MIN_EXPECTED_R, MIN_GEOMETRIC_UPSIDE_PCT, expected_r
+
     sig = row.get("signal") or {}
     wp = _safe_float(sig.get("win_prob")) or 50.0
     er = _safe_float(sig.get("expected_return_pct")) or 0.0
@@ -261,14 +386,19 @@ def _candidate_edge_score(row: dict[str, Any]) -> float:
             rr = reward / abs(entry - stop)
         else:
             rr = 1.0
+    ev = expected_r(win_prob=wp, rr=rr)
+    # Sub-threshold EV or tiny geometric upside → crush score so pickers skip it.
+    if ev is None or ev < MIN_EXPECTED_R:
+        return 0.0
+    if er < MIN_GEOMETRIC_UPSIDE_PCT:
+        return 0.0
     status = ((row.get("entry_status") or {}).get("status") or "").upper()
     status_boost = {"TRIGGERED": 1.15, "READY": 1.1, "ACTIVE": 0.55}.get(status, 0.0)
     if row.get("action") != "enter":
-        # Wait rows ranked lower for selection but still scorable
         status_boost *= 0.4
-    # Prefer non-#1 if #1 is weaker: win_prob * ER * rr_weight
     rr_w = max(0.5, min(1.5, float(rr) / 2.0))
-    return float(wp) * max(er, 0.15) * rr_w * max(status_boost, 0.15)
+    # Rank by expected R × win_prob soft weight × status (not bare ER distance).
+    return float(max(ev, 0.01)) * 100.0 * rr_w * max(status_boost, 0.15) * (wp / 50.0)
 
 
 def _pick_from_evaluated(

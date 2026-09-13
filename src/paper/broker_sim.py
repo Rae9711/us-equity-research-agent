@@ -1,7 +1,7 @@
 """Paper broker — simulate fills at last/current price.
 
 ADVISORY ONLY — 模拟交易 · 不构成投资建议.
-No real broker / no slippage model beyond last price.
+Models adverse slippage (bps) + optional commission for Mag7/liquid ETFs.
 
 Supports dual books via ``book``: ``intraday`` (短线) | ``swing`` (长线).
 """
@@ -44,6 +44,34 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _frictions(account: dict[str, Any]) -> tuple[float, float, float]:
+    """Return (slippage_bps, commission_per_trade, commission_per_share)."""
+    params = account.get("params") or {}
+    slip = float(params.get("slippage_bps") or 0.0)
+    c_trade = float(params.get("commission_per_trade") or 0.0)
+    c_share = float(params.get("commission_per_share") or 0.0)
+    return max(0.0, slip), max(0.0, c_trade), max(0.0, c_share)
+
+
+def apply_slippage(price: float, *, direction: str, is_entry: bool, slippage_bps: float) -> float:
+    """Adverse slippage: you always fill a little worse than the quote.
+
+    Entry LONG / exit SHORT → pay up; entry SHORT / exit LONG → receive less.
+    """
+    if slippage_bps <= 0 or price <= 0:
+        return price
+    factor = slippage_bps / 10_000.0
+    d = (direction or "LONG").upper()
+    pay_up = (d == "LONG" and is_entry) or (d == "SHORT" and not is_entry)
+    return round(price * (1.0 + factor) if pay_up else price * (1.0 - factor), 6)
+
+
+def _commission(shares: int, c_trade: float, c_share: float) -> float:
+    if shares <= 0:
+        return 0.0
+    return round(c_trade + shares * c_share, 4)
 
 
 def _resolve_book(book: str | None, signal: dict[str, Any] | None) -> str:
@@ -133,36 +161,55 @@ def execute_entry(
         raise NonsensePriceError(reject or "nonsense fill price")
 
     direction = (direction or "LONG").upper()
-    notional = round(shares * price, 2)
+    if direction not in ("LONG", "SHORT"):
+        raise ValueError(f"Unsupported direction: {direction}")
+
+    slip_bps, c_trade, c_share = _frictions(account)
+    fill = apply_slippage(
+        price, direction=direction, is_entry=True, slippage_bps=slip_bps
+    )
+    commission = _commission(shares, c_trade, c_share)
+    notional = round(shares * fill, 2)
     cash = float(account.get("cash") or 0.0)
 
     if direction == "LONG":
-        if cash + 1e-9 < notional:
+        need = notional + commission
+        if cash + 1e-9 < need:
             raise InsufficientCashError(
-                f"Need ${notional:.2f} cash, have ${cash:.2f}"
+                f"Need ${need:.2f} cash, have ${cash:.2f}"
             )
-        account["cash"] = round(cash - notional, 2)
-    elif direction == "SHORT":
-        # Simplified: require cash collateral ≥ notional; credit sale proceeds.
+        account["cash"] = round(cash - need, 2)
+    else:  # SHORT: require cash collateral ≥ notional; credit sale proceeds − comm.
         if cash + 1e-9 < notional:
             raise InsufficientCashError(
                 f"Need ${notional:.2f} collateral cash for SHORT, have ${cash:.2f}"
             )
-        account["cash"] = round(cash + notional, 2)
-    else:
-        raise ValueError(f"Unsupported direction: {direction}")
+        account["cash"] = round(cash + notional - commission, 2)
 
     sig = signal or {}
     horizon = sig.get("horizon") or (
         "Swing" if book_key == "swing" else "Intraday"
     )
+    stop_f = _safe_float(stop)
+    risk_per_share = (
+        abs(fill - stop_f) if stop_f is not None and stop_f > 0 else fill * 0.02
+    )
     position = {
         "symbol": symbol.upper(),
         "direction": direction,
         "shares": shares,
-        "avg_entry": round(price, 4),
-        "stop": _safe_float(stop),
+        "initial_shares": shares,
+        "avg_entry": round(fill, 4),
+        "stop": stop_f,
+        "initial_stop": stop_f,
+        "risk_per_share": round(risk_per_share, 6) if risk_per_share else None,
         "target": _safe_float(target),
+        "target1": _safe_float(target),
+        "target2": _safe_float(sig.get("target2") or sig.get("target_price_2")),
+        "high_water": round(fill, 4),
+        "low_water": round(fill, 4),
+        "scaled_out": False,
+        "entry_commission": commission,
         "entry_zone": entry_zone,
         "opened_at": None,  # filled below
         "opened_date": trading_date,
@@ -185,8 +232,13 @@ def execute_entry(
         "action": "ENTRY",
         "symbol": symbol.upper(),
         "direction": direction,
+        "asset_class": "equity",
+        "instrument": sig.get("instrument") or "Stock/ETF",
         "shares": shares,
-        "price": round(price, 4),
+        "price": round(fill, 4),
+        "requested_price": round(price, 4),
+        "slippage_bps": slip_bps,
+        "commission": commission,
         "notional": notional,
         "pnl": None,
         "reason": reason,
@@ -195,8 +247,13 @@ def execute_entry(
         "horizon": horizon,
         "book": book_key,
     }
+    from src.paper.trade_report import enrich_trade_report
+
+    enrich_trade_report(trade, signal=sig, position=position)
+    position["instrument"] = trade.get("instrument")
+    position["asset_class"] = "equity"
     append_trade(account, trade)
-    mark_to_market(account, price, price_by_symbol={symbol.upper(): price})
+    mark_to_market(account, fill, price_by_symbol={symbol.upper(): fill})
     return trade
 
 
@@ -207,9 +264,12 @@ def execute_exit(
     reason: str = "",
     trading_date: str | None = None,
     book: str | None = None,
+    shares: int | None = None,
 ) -> dict[str, Any]:
-    """Close an open position at ``price``.
+    """Close (or partially reduce) an open position at ``price``.
 
+    ``shares`` — if provided and < held size, this is a partial scale-out; the
+    position stays open with the remainder. If omitted, the whole book is closed.
     If ``book`` is omitted, closes the legacy primary book (intraday preferred).
     """
     ensure_positions(account)
@@ -246,36 +306,64 @@ def execute_exit(
     if not ok:
         raise NonsensePriceError(reject or "nonsense fill price")
 
-    shares = int(pos["shares"])
+    held = int(pos["shares"])
+    qty = held if shares is None else max(0, min(int(shares), held))
+    if qty <= 0:
+        raise ValueError("exit shares must be > 0")
+    partial = qty < held
+
     avg = float(pos["avg_entry"])
     direction = (pos.get("direction") or "LONG").upper()
     symbol = pos["symbol"]
-    notional = round(shares * price, 2)
+
+    slip_bps, c_trade, c_share = _frictions(account)
+    fill = apply_slippage(
+        price, direction=direction, is_entry=False, slippage_bps=slip_bps
+    )
+    exit_commission = _commission(qty, c_trade, c_share)
+    # Allocate the position's paid entry commission to the shares being closed.
+    entry_comm_total = float(pos.get("entry_commission") or 0.0)
+    entry_comm_alloc = round(entry_comm_total * (qty / held), 4) if held else 0.0
+
+    notional = round(qty * fill, 2)
     cash = float(account.get("cash") or 0.0)
 
     if direction == "LONG":
-        pnl = (price - avg) * shares
-        account["cash"] = round(cash + notional, 2)
+        gross = (fill - avg) * qty
+        account["cash"] = round(cash + notional - exit_commission, 2)
         side = "SELL"
     else:
-        pnl = (avg - price) * shares
-        # Cover short: buy back
-        account["cash"] = round(cash - notional, 2)
+        gross = (avg - fill) * qty
+        account["cash"] = round(cash - notional - exit_commission, 2)
         side = "BUY_COVER"
 
+    pnl = gross - exit_commission - entry_comm_alloc
     realized = float(account.get("realized_pnl") or 0.0) + pnl
     account["realized_pnl"] = round(realized, 2)
-    set_position(account, book_key, None)
+
+    if partial:
+        pos["shares"] = held - qty
+        pos["entry_commission"] = round(entry_comm_total - entry_comm_alloc, 4)
+        pos["scaled_out"] = True
+        set_position(account, book_key, pos)
+    else:
+        set_position(account, book_key, None)
 
     trade = {
         "side": side,
-        "action": "EXIT",
+        "action": "SCALE_OUT" if partial else "EXIT",
         "symbol": symbol,
         "direction": direction,
-        "shares": shares,
-        "price": round(price, 4),
+        "asset_class": pos.get("asset_class") or "equity",
+        "instrument": pos.get("instrument"),
+        "shares": qty,
+        "price": round(fill, 4),
+        "requested_price": round(price, 4),
+        "slippage_bps": slip_bps,
+        "commission": round(exit_commission + entry_comm_alloc, 4),
         "notional": notional,
         "pnl": round(pnl, 2),
+        "remaining_shares": pos["shares"] if partial else 0,
         "reason": reason,
         "trading_date": trading_date,
         "avg_entry": avg,
@@ -284,8 +372,18 @@ def execute_exit(
         "horizon": pos.get("horizon"),
         "book": book_key,
     }
+    from src.paper.trade_report import enrich_trade_report
+
+    enrich_trade_report(
+        trade,
+        position=pos,
+        equity=float(account.get("equity") or account.get("starting_cash") or STARTING_CASH),
+    )
     append_trade(account, trade)
-    mark_to_market(account, None)
+    if partial:
+        mark_to_market(account, price_by_symbol={symbol.upper(): fill})
+    else:
+        mark_to_market(account, None)
     return trade
 
 
@@ -313,7 +411,11 @@ def can_afford(
         max_position_pct=float(
             max_position_pct
             if max_position_pct is not None
-            else (params.get("max_position_pct") or 25.0)
+            else (
+                params.get("max_position_pct")
+                if params.get("max_position_pct") is not None
+                else 40.0
+            )
         ),
         max_notional=max_notional,
     )

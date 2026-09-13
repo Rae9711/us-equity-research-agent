@@ -1,0 +1,41 @@
+# Deterministic point-in-time event-enhanced long/short strategy.
+signal:
+  momentum_20_weight: 0.25
+  momentum_60_weight: 0.15
+  earnings_surprise_weight: 0.25
+  earnings_revision_weight: 0.15
+  pead_weight: 0.10
+  news_weight: 0.10
+  predicted_alpha_bps_per_score: 100.0
+
+universe:
+  min_price: 5.0
+  min_average_dollar_volume: 10000000.0
+  liquidity_lookback: 20
+  volatility_lookback: 20
+  max_same_day_move: 0.12
+  names_per_sector_side: 1
+  min_names_per_sector: 2
+
+portfolio:
+  gross_target: 1.0
+  max_abs_net: 0.10
+  max_name_weight: 0.10
+  max_sector_gross: 0.15
+  beta_lookback: 60
+  beta_tolerance: 0.03
+  spy_symbol: SPY
+
+costs:
+  cost_gate_multiple: 2.0
+  default_spread_bps: 5.0
+  default_impact_bps: 5.0
+  default_slippage_bps: 2.0
+  default_borrow_bps: 3.0
+
+holding:
+  min_holding_days: 2
+  max_holding_days: 10
+  news_freshness_days: 3
+  earnings_freshness_days: 10
+  revision_freshness_days: 30

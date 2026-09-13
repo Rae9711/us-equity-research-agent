@@ -9,7 +9,13 @@ import json
 
 import pytest
 
-from src.paper.account import default_account, get_position, load_account, save_account
+from src.paper.account import (
+    default_account,
+    get_position,
+    load_account,
+    mark_to_market,
+    save_account,
+)
 from src.paper.broker_sim import (
     InsufficientCashError,
     NonsensePriceError,
@@ -90,6 +96,7 @@ def test_size_shares_and_insufficient_cash(data_root):
 
 def test_entry_fill_and_target_exit(data_root):
     acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0  # isolate fill mechanics
     trade = execute_entry(
         acct,
         symbol="ARM",
@@ -120,11 +127,41 @@ def test_entry_fill_and_target_exit(data_root):
     assert acct["position"] is None
     assert get_position(acct, "intraday") is None
     assert acct["realized_pnl"] == pytest.approx(130.0)
+    assert acct["total_pnl"] == pytest.approx(130.0)
+    assert acct["total_return_pct"] == pytest.approx(1.3)
     assert acct["cash"] == pytest.approx(10000.0 + 130.0)
+
+
+def test_cumulative_pnl_only_after_close(data_root):
+    """Open MTM floats unrealized; total_pnl stays flat until exit."""
+    acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0
+    execute_entry(
+        acct,
+        symbol="ARM",
+        direction="LONG",
+        price=341.0,
+        shares=10,
+        stop=335.0,
+        target=354.0,
+        reason="entry",
+        trading_date="2026-07-08",
+    )
+    mark_to_market(acct, 354.0, price_by_symbol={"ARM": 354.0})
+    assert acct["unrealized_pnl"] == pytest.approx(130.0)
+    assert acct["realized_pnl"] == 0.0
+    assert acct["total_pnl"] == 0.0
+    assert acct["total_return_pct"] == 0.0
+
+    execute_exit(acct, price=354.0, reason="止盈", trading_date="2026-07-08")
+    assert acct["unrealized_pnl"] == 0.0
+    assert acct["total_pnl"] == pytest.approx(130.0)
+    assert acct["total_return_pct"] == pytest.approx(1.3)
 
 
 def test_stop_exit(data_root):
     acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0  # isolate fill mechanics
     execute_entry(
         acct,
         symbol="ARM",
@@ -310,7 +347,8 @@ def test_decide_exit_on_stop(data_root):
         force_price=334.0,
     )
     assert decision["action"] == "EXIT"
-    assert "止损" in (decision["reason"] or "")
+    reason = decision["reason"] or ""
+    assert ("止损" in reason) or ("熔断" in reason)
     assert acct["position"] is None
 
 
@@ -371,7 +409,7 @@ def test_dual_books_enter_both_when_ready(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 95.0,
+        "stop_price": 97.0,
         "target_price": 110.0,
         "win_prob": 65,
         "expected_return_pct": 8.0,
@@ -382,7 +420,7 @@ def test_dual_books_enter_both_when_ready(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 90.0,
+        "stop_price": 95.0,
         "target_price": 130.0,
         "win_prob": 70,
         "expected_return_pct": 12.0,
@@ -404,8 +442,8 @@ def test_dual_books_enter_both_when_ready(data_root):
     books = {b["book"]: b["action"] for b in decision.get("books") or []}
     assert books.get("intraday") == "ENTRY"
     assert books.get("swing") == "ENTRY"
-    # Dual budget: leave cash reserve
-    assert acct["cash"] / acct["equity"] >= 0.18
+    # Dual budget: leave cash reserve (≥ ~10% band)
+    assert acct["cash"] / acct["equity"] >= 0.08
 
 
 def test_allocation_cash_reserve_bounds():
@@ -440,8 +478,10 @@ def test_allocation_cash_reserve_bounds():
     )
     assert risk_hi > risk_lo
     assert cap_hi >= cap_lo
-    assert 0.35 <= risk_lo <= 2.0
-    assert 0.35 <= risk_hi <= 2.0
+    assert 0.35 <= risk_lo <= 3.0
+    assert 0.35 <= risk_hi <= 3.0
+    # Without proven rolling edge, cap stays ≤2% so cold-start isn't oversized.
+    assert risk_hi <= 2.0
 
     hold, reason = should_hold_cash(
         action="enter",
@@ -453,6 +493,91 @@ def test_allocation_cash_reserve_bounds():
     )
     assert hold is True
     assert "保留现金" in reason
+
+    # Broken rolling edge holds cash — do not probe negative expectancy.
+    pause, pause_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=2.0,
+        remaining_er=4.0,
+        entry_status="READY",
+        confidence=0.8,
+        edge_stats={"n": 7, "profit_factor": 0.33, "expectancy": -32.0},
+    )
+    assert pause is True
+    assert "暂停新开仓" in pause_reason
+
+    # Wide stop rejected.
+    wide, wide_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=2.0,
+        remaining_er=4.0,
+        entry_status="READY",
+        confidence=0.8,
+        stop_pct=9.0,
+        horizon="Intraday",
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert wide is True
+    assert "止损过宽" in wide_reason
+
+    # Hard R:R floor blocks weak asymmetry even with decent win_prob.
+    weak_rr, weak_rr_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=1.2,
+        remaining_er=4.0,
+        entry_status="READY",
+        confidence=0.8,
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert weak_rr is True
+    assert "R:R" in weak_rr_reason
+
+    # Negative expected R holds cash (EV gate, not bare ER≥3%).
+    from src.paper.allocation import MIN_EXPECTED_R, expected_r as _ev
+
+    mid_ev = _ev(win_prob=52, rr=1.5)  # 0.52*1.5 - 0.48 = 0.30 < 0.35
+    assert mid_ev is not None and mid_ev < MIN_EXPECTED_R
+    bad_ev, bad_ev_reason = should_hold_cash(
+        action="enter",
+        win_prob=40,
+        rr=2.0,  # 0.40*2.0 - 0.60 = 0.20 < 0.35
+        remaining_er=3.0,
+        entry_status="READY",
+        confidence=0.6,
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert bad_ev is True
+    assert "期望R" in bad_ev_reason or "EV" in bad_ev_reason
+
+    # Soft geometric upside floor still applies.
+    tiny_geo, tiny_geo_reason = should_hold_cash(
+        action="enter",
+        win_prob=70,
+        rr=2.0,
+        remaining_er=0.8,
+        entry_status="READY",
+        confidence=0.8,
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert tiny_geo is True
+    assert "几何上行" in tiny_geo_reason or "软门槛" in tiny_geo_reason
+
+    # Positive EV + hard R:R + soft upside → deploy.
+    ok, _ = should_hold_cash(
+        action="enter",
+        win_prob=60,
+        rr=2.0,  # EV = 0.6*2 - 0.4 = 0.8
+        remaining_er=3.5,
+        entry_status="READY",
+        confidence=0.55,
+        stop_pct=2.0,
+        horizon="Intraday",
+        edge_stats={"n": 0, "profit_factor": 0.0, "expectancy": 0.0},
+    )
+    assert ok is False
 
 
 def test_allocation_sizing_respects_reserve(data_root):
@@ -466,7 +591,7 @@ def test_allocation_sizing_respects_reserve(data_root):
             "symbol": "ARM",
             "direction": "LONG",
             "entry_price": 100.0,
-            "stop_price": 95.0,
+            "stop_price": 97.0,
             "target_price": 110.0,
             "win_prob": 66,
             "expected_return_pct": 5.0,
@@ -477,10 +602,54 @@ def test_allocation_sizing_respects_reserve(data_root):
         entry_status={"status": "READY"},
     )
     assert alloc["hold_cash"] is False
-    assert 20.0 <= alloc["cash_reserve_pct"] <= 40.0
+    assert 10.0 <= alloc["cash_reserve_pct"] <= 20.0
     # Deployable cash leaves room for reserve
-    assert alloc["deployable_cash"] <= acct["cash"] * 0.85
+    assert alloc["deployable_cash"] <= acct["cash"] * 0.95
+    assert alloc["max_position_pct"] >= 25.0  # solo intraday can size up
     assert "现金" in alloc["reason_zh"]
+
+
+def test_broken_rolling_edge_holds_cash(data_root):
+    """Negative rolling expectancy pauses new risk. Cash is a valid day."""
+    from src.paper.allocation import MIN_RISK_PCT, allocate_for_entry, risk_and_cap_pct
+
+    risk, _, reasons = risk_and_cap_pct(
+        confidence=0.8,
+        win_prob=70,
+        rr=2.0,
+        remaining_er=4.0,
+        horizon="Intraday",
+        edge_broken=True,
+    )
+    assert risk == MIN_RISK_PCT
+    assert any("轻仓试错" in r for r in reasons)
+
+    acct = default_account()
+    acct["trades"] = [
+        {"action": "EXIT", "pnl": -40.0, "voided": False} for _ in range(6)
+    ] + [
+        {"action": "EXIT", "pnl": 10.0, "voided": False} for _ in range(2)
+    ]
+    alloc = allocate_for_entry(
+        acct,
+        book="intraday",
+        signal={
+            "symbol": "MU",
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_price": 97.0,
+            "target_price": 110.0,
+            "win_prob": 66,
+            "expected_return_pct": 5.0,
+            "horizon": "Intraday",
+            "entry_status": {"status": "READY"},
+        },
+        quote=100.0,
+        entry_status={"status": "READY"},
+    )
+    assert alloc["hold_cash"] is True
+    assert alloc["edge_broken"] is True
+    assert "暂停新开仓" in alloc["reason_zh"]
 
 
 def test_hold_cash_weak_setup(data_root):
@@ -569,7 +738,7 @@ def test_allocation_persisted_in_journal(data_root):
         "direction": "LONG",
         "entry_price": 100.0,
         "entry_zone": {"low": 99.0, "mid": 100.0, "high": 101.0},
-        "stop_price": 95.0,
+        "stop_price": 97.0,
         "target_price": 112.0,
         "win_prob": 68,
         "expected_return_pct": 8.0,
@@ -617,3 +786,97 @@ def test_run_paper_tick_persists(data_root):
     assert get_position(loaded, "intraday")["symbol"] == "ARM"
     assert loaded["decisions"]
     assert (data_root / "paper" / "account.json").exists()
+
+
+def test_bar_path_does_not_replay_pre_entry_session_high():
+    from src.paper.signals import bar_path_prices
+
+    # Session day-high 243 happened before a 237 entry; next tick last=238.
+    path = bar_path_prices(
+        direction="SHORT",
+        last=238.0,
+        high=243.0,
+        low=235.0,
+        from_price=237.0,
+    )
+    assert max(path) <= 238.0
+    assert 243.0 not in path
+
+
+def test_stop_fill_clips_to_plan_stop_not_day_extreme(data_root):
+    """Gap/last past stop must fill at stop (~1R), not at the day's extreme."""
+    from src.paper.account import set_position
+
+    acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0
+    acct["params"]["use_bar_path_exits"] = True
+    # Simulate an open short that already marked at entry.
+    set_position(
+        acct,
+        "intraday",
+        {
+            "symbol": "ARM",
+            "direction": "SHORT",
+            "shares": 10,
+            "avg_entry": 237.0,
+            "stop": 239.49,
+            "initial_stop": 239.49,
+            "target": 233.0,
+            "risk_per_share": 2.49,
+            "last_price": 237.0,
+            "horizon": "Intraday",
+            "opened_date": "2026-08-25",
+        },
+    )
+    # Force a print well past the stop, with a session high that would previously
+    # have been walked as if it just printed.
+    decision = decide_and_act(
+        acct,
+        "2026-08-25",
+        session_phase="open",
+        force_price=243.32,
+    )
+    assert decision["action"] == "EXIT"
+    exits = [t for t in acct["trades"] if t.get("action") == "EXIT"]
+    assert exits
+    # Fill at stop 239.49 (not 243.32) → about −1R, not −2.5R+.
+    assert exits[-1]["price"] == pytest.approx(239.49, abs=0.02)
+    assert float(exits[-1]["pnl"]) > -40  # 10 shares × ~2.5 ≈ −25, not −63
+
+
+def test_no_same_day_reentry_after_stop_out(data_root):
+    primary = {
+        "symbol": "ARM",
+        "direction": "SHORT",
+        "entry_price": 237.0,
+        "entry_zone": {"low": 236.0, "mid": 237.0, "high": 238.0},
+        "stop_price": 239.49,
+        "target_price": 233.0,
+        "win_prob": 80,
+        "expected_return_pct": 4.0,
+        "risk_reward": 3.0,
+        "horizon": "Intraday",
+    }
+    _write_morning(data_root, "2026-08-25", primary)
+    acct = default_account()
+    acct["params"]["slippage_bps"] = 0.0
+    # Prior losing EXIT today on ARM short.
+    acct["trades"] = [
+        {
+            "action": "EXIT",
+            "symbol": "ARM",
+            "direction": "SHORT",
+            "book": "intraday",
+            "trading_date": "2026-08-25",
+            "pnl": -50.0,
+        }
+    ]
+    decision = decide_and_act(
+        acct,
+        "2026-08-25",
+        session_phase="open",
+        force_price=237.0,
+    )
+    assert decision["action"] == "SKIP"
+    assert get_position(acct, "intraday") is None
+    assert "当日已止损" in (decision["reason"] or "")

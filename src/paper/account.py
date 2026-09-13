@@ -32,18 +32,72 @@ BOOK_SWING = "swing"
 BOOKS = (BOOK_INTRADAY, BOOK_SWING)
 
 DEFAULT_PARAMS: dict[str, Any] = {
-    "risk_pct": 1.0,
-    "max_position_pct": 25.0,
+    # Base risk when edge unproven. Ambition math (advisory, not a guarantee):
+    #   monthly ≈ n × E[R] × risk_pct  →  raise risk only when rolling edge > 0.
+    "risk_pct": 1.5,
+    # None → use horizon caps (intraday ~50% / swing ~70%); set a number to tighten.
+    "max_position_pct": None,
     "prefer_swing_if_no_intraday": True,  # legacy single-book fallback
     "dual_books": True,
     "miss_threshold_pct": 1.0,
-    "force_exit_intraday_at_close": True,
+    # Soft EOD: only force-close flat/losing intraday; winners may scale-out + overnight.
+    "force_exit_intraday_at_close": True,  # retained for compat; see eod_exit_mode
+    "eod_exit_mode": "soft",  # "force" | "soft" | "off"
+    "eod_force_close_if_pnl_r_below": 0.25,  # force flat if open P&L < this R
+    "eod_allow_runner_overnight": True,  # after scale-out, keep runner past close
+    "eod_scale_out_winners": True,  # strong open winners: lock half, run overnight
     # Reject stop/target/entry fills farther than this from entry/stop/target/last.
     "max_price_deviation_pct": 30.0,
-    # Capital allocation (agent-chosen each tick; bounds only)
-    "cash_reserve_min_pct": 20.0,
-    "cash_reserve_max_pct": 40.0,
+    # Prefer bar high/low path for stop/target between ticks when raw OHLC exists.
+    "use_bar_path_exits": True,
+    # Capital allocation (agent-chosen each tick; bounds only).
+    # ~80% deployable → cash reserve band 10–20%.
+    "cash_reserve_min_pct": 10.0,
+    "cash_reserve_max_pct": 20.0,
     "smart_allocation": True,
+    # --- Execution frictions (realism for Mag7 / liquid ETFs) ---
+    # Adverse slippage on every fill. ~3 bps ≈ tight mega-cap/ETF; 5 bps buffer.
+    "slippage_bps": 3.0,
+    "commission_per_trade": 0.0,  # zero-commission retail default
+    "commission_per_share": 0.0,
+    # --- Exit management (profit) — must survive load_account migration ---
+    "exit_management": True,
+    "breakeven_trigger_r": 0.5,   # faster BE — high-WR bias
+    "breakeven_buffer_r": 0.05,   # nudge BE stop past entry to cover costs
+    "trail_trigger_r": 1.0,       # start trailing earlier
+    "trail_distance_r": 0.75,     # tighter chandelier
+    "scale_out_enabled": True,
+    "scale_out_pct": 0.6,         # lock more at T1
+    "runner_target_r": 3.0,       # extend runner target to 3R when no T2 supplied
+    # --- Risk controls ---
+    "correlation_guard": True,    # de-risk concentrated same-factor exposure
+    "adaptive_risk": True,        # scale risk from realized expectancy toward ~10%/mo
+    "adaptive_risk_cap": 3.0,     # ceiling when edge proven (see journal.adaptive_risk_pct)
+    "adaptive_risk_floor": 0.35,
+    "max_loss_per_trade_r": 1.0,  # force flat if open loss ≤ −1R
+    "max_daily_loss_pct": 2.0,    # no new entries after −2% day
+    "option_premium_stop_pct": 50.0,
+    "option_premium_target_mult": 2.0,
+    # --- Event-enhanced market-neutral research book ---
+    # Disabled until BOTH OOS and paper qualification gates pass.
+    "event_ls_enabled": False,
+    "event_ls_requested_enabled": False,
+    "event_ls_backtest_passed": False,
+    "event_ls_max_gross_pct": 100.0,
+    "event_ls_max_abs_net_pct": 10.0,
+    "event_ls_max_sector_gross_pct": 15.0,
+    "event_ls_max_abs_beta": 0.05,
+    "event_ls_max_name_pct": 10.0,
+    "event_ls_volume_participation": 0.05,
+    "event_ls_min_fill_ratio": 0.90,
+    "event_ls_annual_borrow_rate": 0.03,
+    "event_ls_min_hold_days": 2,
+    "event_ls_max_hold_days": 10,
+    "event_ls_paper_min_trades": 100,
+    "event_ls_paper_min_days": 63,
+    "event_ls_drawdown_tiers": [4.0, 6.0, 8.0, 10.0],
+    # Bumped when DEFAULT_PARAMS semantics change; load_account migrates once.
+    "params_schema_version": 5,
 }
 
 
@@ -70,6 +124,8 @@ def default_account() -> dict[str, Any]:
         "equity": STARTING_CASH,
         "realized_pnl": 0.0,
         "unrealized_pnl": 0.0,
+        "total_pnl": 0.0,
+        "total_return_pct": 0.0,
         "position": None,  # legacy alias
         "positions": {BOOK_INTRADAY: None, BOOK_SWING: None},
         "trades": [],
@@ -83,6 +139,18 @@ def default_account() -> dict[str, Any]:
             }
         ],
         "journal": [],
+        "strategy_qualification": {
+            "event_ls": {
+                "status": "NOT_READY",
+                "backtest_passed": False,
+                "paper_passed": False,
+                "enabled": False,
+                "requested_enabled": False,
+                "effective_enabled": False,
+                "paper_eligible": False,
+                "reason": "Requires OOS acceptance and 63 days / 100 paper trades",
+            }
+        },
         "params": dict(DEFAULT_PARAMS),
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
@@ -164,8 +232,101 @@ def load_account() -> dict[str, Any]:
     else:
         for k, v in DEFAULT_PARAMS.items():
             data["params"].setdefault(k, v)
+        _migrate_legacy_params(data["params"])
     ensure_positions(data)
+    sync_closed_pnl_metrics(data)
     return data
+
+
+def _migrate_legacy_params(params: dict[str, Any]) -> None:
+    """Bring persisted paper params forward without wiping user overrides.
+
+    Ensures exit_management / cash reserve / risk defaults that the ≥10%/mo
+    ambition depends on are present after upgrades. Runs versioned migrations
+    so adaptive risk is not re-bumped every load.
+    """
+    ver = int(params.get("params_schema_version") or 0)
+
+    # Legacy flat 25% ceiling left most cash idle; prefer horizon caps.
+    if params.get("max_position_pct") == 25.0:
+        params["max_position_pct"] = None
+    # Legacy idle-heavy cash bands → allow ~80% deployable (10–20%).
+    legacy_min = params.get("cash_reserve_min_pct")
+    legacy_max = params.get("cash_reserve_max_pct")
+    if legacy_min in (20.0, 25.0):
+        params["cash_reserve_min_pct"] = DEFAULT_PARAMS["cash_reserve_min_pct"]
+    if legacy_max in (25.0, 40.0):
+        params["cash_reserve_max_pct"] = DEFAULT_PARAMS["cash_reserve_max_pct"]
+
+    if ver < 2:
+        # One-shot: raise base risk / tighten Mag7 slippage / soft EOD.
+        if params.get("risk_pct") in (1.0, 1):
+            params["risk_pct"] = DEFAULT_PARAMS["risk_pct"]
+        if params.get("slippage_bps") == 5.0:
+            params["slippage_bps"] = DEFAULT_PARAMS["slippage_bps"]
+        if params.get("eod_exit_mode") not in ("force", "soft", "off"):
+            params["eod_exit_mode"] = "soft"
+        params["params_schema_version"] = 2
+        ver = 2
+    elif params.get("eod_exit_mode") not in ("force", "soft", "off"):
+        params["eod_exit_mode"] = "soft"
+
+    if ver < 3:
+        # High-WR / small-loss defaults + circuit breakers + option stops.
+        for key in (
+            "breakeven_trigger_r",
+            "trail_trigger_r",
+            "trail_distance_r",
+            "scale_out_pct",
+            "max_loss_per_trade_r",
+            "max_daily_loss_pct",
+            "option_premium_stop_pct",
+            "option_premium_target_mult",
+        ):
+            params[key] = DEFAULT_PARAMS[key]
+        params["params_schema_version"] = 3
+        ver = 3
+
+    if ver < 4:
+        for key in (
+            "event_ls_enabled",
+            "event_ls_backtest_passed",
+            "event_ls_max_gross_pct",
+            "event_ls_max_abs_net_pct",
+            "event_ls_max_sector_gross_pct",
+            "event_ls_max_abs_beta",
+            "event_ls_max_name_pct",
+            "event_ls_volume_participation",
+            "event_ls_annual_borrow_rate",
+            "event_ls_min_hold_days",
+            "event_ls_max_hold_days",
+            "event_ls_paper_min_trades",
+            "event_ls_paper_min_days",
+            "event_ls_drawdown_tiers",
+        ):
+            params.setdefault(key, deepcopy(DEFAULT_PARAMS[key]))
+        params["params_schema_version"] = 4
+        ver = 4
+
+    if ver < 5:
+        params.setdefault("event_ls_requested_enabled", False)
+        params.setdefault(
+            "event_ls_min_fill_ratio",
+            DEFAULT_PARAMS["event_ls_min_fill_ratio"],
+        )
+        params["params_schema_version"] = 5
+
+
+def sync_closed_pnl_metrics(account: dict[str, Any]) -> dict[str, Any]:
+    """累计收益 = 已平仓盈亏 only (ignore open marks)."""
+    realized = float(account.get("realized_pnl") or 0.0)
+    starting = float(account.get("starting_cash") or STARTING_CASH)
+    account["realized_pnl"] = round(realized, 2)
+    account["total_pnl"] = round(realized, 2)
+    account["total_return_pct"] = round(
+        (realized / starting) * 100.0 if starting else 0.0, 2
+    )
+    return account
 
 
 def save_account(account: dict[str, Any]) -> Path:
@@ -191,7 +352,6 @@ def mark_to_market(
     """Update unrealized PnL + equity from open position marks."""
     ensure_positions(account)
     cash = float(account.get("cash") or 0.0)
-    realized = float(account.get("realized_pnl") or 0.0)
     prices = {str(k).upper(): float(v) for k, v in (price_by_symbol or {}).items()}
     open_rows = open_positions(account)
     open_syms = {str(p.get("symbol") or "").upper() for _, p in open_rows}
@@ -209,14 +369,16 @@ def mark_to_market(
         shares = float(pos.get("shares") or 0)
         avg = float(pos.get("avg_entry") or 0)
         direction = (pos.get("direction") or "LONG").upper()
+        is_option = (pos.get("asset_class") or "equity") == "option"
+        mult = float(pos.get("multiplier") or (100 if is_option else 1))
         if direction == "SHORT":
-            u = (avg - px) * shares
+            u = (avg - px) * shares * mult
         else:
-            u = (px - avg) * shares
+            u = (px - avg) * shares * mult
         unrealized += u
         pos["last_price"] = round(px, 4)
         pos["unrealized_pnl"] = round(u, 2)
-        pos["market_value"] = round(shares * px, 2)
+        pos["market_value"] = round(shares * px * mult, 2)
 
     # Match prior single-position equity: cash + long MV + short unrealized
     equity = cash
@@ -226,20 +388,16 @@ def mark_to_market(
         direction = (pos.get("direction") or "LONG").upper()
         if px is None or px <= 0:
             continue
+        is_option = (pos.get("asset_class") or "equity") == "option"
+        mult = float(pos.get("multiplier") or (100 if is_option else 1))
         if direction == "SHORT":
             equity += float(pos.get("unrealized_pnl") or 0)
         else:
-            equity += shares * px
+            equity += shares * px * mult
 
     account["unrealized_pnl"] = round(unrealized, 2)
     account["equity"] = round(equity, 2)
-    account["realized_pnl"] = round(realized, 2)
-    account["total_pnl"] = round(
-        equity - float(account.get("starting_cash") or STARTING_CASH), 2
-    )
-    account["total_return_pct"] = round(
-        (equity / float(account.get("starting_cash") or STARTING_CASH) - 1.0) * 100.0, 2
-    )
+    sync_closed_pnl_metrics(account)
     sync_legacy_position(account)
     return account
 

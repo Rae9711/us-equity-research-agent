@@ -9,6 +9,9 @@ from typing import Any
 
 DEFAULT_ACCOUNT_SIZE = 10_000.0
 DEFAULT_RISK_PCT = 1.0
+# Rules-based win_prob is an uninformed prior. Never advertise above this
+# without historical calibration.
+MAX_UNCALIBRATED_WIN_PROB = 52.0
 
 _WIN_PROB_LABELS: dict[str, str] = {
     "base": "Base",
@@ -687,6 +690,17 @@ def enrich_trade_slot(
     if calibration.get("source") == "historical":
         slot["win_prob"] = calibration["calibrated_win_prob"]
         slot["calibrated_win_prob"] = calibration["calibrated_win_prob"]
+        slot["win_prob_uncalibrated"] = False
+        if float(slot["win_prob"]) < 52.0 and slot.get("trade_action") in ("BUY", "Small"):
+            slot["trade_action"] = "Pass"
+            slot["trade"] = "Pass"
+            why = list(slot.get("why_factors") or [])
+            why.append("历史校准胜率 < 52%，不开仓")
+            slot["why_factors"] = why[:8]
+    else:
+        # Uncalibrated: never advertise a rules-inflated 71%. EV uses ≤52%.
+        slot["win_prob"] = min(rules_wp, MAX_UNCALIBRATED_WIN_PROB)
+        slot["win_prob_uncalibrated"] = True
 
     similar = find_similar_days(sig, exclude_date=exclude_date, limit=5)
     if similar:

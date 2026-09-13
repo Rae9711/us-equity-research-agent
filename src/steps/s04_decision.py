@@ -82,6 +82,15 @@ def run_step4_trade_decision(trading_date: date | None = None) -> dict[str, Any]
         morning = json.loads(morning_json_path(date_str).read_text(encoding="utf-8"))
 
     index_trade, primary, stock_trades = _resolve_trades(morning)
+    p16_gate = (
+        (morning.get("best_trades") or {}).get("p16_gate")
+        or (morning.get("best_opportunity") or {}).get("p16_gate")
+    )
+    # P16 Wait / No Trade closes index AND stocks. Cash is a valid day.
+    if p16_gate in ("Wait", "No Trade"):
+        index_trade = "NO TRADE"
+        primary = None
+        stock_trades = []
     stock_label = _stock_trade_label(primary)
     has_index_trade = index_trade not in (None, "", "NO TRADE")
     has_stock_trade = stock_label is not None
