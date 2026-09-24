@@ -143,6 +143,80 @@ def resolve_quote(
     return px, source
 
 
+def _section_for_symbol(sym: str) -> str:
+    s = (sym or "").upper()
+    if s in ("SMH", "XLK", "XLF", "XLE"):
+        return "sector"
+    if s in ("QQQ", "SPY", "DIA", "TQQQ", "^VIX", "DX-Y.NYB", "ES=F"):
+        return "market"
+    return "stocks"
+
+
+def resolve_quote_bar(
+    symbol: str,
+    trading_date: str,
+    *,
+    raw: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    """Best-effort OHLC bar for ``trading_date`` from the raw snapshot.
+
+    Returns ``{"open","high","low","prev_close"}`` (floats, keys omitted when
+    unknown). Empty dict when the bar is missing or stale — callers must treat
+    that as "no bar evidence", never as a zero bar.
+    """
+    from datetime import date as date_type
+
+    from src.utils.paths import raw_data_path
+    from src.utils.quote_resolve import quote_bar_date
+    from src.utils.trading_calendar import prior_trading_day
+
+    sym = (symbol or "").upper()
+    if not sym:
+        return {}
+    try:
+        day = date_type.fromisoformat(trading_date)
+    except ValueError:
+        return {}
+
+    if raw is None:
+        path = raw_data_path(trading_date)
+        if not path.exists():
+            return {}
+        try:
+            import json
+
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    out: dict[str, float] = {}
+    sec = (raw or {}).get(_section_for_symbol(sym), {})
+    quotes = sec.get("quotes") or sec.get("prices") or {}
+    q = quotes.get(sym) or {}
+    # Only today's bar counts; a stale bar would mislabel gaps vs touches.
+    if q and quote_bar_date(q) == day:
+        for key in ("open", "high", "low"):
+            v = _safe_float(q.get(key))
+            if v is not None and v > 0:
+                out[key] = v
+
+    try:
+        prior_path = raw_data_path(prior_trading_day(day).isoformat())
+        if prior_path.exists():
+            import json
+
+            prior_raw = json.loads(prior_path.read_text(encoding="utf-8"))
+            psec = (prior_raw or {}).get(_section_for_symbol(sym), {})
+            pquotes = psec.get("quotes") or psec.get("prices") or {}
+            pq = pquotes.get(sym) or {}
+            pc = _safe_float(pq.get("close") or pq.get("current_price"))
+            if pc is not None and pc > 0:
+                out["prev_close"] = pc
+    except Exception:
+        logger.debug("prev close lookup failed for %s", sym, exc_info=True)
+    return out
+
+
 def _morning_top_trades(morning: dict[str, Any]) -> list[dict[str, Any]]:
     top = (morning.get("best_trades") or {}).get("top_trades") or morning.get(
         "top_trades"

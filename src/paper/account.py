@@ -44,6 +44,19 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "cash_reserve_min_pct": 20.0,
     "cash_reserve_max_pct": 40.0,
     "smart_allocation": True,
+    # Stop execution / risk controls (fail-closed)
+    # Stop-market fills never print worse than stop ± this (unless a true gap
+    # opened through the stop, which fills at the open — honestly modeled).
+    "max_stop_slippage_pct": 0.5,
+    # Hard per-trade backstop when the stop is missing/invalid: exit at market
+    # once one trade's unrealized loss reaches this % of equity.
+    "max_trade_loss_equity_pct": 2.0,
+    # Reject entries whose stop is tighter than this % of entry price.
+    "min_stop_dist_pct": 0.8,
+    # Sizing reserve: added to per-share risk so tight stops size smaller.
+    "slippage_reserve_pct": 0.2,
+    # After a stop-out, don't re-enter the same symbol in the same book today.
+    "stop_cooldown_enabled": True,
 }
 
 

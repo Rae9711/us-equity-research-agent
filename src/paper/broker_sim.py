@@ -65,10 +65,14 @@ def size_shares(
     risk_pct: float = 1.0,
     max_position_pct: float = 25.0,
     max_notional: float | None = None,
+    slippage_reserve_pct: float = 0.002,
 ) -> int:
     """Risk-based share count; floor to whole shares; 0 if unaffordable.
 
     ``max_notional`` (optional) caps size by allocation deployable cash.
+    ``slippage_reserve_pct`` (fraction, e.g. 0.002 = 0.2%) is added to the
+    per-share risk so tight stops size smaller — the stop fill is never
+    exactly at the stop level in practice.
     """
     if entry_price <= 0 or cash <= 0 or equity <= 0:
         return 0
@@ -78,6 +82,7 @@ def size_shares(
         per_share_risk = abs(entry_price - stop)
     else:
         per_share_risk = entry_price * 0.02  # 2% fallback
+    per_share_risk += entry_price * max(0.0, float(slippage_reserve_pct or 0.0))
     if per_share_risk <= 0:
         return 0
     by_risk = int(risk_budget // per_share_risk)
@@ -298,9 +303,12 @@ def can_afford(
     risk_pct: float | None = None,
     max_position_pct: float | None = None,
     max_notional: float | None = None,
+    slippage_reserve_pct: float | None = None,
 ) -> tuple[int, str | None]:
     """Return (shares, error_message). shares=0 means cannot enter."""
     params = account.get("params") or {}
+    if slippage_reserve_pct is None:
+        slippage_reserve_pct = float(params.get("slippage_reserve_pct", 0.2)) / 100.0
     shares = size_shares(
         cash=float(account.get("cash") or 0),
         equity=float(account.get("equity") or account.get("cash") or STARTING_CASH),
@@ -316,6 +324,7 @@ def can_afford(
             else (params.get("max_position_pct") or 25.0)
         ),
         max_notional=max_notional,
+        slippage_reserve_pct=slippage_reserve_pct,
     )
     if shares <= 0:
         return 0, "insufficient cash or risk budget for even 1 share"
