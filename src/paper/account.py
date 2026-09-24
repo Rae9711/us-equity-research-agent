@@ -212,7 +212,7 @@ def mark_to_market(
 
     for _book, pos in open_rows:
         sym = str(pos.get("symbol") or "").upper()
-        px = prices.get(sym)
+        px = _safe_float(prices.get(sym))
         if px is None and last_price is not None and last_price > 0 and len(open_syms) <= 1:
             px = float(last_price)
         if px is None:
@@ -240,11 +240,16 @@ def mark_to_market(
         if px is None or px <= 0:
             continue
         if direction == "SHORT":
-            equity += float(pos.get("unrealized_pnl") or 0)
+            equity += _finite(pos.get("unrealized_pnl"))
         else:
             equity += shares * px
 
-    account["unrealized_pnl"] = round(unrealized, 2)
+    if equity != equity or equity in (float("inf"), float("-inf")):
+        # Never persist a poisoned equity value: keep the last good one so
+        # risk math (sizing, breakers) keeps working off real numbers.
+        equity = _finite(account.get("equity"), cash)
+
+    account["unrealized_pnl"] = round(_finite(unrealized), 2)
     account["equity"] = round(equity, 2)
     account["realized_pnl"] = round(realized, 2)
     account["total_pnl"] = round(
@@ -258,12 +263,27 @@ def mark_to_market(
 
 
 def _safe_float(value: Any) -> float | None:
+    """Coerce to float; return None for missing/invalid/non-finite values.
+
+    NaN and inf quotes must never flow into PnL/equity math: ``nan or 0``
+    is ``nan`` (NaN is truthy) and ``nan <= 0`` is False, so without this
+    guard a single bad quote poisons equity for every later tick.
+    """
     if value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
+    if result != result or result in (float("inf"), float("-inf")):
+        return None
+    return result
+
+
+def _finite(value: Any, default: float = 0.0) -> float:
+    """Return ``value`` as a float, or ``default`` when it is not finite."""
+    result = _safe_float(value)
+    return default if result is None else result
 
 
 def append_equity_point(account: dict[str, Any], *, label: str = "tick") -> None:

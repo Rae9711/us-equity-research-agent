@@ -398,3 +398,48 @@ def test_can_afford_uses_reserve_from_params(data_root):
     )
     assert err is None
     assert shares == expect
+
+
+def test_nan_quote_never_poisons_equity(data_root):
+    """Regression: 2026-09-23 20:14 ET tick wrote NaN equity from a NaN quote.
+
+    mark_to_market must skip non-finite quotes, keep the last good mark,
+    and never persist a NaN equity value.
+    """
+    import math
+
+    from src.paper.account import mark_to_market
+
+    acct = default_account()
+    execute_entry(
+        acct,
+        symbol="MSFT",
+        direction="SHORT",
+        price=493.6319,
+        shares=2,
+        stop=509.95,
+        target=472.16,
+        reason="test",
+        trading_date="2026-09-23",
+        book="swing",
+    )
+    mark_to_market(acct, price_by_symbol={"MSFT": 500.59})
+    good_equity = acct["equity"]
+    good_unrealized = acct["unrealized_pnl"]
+    assert math.isfinite(good_equity)
+    # Short 2 @ 493.6319 marked at 500.59 -> unrealized ≈ -13.92
+    assert good_unrealized == pytest.approx(-13.92, abs=0.05)
+
+    # After-hours tick with a NaN quote must not poison anything.
+    mark_to_market(acct, price_by_symbol={"MSFT": float("nan")})
+    assert math.isfinite(acct["equity"])
+    assert acct["equity"] == pytest.approx(good_equity, abs=0.01)
+    assert math.isfinite(acct["unrealized_pnl"])
+
+    # Even a persisted NaN mark must be quarantined, not propagated.
+    pos = acct["positions"]["swing"]
+    pos["last_price"] = float("nan")
+    pos["unrealized_pnl"] = float("nan")
+    acct["equity"] = float("nan")
+    mark_to_market(acct, price_by_symbol={"MSFT": float("nan")})
+    assert math.isfinite(acct["equity"]), "equity must fall back, never stay NaN"
