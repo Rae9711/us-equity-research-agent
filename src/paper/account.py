@@ -231,7 +231,10 @@ def mark_to_market(
         pos["unrealized_pnl"] = round(u, 2)
         pos["market_value"] = round(shares * px, 2)
 
-    # Match prior single-position equity: cash + long MV + short unrealized
+    # Equity = cash + signed market value of every open position.
+    # For shorts, cash already holds the sale proceeds, so the position
+    # contributes its (negative) market value — adding only the unrealized
+    # PnL would double-count the proceeds and overstate equity.
     equity = cash
     for _book, pos in open_positions(account):
         shares = float(pos.get("shares") or 0)
@@ -240,7 +243,7 @@ def mark_to_market(
         if px is None or px <= 0:
             continue
         if direction == "SHORT":
-            equity += _finite(pos.get("unrealized_pnl"))
+            equity -= shares * px
         else:
             equity += shares * px
 

@@ -443,3 +443,61 @@ def test_nan_quote_never_poisons_equity(data_root):
     acct["equity"] = float("nan")
     mark_to_market(acct, price_by_symbol={"MSFT": float("nan")})
     assert math.isfinite(acct["equity"]), "equity must fall back, never stay NaN"
+
+
+def test_short_equity_does_not_double_count_sale_proceeds(data_root):
+    """Regression (found 2026-09-25 by paper-intraday-watch).
+
+    execute_entry credits short-sale proceeds to cash, so mark_to_market must
+    value a short at its *negative* market value. The old formula added only
+    the unrealized PnL (``cash + short unrealized``), double-counting the
+    proceeds: while the 2026-09-21 MSFT short (2 @ 493.6319) was open,
+    displayed equity was overstated by exactly 2*493.6319 ≈ $987.26, masking
+    the true drawdown and inflating risk sizing.
+    """
+    from src.paper.account import mark_to_market
+
+    acct = default_account()
+    execute_entry(
+        acct,
+        symbol="MSFT",
+        direction="SHORT",
+        price=493.6319,
+        shares=2,
+        stop=509.95,
+        target=472.16,
+        reason="test",
+        trading_date="2026-09-21",
+        book="swing",
+    )
+    # Cash holds the $987.26 sale proceeds.
+    assert acct["cash"] == pytest.approx(10000.0 + 2 * 493.6319, abs=0.01)
+
+    mark_to_market(acct, price_by_symbol={"MSFT": 500.59})
+    # Correct: 10987.26 - 2*500.59 = 9986.08 (unrealized -13.92).
+    # Buggy:   10987.26 + (-13.92) = 10973.34 (proceeds double-counted).
+    assert acct["equity"] == pytest.approx(10987.26 - 2 * 500.59, abs=0.05)
+    assert acct["unrealized_pnl"] == pytest.approx(-13.92, abs=0.05)
+
+
+def test_long_equity_is_cash_plus_market_value(data_root):
+    """Long side of the same identity: equity = cash + shares * mark."""
+    from src.paper.account import mark_to_market
+
+    acct = default_account()
+    execute_entry(
+        acct,
+        symbol="AMD",
+        direction="LONG",
+        price=633.35,
+        shares=1,
+        stop=599.52,
+        target=693.56,
+        reason="test",
+        trading_date="2026-09-25",
+        book="swing",
+    )
+    mark_to_market(acct, price_by_symbol={"AMD": 632.425})
+    assert acct["cash"] == pytest.approx(10000.0 - 633.35, abs=0.01)
+    assert acct["equity"] == pytest.approx(10000.0 - 633.35 + 632.425, abs=0.05)
+    assert acct["unrealized_pnl"] == pytest.approx(-0.925, abs=0.05)
