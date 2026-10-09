@@ -3,7 +3,7 @@
 ADVISORY ONLY — 模拟交易 · 不构成投资建议.
 
 Each tick the agent chooses:
-  - cash reserve floor (20–40% of equity, regime / confidence dependent)
+  - cash reserve floor (5–15% of equity, regime / confidence dependent)
   - position size from win_prob, R:R, horizon, Entry Status, remaining ER
   - whether to hold cash deliberately (SKIP/WAIT · 保留现金)
   - dual-book budget split: swing core + intraday satellite when both clean
@@ -16,16 +16,16 @@ from typing import Any
 from src.paper.account import BOOK_INTRADAY, BOOK_SWING, STARTING_CASH, open_positions
 
 # Deployable band: always keep at least this much cash; never exceed this reserve.
-CASH_RESERVE_MIN_PCT = 20.0
-CASH_RESERVE_MAX_PCT = 40.0
+CASH_RESERVE_MIN_PCT = 5.0
+CASH_RESERVE_MAX_PCT = 15.0
 
 # Hard caps (still soft vs fixed 1%/25% — scaled by setup quality)
-BASE_RISK_PCT = 1.0
-MAX_RISK_PCT = 2.0
+BASE_RISK_PCT = 1.5
+MAX_RISK_PCT = 3.0
 MIN_RISK_PCT = 0.35
-MAX_POSITION_PCT_INTRADAY = 22.0
-MAX_POSITION_PCT_SWING = 35.0
-MAX_TOTAL_DEPLOYED_PCT = 75.0  # 100 - CASH_RESERVE_MIN
+MAX_POSITION_PCT_INTRADAY = 40.0
+MAX_POSITION_PCT_SWING = 70.0
+MAX_TOTAL_DEPLOYED_PCT = 95.0  # 100 - CASH_RESERVE_MIN
 
 # Dual-book default split of *deployable* capital (after cash reserve)
 SWING_CORE_SHARE = 0.60
@@ -138,8 +138,8 @@ def setup_confidence(
 
 
 def cash_reserve_pct_for_confidence(confidence: float, *, open_book_count: int = 0) -> float:
-    """Higher confidence → lower cash floor (still within 20–40%)."""
-    # conf 0 → 40%, conf 1 → 20%
+    """Higher confidence → lower cash floor (still within 5–15%)."""
+    # conf 0 → 15%, conf 1 → 5%
     pct = CASH_RESERVE_MAX_PCT - confidence * (CASH_RESERVE_MAX_PCT - CASH_RESERVE_MIN_PCT)
     # If already holding one book, nudge reserve up slightly (leave room / buffer)
     if open_book_count >= 1:

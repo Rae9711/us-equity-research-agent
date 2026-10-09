@@ -412,6 +412,7 @@ def test_allocation_cash_reserve_bounds():
     from src.paper.allocation import (
         CASH_RESERVE_MAX_PCT,
         CASH_RESERVE_MIN_PCT,
+        MAX_RISK_PCT,
         cash_reserve_pct_for_confidence,
         risk_and_cap_pct,
         should_hold_cash,
@@ -440,8 +441,8 @@ def test_allocation_cash_reserve_bounds():
     )
     assert risk_hi > risk_lo
     assert cap_hi >= cap_lo
-    assert 0.35 <= risk_lo <= 2.0
-    assert 0.35 <= risk_hi <= 2.0
+    assert 0.35 <= risk_lo <= MAX_RISK_PCT
+    assert 0.35 <= risk_hi <= MAX_RISK_PCT
 
     hold, reason = should_hold_cash(
         action="enter",
