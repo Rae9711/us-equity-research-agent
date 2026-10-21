@@ -3,14 +3,36 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from typing import Any
 
 import anthropic
 
 
+def _vault_surrogate_key() -> str:
+    """Surrogate for the Secure Vault `custom.anthropic` credential.
+
+    The real API key never lands on disk: authd hands out an ``hsurr:``
+    surrogate and the egress layer swaps in the real key on requests to
+    api.anthropic.com. Returns "" when the vault entry is unavailable.
+    """
+    try:
+        bin_dir = "/opt/muse/skills/custom-connector-setup/bin"
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        from dynamic_credentials import dynamic_credential_entry
+
+        entry = dynamic_credential_entry("custom.anthropic")
+        return str(entry.get("surrogate", "")).strip()
+    except Exception:
+        return ""
+
+
 class AnthropicClient:
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.api_key = (
+            api_key or os.environ.get("ANTHROPIC_API_KEY", "") or _vault_surrogate_key()
+        )
         self.model = model or os.environ.get(
             "ANTHROPIC_MODEL", "claude-sonnet-5"
         )

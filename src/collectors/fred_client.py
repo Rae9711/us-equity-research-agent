@@ -18,10 +18,15 @@ class FredClient:
         q = dict(params or {})
         q["api_key"] = self.api_key
         q.setdefault("file_type", "json")
-        with httpx.Client(timeout=30.0) as client:
-            r = client.get(f"{self.BASE}{path}", params=q)
-            r.raise_for_status()
-            return r.json()
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                r = client.get(f"{self.BASE}{path}", params=q)
+                r.raise_for_status()
+                return r.json()
+        except Exception as exc:
+            # FRED outages (incl. maintenance pages served with HTTP 200)
+            # must degrade to "no data", not kill the whole collection run.
+            return {"error": f"FRED request failed: {type(exc).__name__}"}
 
     def latest_observation(self, series_id: str) -> dict[str, Any] | None:
         data = self.get(
