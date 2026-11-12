@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from src.paper.judgment_quality import compute_panel  # noqa: E402
 from src.paper.shadow_ledger import (  # noqa: E402
     BACKFILL_FROM,
     VERSION,
@@ -234,8 +235,34 @@ def run(state_dir: Path, as_of: date, from_date: date) -> dict:
     summary["run_stats"] = stats
     atomic_write(summary_path, summary)
 
+    # 4) Judgment-quality panel (all candidates, four angles). Computed
+    # after the ledger + summary are persisted, and it must never break
+    # the ledger update: a panel failure only marks panel_status.
+    panel_path = paper_dir / "judgment_quality.json"
+    panel_status = "ok"
+    try:
+        panel_symbols = sorted({r["symbol"] for r in records if r.get("symbol")})
+        panel_start = min(
+            [from_date] + [date.fromisoformat(r["candidate_date"]) for r in records
+                           if r.get("candidate_date")],
+            default=from_date,
+        ) - timedelta(days=21)
+        panel_bars: dict[str, list[dict]] = {}
+        for sym in panel_symbols:
+            bars = fetch_daily_bars(sym, panel_start, as_of)
+            stats["symbols_fetched"] += 1
+            if bars:
+                panel_bars[sym] = bars
+        panel = compute_panel(records, panel_bars, as_of_s)
+        panel["generated_at"] = datetime.now(ET).isoformat()
+        atomic_write(panel_path, panel)
+    except Exception as exc:
+        panel_status = f"error: {exc}"
+        print(f"[shadow] judgment panel failed: {exc}", file=sys.stderr)
+
     return {"as_of": as_of_s, "ledger": str(ledger_path),
-            "summary": str(summary_path), **stats,
+            "summary": str(summary_path), "panel": str(panel_path),
+            "panel_status": panel_status, **stats,
             "totals": summary["totals"]}
 
 
