@@ -308,7 +308,7 @@ def test_entry_rejects_missided_stop(data_root):
 def test_breaker_exits_without_valid_stop(data_root):
     """Hard backstop: no stop set, -5% equity unrealized → market exit."""
     acct = default_account()
-    acct["positions"]["intraday"] = {
+    acct["positions"]["intraday"] = [{
         "symbol": "ARM",
         "direction": "LONG",
         "shares": 50,
@@ -320,7 +320,7 @@ def test_breaker_exits_without_valid_stop(data_root):
         "book": "intraday",
         "signal_source": "test",
         "opened_date": "2026-08-24",
-    }
+    }]
     raw = _raw_bar(
         "ARM", "2026-08-24", open=192.0, high=195.0, low=189.0, close=190.0
     )
@@ -437,7 +437,7 @@ def test_nan_quote_never_poisons_equity(data_root):
     assert math.isfinite(acct["unrealized_pnl"])
 
     # Even a persisted NaN mark must be quarantined, not propagated.
-    pos = acct["positions"]["swing"]
+    pos = acct["positions"]["swing"][0]
     pos["last_price"] = float("nan")
     pos["unrealized_pnl"] = float("nan")
     acct["equity"] = float("nan")

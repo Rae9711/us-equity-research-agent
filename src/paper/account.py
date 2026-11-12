@@ -2,9 +2,11 @@
 
 ADVISORY ONLY — 模拟交易 · 不构成投资建议.
 
-Dual books:
-  - ``positions["intraday"]`` — 短线, flatten at EOD
-  - ``positions["swing"]`` — 长线, hold overnight
+Dual books (each holds a LIST of positions; 2026-11-12 limits):
+  - ``positions["intraday"]`` — 短线, may hold overnight, max 3 trading
+    days then flattened; at most 3 positions
+  - ``positions["swing"]`` — 长线, hold overnight; at most 2 positions
+  - at most 5 positions total across both books
 Legacy ``position`` mirrors the primary open book (intraday preferred) for compat.
 """
 
@@ -30,6 +32,118 @@ ACCOUNT_FILENAME = "account.json"
 BOOK_INTRADAY = "intraday"
 BOOK_SWING = "swing"
 BOOKS = (BOOK_INTRADAY, BOOK_SWING)
+
+# Per-book position limits (Rae, 2026-11-12: intraday 3, swing 2, 5 total;
+# was 1 per book). The per-book notional cap (swing 70% / intraday 40% x
+# confidence) is shared by the whole book, not per position — enforced in
+# _try_entry — and the portfolio 3% planned-risk cap is the total brake.
+MAX_POSITIONS_PER_BOOK: dict[str, int] = {BOOK_INTRADAY: 3, BOOK_SWING: 2}
+MAX_TOTAL_POSITIONS = 5
+
+
+def max_positions_for_book(book: str) -> int:
+    """Max open positions in one book (intraday 3, swing 2)."""
+    return MAX_POSITIONS_PER_BOOK.get(book, 1)
+
+# Pre-2026-09-21 history is unrecoverable: ledger-detail exits sum to
+# +$774.54 while the account's realized PnL is +$184.84. The difference is
+# a real historical loss from before the surviving records begin — not a
+# bookkeeping error — verified 2026-11-05. It is carried as an explicit
+# adjustment (fix 4) instead of being silently buried in realized PnL.
+HISTORY_ADJUSTMENT_AMOUNT = -589.73
+HISTORY_ADJUSTMENT_REASON = (
+    "2026-09-21 之前无法恢复的历史亏损（纸盘迁移时核对："
+    "分笔明细合计与账户 realized 之差）"
+)
+# Verification-epoch start: the day the six execution/record fixes landed.
+# Statistics from this date on are the validation record for live trading.
+VERIFICATION_EPOCH_START = "2026-11-12"
+
+
+def record_history_adjustment(
+    account: dict[str, Any],
+    *,
+    epoch_start: str = VERIFICATION_EPOCH_START,
+) -> bool:
+    """Record the pre-2026-09-21 history adjustment + epoch start.
+
+    Idempotent: returns False when already recorded. Does NOT rewrite any
+    historical leg or change equity / realized PnL — the adjustment is an
+    explicit, visible record, and the epoch marker lets later statistics
+    be computed from the fix date onward.
+    """
+    if account.get("history_adjustment") is not None:
+        return False
+    account["history_adjustment"] = {
+        "amount": HISTORY_ADJUSTMENT_AMOUNT,
+        "currency": "USD",
+        "reason": HISTORY_ADJUSTMENT_REASON,
+        "recorded_date": VERIFICATION_EPOCH_START,
+        "recorded_at": _now_iso(),
+    }
+    account["verification_epoch"] = {
+        "started_on": epoch_start,
+        "note": (
+            "新验证期起点：六项执行/记录修复提交日；"
+            "此前数据不计入验证期统计"
+        ),
+    }
+    append_journal(
+        account,
+        {
+            "type": "history_adjustment",
+            "trading_date": epoch_start,
+            "amount": HISTORY_ADJUSTMENT_AMOUNT,
+            "reason": HISTORY_ADJUSTMENT_REASON,
+            "verification_epoch_started_on": epoch_start,
+        },
+    )
+    return True
+
+
+def ensure_history_adjustment(account: dict[str, Any]) -> bool:
+    """Backfill the adjustment record for accounts with real trade history.
+
+    Fresh accounts (no trades) carry no pre-history gap and are untouched.
+    """
+    if not account.get("trades"):
+        return False
+    return record_history_adjustment(account)
+
+
+def verification_epoch_summary(account: dict[str, Any]) -> dict[str, Any]:
+    """Closed-leg statistics from the verification-epoch start onward."""
+    epoch = account.get("verification_epoch") or {}
+    start = epoch.get("started_on")
+    legs = [
+        t
+        for t in (account.get("trades") or [])
+        if t.get("action") in ("EXIT", "SCALE_OUT")
+        and (not start or (t.get("trading_date") or "") >= start)
+    ]
+    wins = [t for t in legs if float(t.get("pnl") or 0) > 0]
+    losses = [t for t in legs if float(t.get("pnl") or 0) < 0]
+    realized = round(sum(float(t.get("pnl") or 0) for t in legs), 2)
+    r_values = [
+        float(t.get("r_multiple"))
+        for t in legs
+        if t.get("r_multiple") is not None
+    ]
+    return {
+        "started_on": start,
+        "closed_legs": len(legs),
+        "wins": len(wins),
+        "losses": len(losses),
+        "realized_pnl": realized,
+        "avg_win": round(sum(float(t.get("pnl") or 0) for t in wins) / len(wins), 2)
+        if wins
+        else None,
+        "avg_loss": round(sum(float(t.get("pnl") or 0) for t in losses) / len(losses), 2)
+        if losses
+        else None,
+        "r_multiples": r_values,
+        "expectancy_r": round(sum(r_values) / len(r_values), 3) if r_values else None,
+    }
 
 DEFAULT_PARAMS: dict[str, Any] = {
     "risk_pct": 1.0,
@@ -84,7 +198,7 @@ def default_account() -> dict[str, Any]:
         "realized_pnl": 0.0,
         "unrealized_pnl": 0.0,
         "position": None,  # legacy alias
-        "positions": {BOOK_INTRADAY: None, BOOK_SWING: None},
+        "positions": {BOOK_INTRADAY: [], BOOK_SWING: []},
         "trades": [],
         "decisions": [],
         "equity_curve": [
@@ -103,22 +217,48 @@ def default_account() -> dict[str, Any]:
 
 
 def sync_legacy_position(account: dict[str, Any]) -> None:
-    """Keep ``position`` in sync: prefer intraday, else swing."""
+    """Keep ``position`` in sync: first intraday leg, else first swing leg."""
     positions = account.get("positions")
     if not isinstance(positions, dict):
         account["position"] = None
         return
-    account["position"] = positions.get(BOOK_INTRADAY) or positions.get(BOOK_SWING)
+    for book in BOOKS:
+        legs = positions.get(book) or []
+        if isinstance(legs, list) and legs:
+            account["position"] = legs[0]
+            return
+        if isinstance(legs, dict):
+            account["position"] = legs
+            return
+    account["position"] = None
+
+
+def _coerce_book_legs(value: Any) -> list[dict[str, Any]]:
+    """Normalize one book's stored value to a list of position dicts.
+
+    Accepts the current list form, the pre-2026-11-12 single dict (or
+    None) — migrated in place by :func:`ensure_positions`.
+    """
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [p for p in value if isinstance(p, dict)]
+    return []
 
 
 def ensure_positions(account: dict[str, Any]) -> dict[str, Any]:
-    """Migrate legacy single ``position`` → dual ``positions`` books."""
+    """Migrate legacy single ``position`` → dual ``positions`` books.
+
+    Each book holds a list of position dicts (max intraday 3 / swing 2).
+    """
     positions = account.get("positions")
     if not isinstance(positions, dict):
-        positions = {BOOK_INTRADAY: None, BOOK_SWING: None}
+        positions = {BOOK_INTRADAY: [], BOOK_SWING: []}
         account["positions"] = positions
     for book in BOOKS:
-        positions.setdefault(book, None)
+        positions[book] = _coerce_book_legs(positions.get(book))
 
     legacy = account.get("position")
     if legacy and not positions.get(BOOK_INTRADAY) and not positions.get(BOOK_SWING):
@@ -126,32 +266,80 @@ def ensure_positions(account: dict[str, Any]) -> dict[str, Any]:
         book = BOOK_SWING if "swing" in horizon else BOOK_INTRADAY
         legacy = dict(legacy)
         legacy.setdefault("book", book)
-        positions[book] = legacy
+        positions[book] = [legacy]
 
     sync_legacy_position(account)
     return positions
 
 
+def get_positions(account: dict[str, Any], book: str) -> list[dict[str, Any]]:
+    """All open positions in ``book`` (copy of the stored list)."""
+    return list(ensure_positions(account).get(book) or [])
+
+
 def get_position(account: dict[str, Any], book: str) -> dict[str, Any] | None:
-    return ensure_positions(account).get(book)
+    """First open position in ``book`` (compat: was the only position)."""
+    legs = get_positions(account, book)
+    return legs[0] if legs else None
 
 
 def set_position(
     account: dict[str, Any], book: str, position: dict[str, Any] | None
 ) -> None:
+    """Replace a book's legs with a single position (or clear it).
+
+    Compat helper for single-position callers; multi-leg writes use
+    :func:`add_position` / :func:`remove_position`.
+    """
     positions = ensure_positions(account)
     if book not in BOOKS:
         raise ValueError(f"Unknown book: {book}")
     if position is not None:
         position = dict(position)
         position["book"] = book
-    positions[book] = position
+        positions[book] = [position]
+    else:
+        positions[book] = []
     sync_legacy_position(account)
+
+
+def add_position(
+    account: dict[str, Any], book: str, position: dict[str, Any]
+) -> None:
+    """Append one leg to a book (caller enforces the per-book limit)."""
+    positions = ensure_positions(account)
+    if book not in BOOKS:
+        raise ValueError(f"Unknown book: {book}")
+    position = dict(position)
+    position["book"] = book
+    positions[book].append(position)
+    sync_legacy_position(account)
+
+
+def remove_position(
+    account: dict[str, Any], book: str, symbol: str
+) -> dict[str, Any] | None:
+    """Remove one leg (by symbol) from a book; returns it or None."""
+    positions = ensure_positions(account)
+    if book not in BOOKS:
+        raise ValueError(f"Unknown book: {book}")
+    sym = str(symbol or "").upper()
+    legs = positions[book]
+    for i, leg in enumerate(legs):
+        if str(leg.get("symbol") or "").upper() == sym:
+            removed = legs.pop(i)
+            sync_legacy_position(account)
+            return removed
+    return None
 
 
 def open_positions(account: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     positions = ensure_positions(account)
-    return [(b, p) for b, p in ((book, positions.get(book)) for book in BOOKS) if p]
+    out: list[tuple[str, dict[str, Any]]] = []
+    for book in BOOKS:
+        for leg in positions.get(book) or []:
+            out.append((book, leg))
+    return out
 
 
 def load_account() -> dict[str, Any]:
@@ -178,6 +366,7 @@ def load_account() -> dict[str, Any]:
         for k, v in DEFAULT_PARAMS.items():
             data["params"].setdefault(k, v)
     ensure_positions(data)
+    ensure_history_adjustment(data)
     return data
 
 

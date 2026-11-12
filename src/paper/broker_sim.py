@@ -14,11 +14,14 @@ from src.paper.account import (
     BOOK_INTRADAY,
     BOOKS,
     STARTING_CASH,
+    add_position,
     append_trade,
     ensure_positions,
     get_position,
+    get_positions,
     mark_to_market,
-    set_position,
+    max_positions_for_book,
+    remove_position,
 )
 from src.paper.price_guard import (
     DEFAULT_MAX_DEVIATION_PCT,
@@ -35,6 +38,32 @@ class NonsensePriceError(ValueError):
 
 class InsufficientCashError(ValueError):
     """Not enough cash to open the requested size."""
+
+
+def r_multiple(
+    direction: str,
+    entry: float | None,
+    stop: float | None,
+    price: float | None,
+) -> float | None:
+    """Signed R multiple of ``price`` vs the entry/stop plan.
+
+    The plan risk is the entry→stop distance; every exit (stop, target,
+    EOD flatten, loss breaker) reports against the same yardstick so
+    expectancy can be computed across all closed legs.
+    """
+    if entry is None or stop is None or price is None:
+        return None
+    try:
+        entry_f, stop_f, price_f = float(entry), float(stop), float(price)
+    except (TypeError, ValueError):
+        return None
+    risk = abs(entry_f - stop_f)
+    if risk <= 0:
+        return None
+    if (direction or "LONG").upper() == "SHORT":
+        return (entry_f - price_f) / risk
+    return (price_f - entry_f) / risk
 
 
 def _safe_float(value: Any) -> float | None:
@@ -113,8 +142,14 @@ def execute_entry(
     """Open a position at ``price`` in the given book. Raises InsufficientCashError."""
     ensure_positions(account)
     book_key = _resolve_book(book, signal)
-    if get_position(account, book_key):
-        raise ValueError(f"Already holding a {book_key} position")
+    existing = get_positions(account, book_key)
+    if any(str(p.get("symbol") or "").upper() == symbol.upper() for p in existing):
+        raise ValueError(f"Already holding {symbol.upper()} in {book_key}")
+    limit = max_positions_for_book(book_key)
+    if len(existing) >= limit:
+        raise ValueError(
+            f"Book {book_key} is full ({len(existing)}/{limit} positions)"
+        )
     if shares <= 0:
         raise InsufficientCashError("shares must be > 0")
     if price <= 0:
@@ -183,7 +218,7 @@ def execute_entry(
     from src.paper.account import _now_iso
 
     position["opened_at"] = _now_iso()
-    set_position(account, book_key, position)
+    add_position(account, book_key, position)
 
     trade = {
         "side": "BUY" if direction == "LONG" else "SELL_SHORT",
@@ -212,20 +247,51 @@ def execute_exit(
     reason: str = "",
     trading_date: str | None = None,
     book: str | None = None,
+    symbol: str | None = None,
 ) -> dict[str, Any]:
     """Close an open position at ``price``.
 
     If ``book`` is omitted, closes the legacy primary book (intraday preferred).
+    When a book holds several legs, ``symbol`` selects which one; without it
+    the first leg in the book is closed.
     """
     ensure_positions(account)
     if book:
-        pos = get_position(account, book)
         book_key = book
+        if symbol:
+            legs = get_positions(account, book)
+            pos = next(
+                (
+                    p
+                    for p in legs
+                    if str(p.get("symbol") or "").upper()
+                    == str(symbol).upper()
+                ),
+                None,
+            )
+        else:
+            pos = get_position(account, book)
     else:
         # Legacy: close whatever sync_legacy exposes / first open
         pos = account.get("position")
         book_key = None
-        if pos:
+        if symbol:
+            for b in BOOKS:
+                cand = next(
+                    (
+                        p
+                        for p in get_positions(account, b)
+                        if str(p.get("symbol") or "").upper()
+                        == str(symbol).upper()
+                    ),
+                    None,
+                )
+                if cand:
+                    pos, book_key = cand, b
+                    break
+            else:
+                pos = None
+        elif pos:
             book_key = pos.get("book") or _resolve_book(None, pos)
             pos = get_position(account, book_key)
         if not pos:
@@ -270,7 +336,11 @@ def execute_exit(
 
     realized = float(account.get("realized_pnl") or 0.0) + pnl
     account["realized_pnl"] = round(realized, 2)
-    set_position(account, book_key, None)
+    remove_position(account, book_key, symbol)
+
+    # Every exit reports its R multiple vs the entry→stop plan risk, so
+    # expectancy can be computed across all closed legs (not just stops).
+    rm = r_multiple(direction, avg, pos.get("stop"), price)
 
     trade = {
         "side": side,
@@ -281,6 +351,7 @@ def execute_exit(
         "price": round(price, 4),
         "notional": notional,
         "pnl": round(pnl, 2),
+        "r_multiple": round(rm, 2) if rm is not None else None,
         "reason": reason,
         "trading_date": trading_date,
         "avg_entry": avg,

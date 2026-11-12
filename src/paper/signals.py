@@ -217,6 +217,76 @@ def resolve_quote_bar(
     return out
 
 
+def resolve_minute_bars(
+    symbol: str,
+    trading_date: str,
+    *,
+    raw: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Today's regular-session 1-minute bars (ET), oldest first.
+
+    Each bar is ``{"ts", "open", "high", "low", "close"}``. Returns ``[]``
+    when bars are unavailable (network failure, no session yet) — callers
+    must fall back to the single-price path, never treat "no bars" as "no
+    touch". Pre-market/after-hours bars are excluded: only 9:30–16:00 ET.
+    """
+    from datetime import date as date_type
+    from datetime import time as time_type
+
+    import yfinance as yf
+
+    from src.utils.trading_calendar import ET
+
+    sym = (symbol or "").upper()
+    if not sym:
+        return []
+    try:
+        day = date_type.fromisoformat(trading_date)
+    except ValueError:
+        return []
+    try:
+        hist = yf.Ticker(sym).history(period="1d", interval="1m", prepost=True)
+    except Exception:
+        logger.debug("minute bars failed for %s", sym, exc_info=True)
+        return []
+    if hist.empty:
+        return []
+    open_t = time_type(9, 30)
+    close_t = time_type(16, 0)
+    out: list[dict[str, Any]] = []
+    for idx, row in hist.iterrows():
+        try:
+            ts = idx.to_pydatetime()
+        except Exception:
+            continue
+        ts = ts.astimezone(ET) if ts.tzinfo is not None else ET.localize(ts)
+        if ts.date() != day:
+            continue
+        if not (open_t <= ts.time() < close_t):
+            continue
+        try:
+            o, h, lo, c = (
+                float(row["Open"]),
+                float(row["High"]),
+                float(row["Low"]),
+                float(row["Close"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if min(o, h, lo, c) <= 0:
+            continue
+        out.append(
+            {
+                "ts": ts.isoformat(),
+                "open": round(o, 4),
+                "high": round(h, 4),
+                "low": round(lo, 4),
+                "close": round(c, 4),
+            }
+        )
+    return out
+
+
 def _morning_top_trades(morning: dict[str, Any]) -> list[dict[str, Any]]:
     top = (morning.get("best_trades") or {}).get("top_trades") or morning.get(
         "top_trades"

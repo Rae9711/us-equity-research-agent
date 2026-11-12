@@ -27,6 +27,13 @@ MAX_POSITION_PCT_INTRADAY = 40.0
 MAX_POSITION_PCT_SWING = 70.0
 MAX_TOTAL_DEPLOYED_PCT = 95.0  # 100 - CASH_RESERVE_MIN
 
+# Portfolio-level cap on combined *planned* risk across both books (fix 5):
+# the sum of every open position's entry→stop dollars plus a new entry's
+# planned risk must stay within this % of equity. This is separate from the
+# per-trade 3% clamp in risk_and_cap_pct — one 3% trade plus another 3%
+# trade would otherwise put 6% of equity at risk simultaneously.
+MAX_PORTFOLIO_PLANNED_RISK_PCT = 3.0
+
 # Dual-book default split of *deployable* capital (after cash reserve)
 SWING_CORE_SHARE = 0.60
 INTRADAY_SATELLITE_SHARE = 0.40
@@ -230,6 +237,19 @@ def risk_and_cap_pct(
     return round(risk, 2), round(cap, 1), reasons
 
 
+def book_notional_cap_pct(book: str, confidence: float) -> float:
+    """Per-book TOTAL-notional cap: 40% intraday / 70% swing x confidence
+    factor — shared by all the book's legs (fix 7).
+
+    Deliberately NOT the per-entry ``max_position_pct`` (which the account
+    ``max_position_pct`` param further tightens to a 25% base): the book
+    cap is the book's own limit, and each new leg must fit BOTH its own
+    per-entry cap and the headroom left under this book cap.
+    """
+    base = MAX_POSITION_PCT_SWING if book == BOOK_SWING else MAX_POSITION_PCT_INTRADAY
+    return _clamp(base * (0.55 + 0.55 * float(confidence or 0.0)), 8.0, base)
+
+
 def should_hold_cash(
     *,
     action: str,
@@ -413,6 +433,122 @@ def allocate_for_entry(
         "advisory": True,
         "advisory_zh": "模拟交易 · 不构成投资建议",
     }
+
+
+def planned_risk_dollars(
+    *,
+    shares: float,
+    entry: float | None,
+    stop: float | None,
+    direction: str = "LONG",
+) -> float | None:
+    """Dollars lost if the stop is hit (plan risk for one position).
+
+    Mirrors the sizing fallback in ``broker_sim.size_shares``: with no
+    usable stop, plan risk is 2% of entry per share.
+    """
+    entry_f = _safe_float(entry)
+    if entry_f is None or entry_f <= 0 or shares is None or float(shares) <= 0:
+        return None
+    stop_f = _safe_float(stop)
+    if stop_f is not None and stop_f > 0:
+        per_share = abs(entry_f - stop_f)
+    else:
+        per_share = entry_f * 0.02
+    if per_share <= 0:
+        return None
+    return round(float(shares) * per_share, 2)
+
+
+def portfolio_planned_risk(account: dict[str, Any]) -> dict[str, Any]:
+    """Combined planned risk of all open positions vs the portfolio cap."""
+    params = account.get("params") or {}
+    equity = float(account.get("equity") or account.get("cash") or STARTING_CASH)
+    cap_pct = float(
+        params.get("max_portfolio_planned_risk_pct")
+        or MAX_PORTFOLIO_PLANNED_RISK_PCT
+    )
+    cap_dollars = round(equity * cap_pct / 100.0, 2)
+    legs: list[dict[str, Any]] = []
+    total = 0.0
+    for book, pos in open_positions(account):
+        risk = planned_risk_dollars(
+            shares=pos.get("shares"),
+            entry=pos.get("avg_entry"),
+            stop=pos.get("stop"),
+            direction=pos.get("direction") or "LONG",
+        )
+        legs.append(
+            {
+                "book": book,
+                "symbol": pos.get("symbol"),
+                "direction": pos.get("direction"),
+                "shares": pos.get("shares"),
+                "planned_risk": risk,
+            }
+        )
+        if risk is not None:
+            total += risk
+    total = round(total, 2)
+    return {
+        "equity": round(equity, 2),
+        "cap_pct": cap_pct,
+        "cap_dollars": cap_dollars,
+        "total_planned_risk": total,
+        "headroom": round(max(0.0, cap_dollars - total), 2),
+        "legs": legs,
+    }
+
+
+def apply_portfolio_risk_cap(
+    account: dict[str, Any],
+    *,
+    direction: str,
+    entry_price: float,
+    stop_price: float | None,
+    shares: int,
+) -> tuple[int, dict[str, Any]]:
+    """Reduce ``shares`` so existing + new planned risk stays in the cap.
+
+    Returns ``(shares, detail)``. ``detail["capped"]`` is True when the
+    request was reduced; ``shares == 0`` means even one share would breach
+    the cap and the entry must be skipped.
+    """
+    detail = portfolio_planned_risk(account)
+    cap_dollars = detail["cap_dollars"]
+    existing = detail["total_planned_risk"]
+    per_share = planned_risk_dollars(
+        shares=1, entry=entry_price, stop=stop_price, direction=direction
+    )
+    detail["new_per_share_risk"] = per_share
+    detail["requested_shares"] = int(shares)
+    if per_share is None or per_share <= 0:
+        detail["capped"] = False
+        detail["reason_zh"] = ""
+        return int(shares), detail
+    new_risk = round(float(shares) * per_share, 2)
+    detail["new_planned_risk"] = new_risk
+    detail["combined_planned_risk"] = round(existing + new_risk, 2)
+    if existing + new_risk <= cap_dollars + 1e-9:
+        detail["capped"] = False
+        detail["reason_zh"] = ""
+        return int(shares), detail
+    headroom = max(0.0, cap_dollars - existing)
+    max_shares = int(headroom // per_share)
+    detail["capped"] = True
+    if max_shares <= 0:
+        detail["allowed_shares"] = 0
+        detail["reason_zh"] = (
+            f"组合计划风险已满：已有持仓计划风险 ${existing:.2f}，"
+            f"上限 ${cap_dollars:.2f}（{detail['cap_pct']:g}% equity），无法新开仓"
+        )
+        return 0, detail
+    detail["allowed_shares"] = max_shares
+    detail["reason_zh"] = (
+        f"组合计划风险上限减仓：已有 ${existing:.2f} + 新开 ${new_risk:.2f} "
+        f"> 上限 ${cap_dollars:.2f}，股数 {shares} → {max_shares}"
+    )
+    return max_shares, detail
 
 
 def portfolio_allocation_snapshot(account: dict[str, Any]) -> dict[str, Any]:

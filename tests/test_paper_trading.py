@@ -202,10 +202,15 @@ def test_force_price_does_not_false_stop_swing(data_root):
     assert get_position(acct, "swing")["symbol"] == "META"
     assert get_position(acct, "swing")["shares"] == 3
     assert acct["realized_pnl"] == 0.0
-    books = {b["book"]: b for b in (decision.get("books") or [])}
-    swing = books.get("swing") or {}
-    assert swing.get("action") == "HOLD"
-    assert swing.get("quote_rejected") is True or "拒绝" in (swing.get("reason") or "")
+    # A book may now hold several legs, so the decision can carry more than
+    # one "swing" row (managed leg + second-leg entry attempt); the managed
+    # leg must still HOLD with the nonsense quote rejected.
+    swing_rows = [b for b in (decision.get("books") or []) if b.get("book") == "swing"]
+    assert any(
+        r.get("action") == "HOLD"
+        and (r.get("quote_rejected") is True or "拒绝" in (r.get("reason") or ""))
+        for r in swing_rows
+    )
 
 
 def test_reject_nonsense_entry_quote(data_root):
@@ -314,7 +319,9 @@ def test_decide_exit_on_stop(data_root):
     assert acct["position"] is None
 
 
-def test_dual_books_eod_flattens_intraday_only(data_root, monkeypatch):
+def test_dual_books_3day_flatten_intraday_only(data_root, monkeypatch):
+    """Revised fix 2 (2026-11-12): an intraday leg flattens on its 3rd
+    trading day at the close, not every day; swing legs never flatten."""
     acct = default_account()
     execute_entry(
         acct,
@@ -324,7 +331,7 @@ def test_dual_books_eod_flattens_intraday_only(data_root, monkeypatch):
         shares=5,
         stop=335.0,
         target=354.0,
-        trading_date="2026-07-08",
+        trading_date="2026-07-06",
         signal={"source": "morning_primary", "horizon": "Intraday"},
         book="intraday",
     )
@@ -350,6 +357,11 @@ def test_dual_books_eod_flattens_intraday_only(data_root, monkeypatch):
 
     monkeypatch.setattr(
         "src.paper.execution_agent.resolve_quote", _fake_quote
+    )
+    # The close-window check compares the wall clock against the session
+    # close; pin it so the test does not depend on when it runs.
+    monkeypatch.setattr(
+        "src.paper.execution_agent.session_in_close_window", lambda d: True
     )
 
     decision = decide_and_act(

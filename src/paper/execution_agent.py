@@ -4,12 +4,14 @@ ADVISORY ONLY — 模拟交易 · 不构成投资建议.
 Uses Ideal Entry zone + Entry Status + stop/target vs last price.
 
 Dual books (default):
-  - intraday / 短线 — Primary #1, force flat at EOD
-  - swing / 长线 — swing_trade, hold overnight
+  - intraday / 短线 — Primary #1, may hold overnight, at most 3 trading
+    days then flattened at the close window; at most 3 legs
+  - swing / 长线 — swing_trade, hold overnight; at most 2 legs
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src.paper.account import (
@@ -17,16 +19,24 @@ from src.paper.account import (
     BOOK_SWING,
     ensure_positions,
     get_position,
+    get_positions,
     mark_to_market,
+    max_positions_for_book,
     open_positions,
 )
-from src.paper.allocation import allocate_for_entry
+from src.paper.allocation import (
+    allocate_for_entry,
+    apply_portfolio_risk_cap,
+    book_notional_cap_pct,
+)
+from src.paper.news_gate import news_block_reason, news_gate_for_date
 from src.paper.broker_sim import (
     InsufficientCashError,
     NonsensePriceError,
     can_afford,
     execute_entry,
     execute_exit,
+    r_multiple,
 )
 from src.paper.price_guard import (
     DEFAULT_MAX_DEVIATION_PCT,
@@ -40,10 +50,18 @@ from src.paper.signals import (
     pick_intraday_signal,
     pick_signal,
     pick_swing_signal,
+    resolve_minute_bars,
     resolve_quote,
     resolve_quote_bar,
 )
 from src.research.entry_status import infer_session_phase
+from src.utils.trading_calendar import holding_trading_days, session_in_close_window
+
+logger = logging.getLogger(__name__)
+
+# Fix 2 (revised 2026-11-12): an intraday leg may hold overnight, at most
+# 3 trading days; on the 3rd trading day it is flattened at the close.
+INTRADAY_MAX_HOLDING_DAYS = 3
 
 BOOK_LABEL_ZH = {
     BOOK_INTRADAY: "短线",
@@ -94,16 +112,13 @@ def _param(params: dict[str, Any], key: str, default: float) -> float:
 def _r_multiple(
     direction: str, entry: float | None, stop: float | None, price: float | None
 ) -> float | None:
-    """Signed R multiple of ``price`` vs the entry/stop plan."""
-    if entry is None or stop is None or price is None:
-        return None
-    risk = abs(entry - stop)
-    if risk <= 0:
-        return None
-    d = (direction or "LONG").upper()
-    if d == "SHORT":
-        return (entry - price) / risk
-    return (price - entry) / risk
+    """Signed R multiple of ``price`` vs the entry/stop plan.
+
+    Thin wrapper around :func:`src.paper.broker_sim.r_multiple` (kept so
+    existing imports keep working); ``execute_exit`` now records R on every
+    exit centrally, so call sites only need R for reason strings.
+    """
+    return r_multiple(direction, entry, stop, price)
 
 
 def _stop_fill_price(
@@ -245,19 +260,87 @@ def _collect_symbols(trading_date: str, account: dict[str, Any]) -> list[str]:
     return syms
 
 
-def _manage_position(
+def _bar_stop_trigger_price(direction: str, bar: dict[str, Any]) -> float | None:
+    """Adverse extreme of a bar (the price that would have touched the stop)."""
+    d = (direction or "LONG").upper()
+    if d == "SHORT":
+        return _safe_float(bar.get("high"))
+    return _safe_float(bar.get("low"))
+
+
+def _bar_target_trigger_price(direction: str, bar: dict[str, Any]) -> float | None:
+    """Favourable extreme of a bar (the price that would have touched the target)."""
+    d = (direction or "LONG").upper()
+    if d == "SHORT":
+        return _safe_float(bar.get("low"))
+    return _safe_float(bar.get("high"))
+
+
+def _scan_bars_for_exit(
+    direction: str,
+    stop: float | None,
+    target: float | None,
+    bars: list[dict[str, Any]],
+    prev_close: float | None,
+) -> tuple[str, dict[str, Any], float | None] | None:
+    """First stop/target touch across 1-minute bars, in time order.
+
+    Returns ``(kind, bar, prev_close_of_bar)`` with kind ``"stop"`` or
+    ``"target"``, or None when no bar touched either level. Within one bar
+    the stop is checked first: order inside a minute is unknowable, and the
+    risk control takes precedence over the profit target.
+    """
+    prev = prev_close
+    for bar in bars:
+        trig_stop = _bar_stop_trigger_price(direction, bar)
+        if stop is not None and trig_stop is not None and _stop_hit(direction, trig_stop, stop):
+            return ("stop", bar, prev)
+        trig_target = _bar_target_trigger_price(direction, bar)
+        if target is not None and trig_target is not None and _target_hit(
+            direction, trig_target, target
+        ):
+            return ("target", bar, prev)
+        close = _safe_float(bar.get("close"))
+        if close is not None:
+            prev = close
+    return None
+
+
+def _target_fill_price(
+    direction: str,
+    target: float,
+    bar: dict[str, Any],
+    prev_close: float | None,
+) -> tuple[float, bool]:
+    """Fill for a target touch inside one 1-minute bar.
+
+    A bar that *opened* already beyond the target is a true gap: fill at the
+    open (the gap gain is real, mirroring the gap-through-stop rule). An
+    intraday touch inside the bar fills at the target itself — the
+    first-touch price — never at a later tick's farther price.
+    """
+    open_px = _safe_float(bar.get("open"))
+    d = (direction or "LONG").upper()
+    if open_px is not None and prev_close is not None:
+        if d == "SHORT" and prev_close > target and open_px <= target:
+            return open_px, True
+        if d == "LONG" and prev_close < target and open_px >= target:
+            return open_px, True
+    return target, False
+
+
+def _manage_single_position(
     account: dict[str, Any],
     book: str,
+    pos: dict[str, Any],
     trading_date: str,
     phase: str,
     price_map: dict[str, float] | None,
     raw: dict[str, Any] | None,
     params: dict[str, Any],
+    bars_map: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any] | None:
-    """Manage one open book. Returns a book-result dict or None if empty."""
-    pos = get_position(account, book)
-    if not pos:
-        return None
+    """Manage one open leg. Returns a book-result dict or None if skipped."""
 
     label = BOOK_LABEL_ZH.get(book, book)
     sym = pos["symbol"]
@@ -305,6 +388,90 @@ def _manage_position(
     entry_px = _safe_float(pos.get("avg_entry"))
     horizon = (pos.get("horizon") or ("Swing" if book == BOOK_SWING else "Intraday")).lower()
 
+    # --- Fix 1: sequential 1-minute bars ---------------------------------
+    # A 30-minute tick only sees the last price: a stop touched mid-interval
+    # and recovered, or a target touched and run past, was invisible or
+    # filled at the stale far quote. Scan today's 1m bars in order; the
+    # first touch wins and fills off that bar, not the late tick quote.
+    # When no bars are available (or the quote was force-injected for a
+    # demo/test), fall through to the single-price checks below.
+    forced = bool(price_map and sym in price_map)
+    bars: list[dict[str, Any]] | None = None
+    if bars_map is not None:
+        bars = bars_map.get(sym)
+    elif not forced:
+        try:
+            bars = resolve_minute_bars(sym, trading_date, raw=raw)
+        except Exception:
+            logger.debug("minute bar scan failed for %s", sym, exc_info=True)
+            bars = None
+    if bars:
+        bar_prev_close = resolve_quote_bar(sym, trading_date, raw=raw).get(
+            "prev_close"
+        )
+        hit = _scan_bars_for_exit(direction, stop, target, bars, bar_prev_close)
+        if hit is not None:
+            kind, bar, bar_prev = hit
+            if kind == "stop":
+                max_slip = _param(params, "max_stop_slippage_pct", 0.5)
+                trig = _bar_stop_trigger_price(direction, bar)
+                bar_evidence = {"open": bar.get("open"), "prev_close": bar_prev}
+                fill, capped, gap = _stop_fill_price(
+                    direction, stop, trig, bar_evidence, max_slip
+                )
+                r_mult = _r_multiple(direction, entry_px, stop, fill)
+                reason = f"{label}止损触发 @ {fill:.4g} (stop={stop})"
+                if gap:
+                    reason += "·跳空穿止损按开盘价成交"
+                elif capped:
+                    reason += f"·成交价触滑点上限 {max_slip:g}%"
+                reason += f"·1分钟K线 {bar.get('ts')} 先触及"
+                if r_mult is not None:
+                    reason += f"·R={r_mult:.2f}"
+                    if r_mult >= 0:
+                        reason += "（盈利/保本离场，非亏损止损）"
+                trade = execute_exit(
+                    account,
+                    price=fill,
+                    reason=reason,
+                    trading_date=trading_date,
+                    book=book,
+                    symbol=sym,
+                )
+                trade["stop_trigger"] = stop
+                trade["fill_price"] = round(fill, 4)
+                trade["slippage_capped"] = capped
+                trade["gap_through_stop"] = gap
+                trade["bar_ts"] = bar.get("ts")
+                _set_stop_cooldown(account, trading_date, book, sym)
+                base["action"] = "EXIT"
+                base["reason"] = trade["reason"]
+                base["trade"] = trade
+                return base
+            fill, gap = _target_fill_price(direction, target, bar, bar_prev)
+            r_mult = _r_multiple(direction, entry_px, stop, fill)
+            target_reason = f"{label}止盈触发 @ {fill:.4g} (target={target})"
+            if gap:
+                target_reason += "·跳空穿目标按开盘价成交"
+            target_reason += f"·1分钟K线 {bar.get('ts')} 先触及"
+            if r_mult is not None:
+                target_reason += f"·R={r_mult:.2f}"
+            trade = execute_exit(
+                account,
+                price=fill,
+                reason=target_reason,
+                trading_date=trading_date,
+                book=book,
+                symbol=sym,
+            )
+            trade["fill_price"] = round(fill, 4)
+            trade["gap_through_target"] = gap
+            trade["bar_ts"] = bar.get("ts")
+            base["action"] = "EXIT"
+            base["reason"] = trade["reason"]
+            base["trade"] = trade
+            return base
+
     if _stop_hit(direction, px, stop):
         max_slip = _param(params, "max_stop_slippage_pct", 0.5)
         bar = resolve_quote_bar(sym, trading_date, raw=raw)
@@ -325,12 +492,12 @@ def _manage_position(
             reason=reason,
             trading_date=trading_date,
             book=book,
+            symbol=sym,
         )
         trade["stop_trigger"] = stop
         trade["fill_price"] = round(fill, 4)
         trade["slippage_capped"] = capped
         trade["gap_through_stop"] = gap
-        trade["r_multiple"] = round(r_mult, 2) if r_mult is not None else None
         _set_stop_cooldown(account, trading_date, book, sym)
         base["action"] = "EXIT"
         base["reason"] = trade["reason"]
@@ -364,8 +531,8 @@ def _manage_position(
                 ),
                 trading_date=trading_date,
                 book=book,
+                symbol=sym,
             )
-            trade["r_multiple"] = _r_multiple(direction, entry_px, stop, px)
             _set_stop_cooldown(account, trading_date, book, sym)
             base["action"] = "EXIT"
             base["reason"] = trade["reason"]
@@ -373,38 +540,220 @@ def _manage_position(
             return base
 
     if _target_hit(direction, px, target):
+        r_mult = _r_multiple(direction, entry_px, stop, px)
+        target_reason = f"{label}止盈触发 @ {px} (target={target})"
+        if r_mult is not None:
+            target_reason += f"·R={r_mult:.2f}"
         trade = execute_exit(
             account,
             price=px,
-            reason=f"{label}止盈触发 @ {px} (target={target})",
+            reason=target_reason,
             trading_date=trading_date,
             book=book,
+            symbol=sym,
         )
         base["action"] = "EXIT"
         base["reason"] = trade["reason"]
         base["trade"] = trade
         return base
 
+    # Fix 2 (revised 2026-11-12): an intraday leg may hold overnight, at
+    # most 3 trading days. On the 3rd trading day it is deterministically
+    # flattened in the close window (the last tick of the day); if that
+    # window was missed (no tick ran), the first later tick flattens it
+    # instead (overdue). Swing legs are untouched. The check lives in the
+    # tick flow — there is no EOD job — and reuses flatten_intraday_at_close.
     force_eod = bool(params.get("force_exit_intraday_at_close", True))
     is_swing = book == BOOK_SWING or "swing" in horizon
-    if force_eod and not is_swing and phase == "closed":
-        trade = execute_exit(
-            account,
-            price=px,
-            reason=f"短线仓位收盘平仓 @ {px}",
-            trading_date=trading_date,
-            book=book,
+    if force_eod and not is_swing:
+        holding_days = holding_trading_days(pos.get("opened_date"), trading_date)
+        due = (
+            holding_days is not None
+            and holding_days >= INTRADAY_MAX_HOLDING_DAYS
+            and (
+                session_in_close_window(trading_date)
+                or (
+                    holding_days > INTRADAY_MAX_HOLDING_DAYS
+                    and phase != "premarket"
+                )
+            )
         )
-        base["action"] = "EXIT"
-        base["reason"] = trade["reason"]
-        base["trade"] = trade
-        return base
+        if due:
+            flattened = flatten_intraday_at_close(
+                account,
+                trading_date,
+                price=px,
+                raw=raw,
+                symbol=sym,
+                min_holding_days=INTRADAY_MAX_HOLDING_DAYS,
+            )
+            if flattened is not None and flattened.get("action") in (
+                "EXIT",
+                "HOLD",
+            ):
+                return flattened
+            # SKIP (not due — defensive) falls through to the HOLD tail.
 
     mark_to_market(account, price_by_symbol={sym: px})
     base["reason"] = (
         f"{label}持仓 {sym} {direction} {pos.get('shares')}股 @ {pos.get('avg_entry')}；"
         f"现价 {px}，未触止损/止盈"
     )
+    return base
+
+
+def _manage_position(
+    account: dict[str, Any],
+    book: str,
+    trading_date: str,
+    phase: str,
+    price_map: dict[str, float] | None,
+    raw: dict[str, Any] | None,
+    params: dict[str, Any],
+    bars_map: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """Manage every open leg in a book. Returns one result per leg."""
+    results: list[dict[str, Any]] = []
+    for leg in get_positions(account, book):
+        managed = _manage_single_position(
+            account, book, leg, trading_date, phase, price_map, raw, params,
+            bars_map=bars_map,
+        )
+        if managed:
+            results.append(managed)
+    return results
+
+
+def flatten_intraday_at_close(
+    account: dict[str, Any],
+    trading_date: str,
+    *,
+    price: float | None = None,
+    bars: list[dict[str, Any]] | None = None,
+    raw: dict[str, Any] | None = None,
+    symbol: str | None = None,
+    min_holding_days: int | None = INTRADAY_MAX_HOLDING_DAYS,
+) -> dict[str, Any] | None:
+    """Deterministically flatten one intraday leg at/after the session close.
+
+    Replaces the old opportunistic ``phase == "closed"`` branch (which only
+    fired if a tick happened to run with that phase). Called from
+    :func:`_manage_single_position` when the leg's holding limit expires —
+    there is no EOD job, the check lives in the tick flow. Swing legs are
+    untouched.
+
+    ``min_holding_days`` is a guard: legs held fewer trading days are left
+    alone (returned as SKIP). Exit price preference: injected price > last
+    1-minute bar close (the true close) > live/last quote > the leg's last
+    mark. Returns a book-result dict, or None when no matching leg is open.
+    """
+    if symbol:
+        legs = get_positions(account, BOOK_INTRADAY)
+        pos = next(
+            (
+                p
+                for p in legs
+                if str(p.get("symbol") or "").upper() == str(symbol).upper()
+            ),
+            None,
+        )
+    else:
+        pos = get_position(account, BOOK_INTRADAY)
+    if not pos:
+        return None
+
+    label = BOOK_LABEL_ZH.get(BOOK_INTRADAY, BOOK_INTRADAY)
+    sym = pos["symbol"]
+    direction = (pos.get("direction") or "LONG").upper()
+    entry_px = _safe_float(pos.get("avg_entry"))
+    stop = _safe_float(pos.get("stop"))
+    holding_days = holding_trading_days(pos.get("opened_date"), trading_date)
+
+    base: dict[str, Any] = {
+        "book": BOOK_INTRADAY,
+        "book_zh": label,
+        "action": "HOLD",
+        "reason": "",
+        "trade": None,
+        "signal": {
+            "symbol": sym,
+            "direction": direction,
+            "source": pos.get("signal_source"),
+            "horizon": pos.get("horizon"),
+        },
+        "quote": None,
+        "quote_source": "none",
+    }
+    if min_holding_days is not None and (
+        holding_days is None or holding_days < min_holding_days
+    ):
+        held = "未知" if holding_days is None else f"{holding_days} 天"
+        base["action"] = "SKIP"
+        base["reason"] = (
+            f"{label}持仓 {sym}：已持有 {held}，未到 {min_holding_days} 个交易日，"
+            "收盘不平仓"
+        )
+        return base
+
+    px: float | None = None
+    qsrc = "none"
+    if price is not None and price > 0:
+        px, qsrc = float(price), "injected"
+    if px is None:
+        use_bars = bars
+        if use_bars is None:
+            try:
+                use_bars = resolve_minute_bars(sym, trading_date, raw=raw)
+            except Exception:
+                logger.debug("EOD bar fetch failed for %s", sym, exc_info=True)
+                use_bars = None
+        if use_bars:
+            last_close = _safe_float(use_bars[-1].get("close"))
+            if last_close is not None and last_close > 0:
+                px, qsrc = last_close, "minute_bar_close"
+    if px is None:
+        px, qsrc = resolve_quote(sym, trading_date, raw=raw, prefer_live=True)
+    if px is None:
+        px = _safe_float(pos.get("last_price"))
+        qsrc = "last_mark" if px else "none"
+    base["quote"] = px
+    base["quote_source"] = qsrc
+
+    if px is None or px <= 0:
+        base["reason"] = f"{label}持仓 {sym}：收盘平仓无可用报价，继续持有"
+        return base
+
+    params = account.get("params") or {}
+    max_dev = float(
+        params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
+    )
+    sane, reject = is_sane_fill_price(
+        px, anchors=anchors_from_position(pos), max_deviation_pct=max_dev
+    )
+    if not sane:
+        base["reason"] = (
+            f"{label}持仓 {sym}：{reject or '报价异常'}，拒绝收盘平仓，继续持有"
+        )
+        base["quote_rejected"] = True
+        return base
+
+    r_mult = _r_multiple(direction, entry_px, stop, px)
+    reason = (
+        f"{label}持仓 {sym} 满 {holding_days} 个交易日收盘平仓 @ {px}"
+    )
+    if r_mult is not None:
+        reason += f"·R={r_mult:.2f}"
+    trade = execute_exit(
+        account,
+        price=px,
+        reason=reason,
+        trading_date=trading_date,
+        book=BOOK_INTRADAY,
+        symbol=sym,
+    )
+    base["action"] = "EXIT"
+    base["reason"] = trade["reason"]
+    base["trade"] = trade
     return base
 
 
@@ -415,6 +764,7 @@ def _try_entry(
     trading_date: str,
     *,
     peer_entering: bool = False,
+    news_gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     label = BOOK_LABEL_ZH.get(book, book)
     action = picked.get("action")
@@ -467,6 +817,36 @@ def _try_entry(
         result["reason"] = f"{label}跳过：{sym} 当日已止损/熔断离场，冷却中不再重入"
         return result
 
+    # Fix 7: one symbol at most once per book — a second leg must be a
+    # different symbol; the signal picker may re-pick a held symbol.
+    if sym and any(
+        str(p.get("symbol") or "").upper() == sym
+        for p in get_positions(account, book)
+    ):
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}跳过：{sym} 已在{label}持仓，不重复开仓"
+        return result
+
+    # Fix 7: book-full guard (decide_and_act also gates the pick, but
+    # _try_entry must stay safe when called directly).
+    limit = max_positions_for_book(book)
+    if len(get_positions(account, book)) >= limit:
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}跳过：{label}账本已满（{limit} 个仓位）"
+        return result
+
+    # Fix 6: news-availability gate — when Polygon's intraday news fetch
+    # failed/429'd for this symbol (or globally), the research behind the
+    # signal was built without its news, so no new entry. Existing
+    # positions are managed elsewhere and are unaffected.
+    block_reason = news_block_reason(news_gate, sym)
+    if block_reason:
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}跳过：{block_reason}"
+        result["news_blocked"] = True
+        result["news_gate"] = news_gate
+        return result
+
     direction = str(sig.get("direction") or "LONG").upper()
     entry_ref = _safe_float(sig.get("entry_price") or sig.get("entry")) or float(px)
     stop_ref = _safe_float(sig.get("stop_price") or sig.get("stop"))
@@ -495,13 +875,51 @@ def _try_entry(
             result["reason"] = allocation.get("reason_zh") or "保留现金"
             return result
 
+    # Fix 7: the book's notional cap (40% intraday / 70% swing x
+    # confidence) is shared by all its legs, not per leg. This entry must
+    # fit BOTH its own per-entry cap and the headroom left under the book
+    # cap; when the book already uses the whole cap, skip instead of opening.
+    effective_max_pos_pct = (allocation or {}).get("max_position_pct")
+    book_notional_used_pct = 0.0
+    book_cap_pct = None
+    if allocation is not None:
+        equity = float(account.get("equity") or 0.0)
+        used = 0.0
+        for leg in get_positions(account, book):
+            mv = _safe_float(leg.get("market_value"))
+            if mv is None:
+                px_leg = _safe_float(leg.get("last_price")) or _safe_float(
+                    leg.get("avg_entry")
+                )
+                mv = float(leg.get("shares") or 0) * (px_leg or 0.0)
+            used += mv or 0.0
+        book_notional_used_pct = (used / equity * 100.0) if equity else 0.0
+        book_cap_pct = book_notional_cap_pct(book, allocation.get("confidence"))
+        headroom_pct = book_cap_pct - book_notional_used_pct
+        effective_max_pos_pct = max(
+            0.0,
+            min(float(effective_max_pos_pct or 0.0), headroom_pct),
+        )
+        allocation = dict(allocation)
+        allocation["max_position_pct"] = effective_max_pos_pct
+        allocation["book_notional_used_pct"] = round(book_notional_used_pct, 2)
+        allocation["book_cap_pct"] = round(book_cap_pct, 1)
+        result["allocation"] = allocation
+        if book_notional_used_pct > 0 and headroom_pct <= 0:
+            result["action"] = "SKIP"
+            result["reason"] = (
+                f"{label}跳过：账本名义上限已满，已用 "
+                f"{book_notional_used_pct:.1f}% ≥ 账本上限 {book_cap_pct:.1f}%"
+            )
+            return result
+
     shares, err = can_afford(
         account,
         price=px,
         stop=sig.get("stop_price"),
         direction=sig.get("direction") or "LONG",
         risk_pct=(allocation or {}).get("risk_pct"),
-        max_position_pct=(allocation or {}).get("max_position_pct"),
+        max_position_pct=effective_max_pos_pct,
         max_notional=(allocation or {}).get("deployable_cash"),
     )
     if shares <= 0:
@@ -515,10 +933,34 @@ def _try_entry(
             result["reason"] = f"{label}资金不足无法开仓：{err}"
         return result
 
+    # Fix 5: portfolio-level planned-risk cap — existing open positions'
+    # entry→stop dollars plus this entry's planned risk must stay within
+    # 3% of equity. Reduce shares to fit, or skip when even 1 share
+    # breaches the cap. Per-trade 3% clamp and notional caps are unchanged.
+    shares, cap_detail = apply_portfolio_risk_cap(
+        account,
+        direction=direction,
+        entry_price=float(px),
+        stop_price=sig.get("stop_price"),
+        shares=shares,
+    )
+    result["portfolio_risk_cap"] = cap_detail
+    if shares <= 0:
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}跳过：{cap_detail.get('reason_zh') or '组合计划风险已满'}"
+        return result
+
     alloc_reason = (allocation or {}).get("reason_zh") or ""
     entry_reason = picked.get("reason") or f"模拟{label}买入"
     if alloc_reason:
         entry_reason = f"{entry_reason} · {alloc_reason}"
+    if cap_detail.get("capped"):
+        entry_reason = f"{entry_reason} · {cap_detail.get('reason_zh')}"
+    if book_notional_used_pct > 0:
+        entry_reason = (
+            f"{entry_reason} · 账本名义已用 {book_notional_used_pct:.1f}%"
+            f"（上限 {book_cap_pct:.1f}%），本笔上限 {effective_max_pos_pct:.1f}%"
+        )
 
     try:
         trade = execute_entry(
@@ -557,6 +999,10 @@ def _try_entry(
         equity = float(account.get("equity") or 1)
         notional = float(trade.get("notional") or 0)
         trade["position_pct"] = round(notional / equity * 100.0, 1) if equity else 0
+
+    if cap_detail.get("capped"):
+        trade["portfolio_risk_capped"] = True
+        trade["portfolio_planned_risk"] = cap_detail
 
     result["action"] = "ENTRY"
     result["reason"] = trade.get("reason") or entry_reason
@@ -605,12 +1051,20 @@ def decide_and_act(
     session_phase: str | None = None,
     raw: dict[str, Any] | None = None,
     force_price: float | None = None,
+    bars_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    """One paper-trading tick. Mutates ``account``. Returns decision summary."""
+    """One paper-trading tick. Mutates ``account``. Returns decision summary.
+
+    ``bars_by_symbol`` injects today's 1-minute bars per symbol (tests /
+    replay); when omitted the tick fetches live bars for stop/target scans.
+    """
     phase = session_phase or infer_session_phase(trading_date)
     params = account.get("params") or {}
     ensure_positions(account)
     dual = bool(params.get("dual_books", True))
+    # Fix 6: news gate is resolved once per tick from the freshest
+    # collection evidence (Step 3 intraday errors, else Step 0 raw errors).
+    news_gate = news_gate_for_date(trading_date, raw=raw)
 
     price_map: dict[str, float] | None = None
     if force_price is not None:
@@ -628,6 +1082,7 @@ def decide_and_act(
             price_map=price_map,
             force_price=force_price,
             params=params,
+            bars_map=bars_by_symbol,
         )
 
     book_results: list[dict[str, Any]] = []
@@ -635,10 +1090,10 @@ def decide_and_act(
     # 1) Manage open positions (exits free cash before new entries)
     for book in (BOOK_INTRADAY, BOOK_SWING):
         managed = _manage_position(
-            account, book, trading_date, phase, price_map, raw, params
+            account, book, trading_date, phase, price_map, raw, params,
+            bars_map=bars_by_symbol,
         )
-        if managed:
-            book_results.append(managed)
+        book_results.extend(managed or [])
 
     # 2) Entries for empty books (skip new 短线 when session closed)
     if phase == "premarket":
@@ -653,6 +1108,7 @@ def decide_and_act(
                 "quote": None,
                 "quote_source": None,
                 "books": [],
+                "news_gate": news_gate,
                 "advisory": True,
                 "advisory_zh": "模拟交易 · 不构成投资建议",
             }
@@ -675,8 +1131,16 @@ def decide_and_act(
         for s in _collect_symbols(trading_date, account):
             inj[s] = float(force_price)
 
-    need_intraday = not get_position(account, BOOK_INTRADAY) and phase != "closed"
-    need_swing = not get_position(account, BOOK_SWING)
+    # Fix 7: a book with a free slot may take a new leg (intraday ≤3,
+    # swing ≤2). No new intraday leg after the close.
+    need_intraday = (
+        len(get_positions(account, BOOK_INTRADAY))
+        < max_positions_for_book(BOOK_INTRADAY)
+        and phase != "closed"
+    )
+    need_swing = len(get_positions(account, BOOK_SWING)) < max_positions_for_book(
+        BOOK_SWING
+    )
 
     picked_intra = None
     picked_swing = None
@@ -727,6 +1191,7 @@ def decide_and_act(
                 picked_swing,
                 trading_date,
                 peer_entering=both_enter,
+                news_gate=news_gate,
             )
         )
     if picked_intra is not None:
@@ -738,6 +1203,7 @@ def decide_and_act(
                 trading_date,
                 peer_entering=both_enter
                 or bool(get_position(account, BOOK_SWING)),
+                news_gate=news_gate,
             )
         )
 
@@ -753,7 +1219,9 @@ def decide_and_act(
     elif not open_positions(account):
         mark_to_market(account, None)
 
-    return _aggregate(book_results, trading_date, phase)
+    result = _aggregate(book_results, trading_date, phase)
+    result["news_gate"] = news_gate
+    return result
 
 
 def _decide_single_book(
@@ -765,8 +1233,10 @@ def _decide_single_book(
     price_map: dict[str, float] | None,
     force_price: float | None,
     params: dict[str, Any],
+    bars_map: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Legacy single-position path (dual_books=False)."""
+    news_gate = news_gate_for_date(trading_date, raw=raw)
     result: dict[str, Any] = {
         "trading_date": trading_date,
         "session_phase": phase,
@@ -776,6 +1246,7 @@ def _decide_single_book(
         "signal": None,
         "quote": None,
         "quote_source": None,
+        "news_gate": news_gate,
         "advisory": True,
         "advisory_zh": "模拟交易 · 不构成投资建议",
     }
@@ -789,18 +1260,20 @@ def _decide_single_book(
             BOOK_SWING if "swing" in str(pos.get("horizon") or "").lower() else BOOK_INTRADAY
         )
         managed = _manage_position(
-            account, book, trading_date, phase, price_map, raw, params
+            account, book, trading_date, phase, price_map, raw, params,
+            bars_map=bars_map,
         )
         if managed:
+            first = managed[0]
             result.update(
                 {
-                    "action": managed["action"],
-                    "reason": managed["reason"],
-                    "trade": managed["trade"],
-                    "signal": managed["signal"],
-                    "quote": managed["quote"],
-                    "quote_source": managed["quote_source"],
-                    "books": [managed],
+                    "action": first["action"],
+                    "reason": first["reason"],
+                    "trade": first["trade"],
+                    "signal": first["signal"],
+                    "quote": first["quote"],
+                    "quote_source": first["quote_source"],
+                    "books": managed,
                 }
             )
             return result
@@ -835,7 +1308,7 @@ def _decide_single_book(
         if "swing" in str(sig.get("horizon") or "").lower() or sig.get("source") == "swing"
         else BOOK_INTRADAY
     )
-    entered = _try_entry(account, entry_book, picked, trading_date)
+    entered = _try_entry(account, entry_book, picked, trading_date, news_gate=news_gate)
     result.update(
         {
             "action": entered["action"],

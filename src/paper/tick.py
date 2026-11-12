@@ -23,7 +23,11 @@ from src.paper.execution_agent import decide_and_act
 from src.paper.journal import record_tick_decision
 from src.research.entry_status import infer_session_phase
 from src.utils.paths import raw_data_path
-from src.utils.trading_calendar import require_trading_day, skipped_non_trading_day, today_et
+from src.utils.trading_calendar import (
+    require_trading_day,
+    skipped_non_trading_day,
+    today_et,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,7 @@ def run_paper_tick(
     session_phase: str | None = None,
     force_price: float | None = None,
     allow_non_trading_day: bool = False,
+    bars_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Run one simulated trading tick and persist account state.
 
@@ -76,6 +81,7 @@ def run_paper_tick(
         session_phase=phase,
         raw=raw or None,
         force_price=force_price,
+        bars_by_symbol=bars_by_symbol,
     )
     record_tick_decision(account, decision)
 

@@ -165,6 +165,94 @@ def market_open_et(d: date | None = None) -> datetime:
     return ET.localize(datetime(d.year, d.month, d.day, 9, 30, 0))
 
 
+# NYSE early closes (1:00 PM ET). Same annual-extension caveat as holidays:
+# verify against the NYSE calendar each year; a missing date only delays the
+# deterministic EOD flatten to the 4:00 PM close check, it never blocks it.
+_NYSE_EARLY_CLOSE: dict[date, str] = {
+    # 2025
+    date(2025, 7, 3): "Day before Independence Day",
+    date(2025, 11, 28): "Day after Thanksgiving",
+    date(2025, 12, 24): "Christmas Eve",
+    # 2026
+    date(2026, 7, 2): "Day before Independence Day (observed)",
+    date(2026, 11, 25): "Day before Thanksgiving",
+    date(2026, 12, 24): "Christmas Eve",
+    # 2027
+    date(2027, 7, 2): "Day before Independence Day (observed)",
+    date(2027, 11, 24): "Day before Thanksgiving",
+    date(2027, 12, 23): "Christmas Eve (observed)",
+}
+
+
+def nyse_early_close(d: date | None = None) -> str | None:
+    """Return early-close label if NYSE closes at 1:00 PM ET, else None."""
+    d = d or today_et()
+    return _NYSE_EARLY_CLOSE.get(d)
+
+
+def session_close_et(d: date | None = None) -> datetime:
+    """US cash equity session close — 4:00 PM ET, 1:00 PM on early closes."""
+    d = d or today_et()
+    hour = 13 if nyse_early_close(d) else 16
+    return ET.localize(datetime(d.year, d.month, d.day, hour, 0, 0))
+
+
+def session_closed_now(d: date | None = None, *, now: datetime | None = None) -> bool:
+    """True once the cash session has closed (handles holidays, early closes, DST).
+
+    DST is handled by the America/New_York tzinfo: ``now`` is compared in ET.
+    """
+    d = d or today_et()
+    if not is_trading_day(d):
+        return True
+    now_et = now.astimezone(ET) if now is not None else datetime.now(ET)
+    if now_et.tzinfo is None:
+        now_et = ET.localize(now_et)
+    return now_et >= session_close_et(d)
+
+
+def session_in_close_window(
+    d: date | None = None, *, now: datetime | None = None, window_minutes: int = 30
+) -> bool:
+    """True once the session is within ``window_minutes`` of its close (or past it).
+
+    The paper tick runs every 30 minutes and never after the close, so the
+    last tick of the day (15:44 ET on a normal day) is the deterministic
+    moment to flatten a position whose holding limit expires today. The
+    window uses the early-close-aware close, so on a 1:00 PM close the
+    flatten fires on the first tick at/after 12:30 PM instead.
+    """
+    d = d or today_et()
+    if not is_trading_day(d):
+        return False
+    now_et = now.astimezone(ET) if now is not None else datetime.now(ET)
+    if now_et.tzinfo is None:
+        now_et = ET.localize(now_et)
+    return now_et >= session_close_et(d) - timedelta(minutes=window_minutes)
+
+
+def holding_trading_days(
+    opened: str | date | None, current: str | date | None
+) -> int | None:
+    """Inclusive count of trading days a position has been held.
+
+    ``opened`` is the position's ``opened_date`` (``YYYY-MM-DD`` or a date);
+    ``current`` is the trading date being evaluated. Returns None when
+    either date is missing/unparseable, so callers can skip the rule
+    instead of flattening on unknown data.
+    """
+    try:
+        start = date.fromisoformat(opened) if isinstance(opened, str) else opened
+        end = date.fromisoformat(current) if isinstance(current, str) else current
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(start, date) or not isinstance(end, date):
+        return None
+    if end < start:
+        return 0
+    return count_trading_days(start, end)
+
+
 def prior_close_utc_iso(trading_date: date | None = None) -> str:
     """Prior session close (4:00 PM ET on prior trading day) as UTC ISO for Polygon filters."""
     trading_date = trading_date or today_et()
