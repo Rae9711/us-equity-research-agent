@@ -246,3 +246,51 @@ def test_reference_equities_use_last_point_before_each_boundary():
     day_ref, week_ref = reference_equities(acct, "2026-11-12")
     assert day_ref == 9900.0  # last point before today
     assert week_ref == 10000.0  # last point before Monday 2026-11-09
+
+
+# ---------------------------------------------------------------------------
+# Corrupt state fails CLOSED (2026-11-12): never silently reseed to untripped.
+# ---------------------------------------------------------------------------
+
+
+def test_corrupt_state_blocks_entries_and_is_not_overwritten(tmp_path):
+    path = tmp_path / "cb.json"
+    path.write_text("{not json", encoding="utf-8")
+    acct = _acct(10050.0, _curve([("2026-11-11", 10000.0)]))
+    status, events = check_circuit_breaker(acct, "2026-11-12", state_path=path)
+    assert status["blocked"] is True
+    assert status.get("corrupt") is True
+    assert "损坏" in (status["reason"] or "")
+    assert any(e.get("type") == "corrupt" for e in events)
+    # The corrupt file is NOT healed: it stays byte-identical, so the next
+    # tick blocks again instead of silently resuming.
+    assert path.read_text(encoding="utf-8") == "{not json"
+    status2, _ = check_circuit_breaker(acct, "2026-11-12", state_path=path)
+    assert status2["blocked"] is True
+    row = breaker_decision_row(
+        [e for e in events if e["type"] == "corrupt"][0], "2026-11-12"
+    )
+    assert row["action"] == "CIRCUIT_BREAKER_CORRUPT"
+    assert "损坏" in row["reason"]
+
+
+def test_corrupt_non_object_state_blocks_entries(tmp_path):
+    # Valid JSON but the wrong shape used to crash _load_state (data.get
+    # on a list) — now it fails closed like any other corruption.
+    path = tmp_path / "cb.json"
+    path.write_text("[1, 2, 3]", encoding="utf-8")
+    acct = _acct(10050.0, _curve([("2026-11-11", 10000.0)]))
+    status, events = check_circuit_breaker(acct, "2026-11-12", state_path=path)
+    assert status["blocked"] is True
+    assert any(e.get("type") == "corrupt" for e in events)
+    assert path.read_text(encoding="utf-8") == "[1, 2, 3]"
+
+
+def test_missing_state_still_starts_fresh(tmp_path):
+    # Absence is not corruption: first run seeds a fresh untripped state.
+    path = tmp_path / "cb.json"
+    acct = _acct(10050.0, _curve([("2026-11-11", 10000.0)]))
+    status, _ = check_circuit_breaker(acct, "2026-11-12", state_path=path)
+    assert status["blocked"] is False
+    assert status.get("corrupt") is None
+    assert path.exists()

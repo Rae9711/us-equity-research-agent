@@ -153,7 +153,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "miss_threshold_pct": 1.0,
     "force_exit_intraday_at_close": True,
     # Reject stop/target/entry fills farther than this from entry/stop/target/last.
-    "max_price_deviation_pct": 30.0,
+    "max_price_deviation_pct": 10.0,
     # Capital allocation (agent-chosen each tick; bounds only)
     "cash_reserve_min_pct": 20.0,
     "cash_reserve_max_pct": 40.0,

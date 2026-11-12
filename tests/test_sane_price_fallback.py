@@ -45,6 +45,12 @@ def _open_leg(acct, symbol, *, book, price, shares, stop, target,
         signal={
             "source": "test",
             "horizon": "Swing" if book == "swing" else "Intraday",
+            # Mirror production _try_entry: the broker's sane check anchors
+            # on the planned entry, so the test signal must carry it.
+            "entry_price": price,
+            "stop_price": stop,
+            "target_price": target,
+            "entry_zone": {"low": price - 1, "mid": price, "high": price + 1},
         },
         book=book,
     )
@@ -166,3 +172,79 @@ def test_sane_quote_uses_live_quote_no_fallback(data_root, monkeypatch):
     assert hold["quote"] == pytest.approx(338.0)
     assert hold["quote_source"] == "test"
     assert "quote_fallback" not in hold
+
+
+# ---------------------------------------------------------------------------
+# 10% band + quote/bar agreement (2026-11-12): a genuine gap is accepted,
+# two wild readings that disagree are still refused.
+# ---------------------------------------------------------------------------
+
+def test_band_is_10_percent_by_default():
+    """The default band tightened 30% -> 10%: a quote 13% from every anchor
+    is now insane (it was sane under 30%)."""
+    from src.paper.price_guard import (
+        DEFAULT_MAX_DEVIATION_PCT,
+        is_sane_fill_price,
+        prices_agree,
+    )
+
+    assert DEFAULT_MAX_DEVIATION_PCT == 10.0
+    anchors = [341.0, 335.0, 354.0]
+    ok, _ = is_sane_fill_price(360.0, anchors=anchors)
+    assert ok is True  # 1.7% from the target anchor
+    ok, reason = is_sane_fill_price(400.0, anchors=anchors)
+    assert ok is False and "10%" in (reason or "")
+    assert prices_agree(300.0, 301.0) is True
+    assert prices_agree(300.0, 400.0) is False
+
+
+def test_gapped_quote_agreeing_with_bars_is_accepted(data_root, monkeypatch):
+    """Live quote $300 is 12% below every plan anchor (rejected at 10%),
+    but the last 1m bar close $301 agrees with it: a real gap, not a bad
+    tick. Management proceeds and the gap-through-stop exit fires."""
+    acct = default_account()
+    _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
+              stop=335.0, target=354.0, trading_date="2026-11-09")
+    monkeypatch.setattr(
+        "src.paper.execution_agent.resolve_quote", _fake_quote(300.0)
+    )
+    bars = [
+        _bar("2026-11-09 09:31", 340.0, 341.0, 339.0, 340.0),
+        _bar("2026-11-09 09:32", 300.0, 301.0, 299.0, 301.0),
+    ]
+    decision = decide_and_act(
+        acct, "2026-11-09", session_phase="open",
+        bars_by_symbol={"ARM": bars},
+    )
+    row = _exit_row(decision, "intraday")
+    assert row is not None, "gap-through-stop exit must fire"
+    assert row.get("quote_rejected") is not True
+    assert row.get("quote_agrees_with_bars") is True
+    assert get_position(acct, "intraday") is None
+
+
+def test_gapped_quote_disagreeing_with_bars_still_refuses(data_root, monkeypatch):
+    """Live quote $300 (12% below anchors) and last bar close $400 (13%
+    above the target anchor) disagree with each other: two wild readings,
+    no independent confirmation — still refuse-and-hold."""
+    acct = default_account()
+    _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
+              stop=335.0, target=354.0, trading_date="2026-11-09")
+    monkeypatch.setattr(
+        "src.paper.execution_agent.resolve_quote", _fake_quote(300.0)
+    )
+    bars = [
+        _bar("2026-11-09 09:31", 340.0, 341.0, 339.0, 340.0),
+        _bar("2026-11-09 09:32", 400.0, 401.0, 399.0, 400.0),
+    ]
+    decision = decide_and_act(
+        acct, "2026-11-09", session_phase="open",
+        bars_by_symbol={"ARM": bars},
+    )
+    refused = [
+        b for b in _book_rows(decision, "intraday") if b.get("quote_rejected")
+    ]
+    assert refused, "expected a refuse-and-hold row"
+    assert refused[0]["action"] == "HOLD"
+    assert _exit_row(decision, "intraday") is None
+    assert get_position(acct, "intraday") is not None

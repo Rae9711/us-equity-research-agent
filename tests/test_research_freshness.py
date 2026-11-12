@@ -220,7 +220,9 @@ def _open_leg(acct, symbol, *, book, price, shares, stop, target, trading_date):
         target=target,
         reason="test",
         trading_date=trading_date,
-        signal={"source": "test", "horizon": "Swing" if book == "swing" else "Intraday"},
+        signal={"source": "test", "horizon": "Swing" if book == "swing" else "Intraday",
+                "entry_price": price, "stop_price": stop, "target_price": target,
+                "entry_zone": {"low": price - 1, "mid": price, "high": price + 1}},
         book=book,
     )
 

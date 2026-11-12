@@ -46,6 +46,7 @@ from src.paper.price_guard import (
     anchors_from_position,
     anchors_from_signal,
     is_sane_fill_price,
+    prices_agree,
 )
 from src.paper.signals import (
     load_candidate_signals,
@@ -448,6 +449,81 @@ def _target_fill_price(
     return target, False
 
 
+def _quote_outage_key(trading_date: str, book: str, symbol: str) -> str:
+    return f"{trading_date}:{book}:{symbol}"
+
+
+def _bump_quote_outage(
+    account: dict[str, Any], trading_date: str, book: str, symbol: str
+) -> int:
+    """Count one more consecutive tick with no usable quote for this leg."""
+    rs = account.setdefault("risk_state", {})
+    if not isinstance(rs, dict):
+        return 1
+    outages = rs.setdefault("quote_outage", {})
+    if not isinstance(outages, dict):
+        return 1
+    key = _quote_outage_key(trading_date, book, symbol)
+    count = int(outages.get(key) or 0) + 1
+    outages[key] = count
+    return count
+
+
+def _reset_quote_outage(
+    account: dict[str, Any], trading_date: str, book: str, symbol: str
+) -> None:
+    outages = (account.get("risk_state") or {}).get("quote_outage") or {}
+    if isinstance(outages, dict):
+        outages.pop(_quote_outage_key(trading_date, book, symbol), None)
+
+
+def _force_outage_exit_if_due(
+    account: dict[str, Any],
+    trading_date: str,
+    book: str,
+    pos: dict[str, Any],
+    base: dict[str, Any],
+    count: int,
+    params: dict[str, Any],
+) -> bool:
+    """Force-exit a leg after ``quote_outage_max_ticks`` consecutive ticks
+    with no usable quote (default 3 = ~90 minutes of ticks).
+
+    A leg that cannot be priced cannot be managed — its stop may already
+    have been hit. Exiting at the last good mark books an approximate
+    P&L, but it bounds the unmanaged window instead of letting the leg
+    sit past its stop for a whole data-outage day. A time exit like this
+    sets no stop cooldown. Without a last good mark there is no price to
+    exit at, so the leg keeps holding (and the streak keeps counting).
+    Returns True when an exit was forced (``base`` mutated)."""
+    max_ticks = int(_param(params, "quote_outage_max_ticks", 3) or 3)
+    if count < max_ticks:
+        return False
+    last_px = _safe_float(pos.get("last_price"))
+    if last_px is None or last_px <= 0:
+        return False
+    sym = pos["symbol"]
+    label = BOOK_LABEL_ZH.get(book, book)
+    reason = (
+        f"{label}持仓 {sym}：连续 {count} 个 tick 无有效报价（数据中断），"
+        f"强制平仓 @ {last_px}（最后有效价）"
+    )
+    trade = execute_exit(
+        account,
+        price=last_px,
+        reason=reason,
+        trading_date=trading_date,
+        book=book,
+        symbol=sym,
+    )
+    trade["quote_outage_exit"] = True
+    _reset_quote_outage(account, trading_date, book, sym)
+    base["action"] = "EXIT"
+    base["reason"] = trade["reason"]
+    base["trade"] = trade
+    return True
+
+
 def _manage_single_position(
     account: dict[str, Any],
     book: str,
@@ -486,6 +562,11 @@ def _manage_single_position(
     }
 
     if px is None:
+        count = _bump_quote_outage(account, trading_date, book, sym)
+        if _force_outage_exit_if_due(
+            account, trading_date, book, pos, base, count, params
+        ):
+            return base
         base["reason"] = f"{label}持仓 {sym}：无报价，继续持有"
         return base
 
@@ -529,6 +610,22 @@ def _manage_single_position(
             base["quote"] = px
             base["quote_source"] = qsrc
             base["quote_fallback"] = True
+        elif fb_close is not None and prices_agree(px, fb_close, max_dev):
+            # Real gap, not a bad tick: the live quote and the last 1m bar
+            # close (a different read of the feed) agree with each other
+            # even though both sit far from the plan anchors. Accept the
+            # live quote so a genuine gap-through-stop still executes.
+            logger.info(
+                "%s %s: live quote $%s rejected vs plan anchors (%s) but "
+                "agrees with last 1m bar close $%s — treating as a real gap",
+                label,
+                sym,
+                px,
+                reject,
+                fb_close,
+            )
+            base["quote_agrees_with_bars"] = True
+            # px stays as the live quote; fall through to management.
         else:
             logger.warning(
                 "%s %s: live quote $%s rejected (%s); bar-close fallback %s "
@@ -539,11 +636,19 @@ def _manage_single_position(
                 reject,
                 "also rejected" if fb_close is not None else "unavailable",
             )
+            count = _bump_quote_outage(account, trading_date, book, sym)
+            if _force_outage_exit_if_due(
+                account, trading_date, book, pos, base, count, params
+            ):
+                return base
             base["reason"] = (
                 f"{label}持仓 {sym}：{reject or '报价异常'}，拒绝止损/止盈/平仓，继续持有"
             )
             base["quote_rejected"] = True
             return base
+
+    # A usable quote arrived: the outage streak for this leg resets.
+    _reset_quote_outage(account, trading_date, book, sym)
 
     stop = _safe_float(pos.get("stop"))
     target = _safe_float(pos.get("target"))
@@ -597,6 +702,10 @@ def _manage_single_position(
                     trading_date=trading_date,
                     book=book,
                     symbol=sym,
+                    # Bar-scan stop fill: the fill is a real bar open (gap)
+                    # or a capped first touch — the bar series is the
+                    # evidence, so the broker's anchor check is skipped.
+                    bar_validated=True,
                 )
                 trade["stop_trigger"] = stop
                 trade["fill_price"] = round(fill, 4)
@@ -623,6 +732,9 @@ def _manage_single_position(
                 trading_date=trading_date,
                 book=book,
                 symbol=sym,
+                # Bar-scan target fill: same as the stop case — a gap open
+                # through the target can sit far from the plan anchors.
+                bar_validated=True,
             )
             trade["fill_price"] = round(fill, 4)
             trade["gap_through_target"] = gap
@@ -1447,7 +1559,11 @@ def decide_and_act(
     for row in book_results:
         sig = row.get("signal") or {}
         sym = (sig.get("symbol") or (row.get("trade") or {}).get("symbol") or "").upper()
-        if sym and row.get("quote") is not None:
+        # A rejected quote must never become a mark: it would poison the
+        # position's last_price, and the poisoned mark would then validate
+        # the same garbage quote as an anchor on the next tick
+        # (self-confirming). A refused leg keeps its previous last_price.
+        if sym and row.get("quote") is not None and not row.get("quote_rejected"):
             px_map[sym] = float(row["quote"])
     if px_map:
         mark_to_market(account, price_by_symbol=px_map)

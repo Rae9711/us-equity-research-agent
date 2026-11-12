@@ -68,16 +68,29 @@ def _load_state(state_path: str | Path | None) -> dict[str, Any]:
         return _default_state()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("breaker state is not a JSON object")
+        base = _default_state()
+        for key in ("day", "week"):
+            if isinstance(data.get(key), dict):
+                base[key].update(data[key])
+        if isinstance(data.get("events"), list):
+            base["events"] = data["events"][-MAX_EVENTS_KEPT:]
+        return base
     except Exception:
-        logger.exception("Corrupt circuit breaker state; reseeding")
-        return _default_state()
-    base = _default_state()
-    for key in ("day", "week"):
-        if isinstance(data.get(key), dict):
-            base[key].update(data[key])
-    if isinstance(data.get("events"), list):
-        base["events"] = data["events"][-MAX_EVENTS_KEPT:]
-    return base
+        # Fail CLOSED (2026-11-12): a corrupt safety file must never
+        # silently reseed to "untripped". The state is marked corrupt;
+        # check_circuit_breaker blocks new entries and refuses to
+        # overwrite the file, so the block persists until a human repairs
+        # or deletes it.
+        logger.error(
+            "Corrupt circuit breaker state at %s; failing CLOSED "
+            "(new entries blocked until repaired)",
+            path,
+        )
+        state = _default_state()
+        state["corrupt"] = True
+        return state
 
 
 def _save_state(state: dict[str, Any], state_path: str | Path | None) -> Path:
@@ -338,6 +351,30 @@ def check_circuit_breaker(
         day_threshold_pct=day_threshold_pct,
         week_threshold_pct=week_threshold_pct,
     )
+    if state.get("corrupt"):
+        # Fail closed: block new entries and do NOT overwrite the corrupt
+        # file with a fresh state (that would silently heal the safety).
+        # The block persists until a human repairs or deletes the file.
+        tick_iso = _tick_iso(tick_dt)
+        day_s = trading_date.isoformat() if hasattr(trading_date, "isoformat") else str(trading_date)
+        corrupt_event = {
+            "type": "corrupt",
+            "scope": "day",
+            "trading_date": day_s,
+            "ref_equity": None,
+            "equity": float(account.get("equity") or 0.0),
+            "pct": None,
+            "ts": tick_iso,
+        }
+        events = [*events, corrupt_event]
+        status = {
+            **status,
+            "blocked": True,
+            "tripped_day": True,
+            "corrupt": True,
+            "reason": "熔断状态文件损坏，默认封锁新开仓（需人工修复或删除状态文件）",
+        }
+        return status, events
     _save_state(state, state_path)
     return status, events
 
@@ -349,6 +386,21 @@ def entries_allowed(status: dict[str, Any] | None) -> bool:
 def breaker_decision_row(event: dict[str, Any], trading_date: str) -> dict[str, Any]:
     """Convert a trip/reset event into an account decision-record row."""
     scope_zh = "当日" if event.get("scope") == "day" else "当周"
+    if event.get("type") == "corrupt":
+        return {
+            "trading_date": trading_date,
+            "action": "CIRCUIT_BREAKER_CORRUPT",
+            "reason": (
+                "熔断状态文件损坏，默认封锁新开仓，需人工修复或删除状态文件；"
+                "已持仓位照常管理"
+            ),
+            "book": None,
+            "book_zh": "熔断",
+            "symbol": None,
+            "quote": None,
+            "pnl": None,
+            "advisory": True,
+        }
     if event.get("type") == "trip":
         action = "CIRCUIT_BREAKER_TRIP"
         reason = (

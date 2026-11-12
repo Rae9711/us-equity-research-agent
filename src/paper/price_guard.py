@@ -12,7 +12,11 @@ from __future__ import annotations
 from typing import Any
 
 # Max relative distance from any positive reference anchor.
-DEFAULT_MAX_DEVIATION_PCT = 30.0
+# 10% (tightened from 30% on 2026-11-12): the band's job is to catch
+# gross quote errors (wrong symbol, 2x/10x, stale garbage), not 1-2%
+# lags — and a genuine gap is accepted via the quote/bar agreement rule
+# in _manage_single_position, so tightening does not trap gap days.
+DEFAULT_MAX_DEVIATION_PCT = 10.0
 
 
 def _safe_float(value: Any) -> float | None:
@@ -50,6 +54,25 @@ def price_deviation_pct(price: float, anchor: float) -> float:
     if anchor <= 0:
         return float("inf")
     return abs(price - anchor) / anchor * 100.0
+
+
+def prices_agree(
+    a: float | None,
+    b: float | None,
+    max_deviation_pct: float = DEFAULT_MAX_DEVIATION_PCT,
+) -> bool:
+    """True when two independent price reads agree within the band.
+
+    Used for real gaps: a live quote far from the plan anchors is not
+    necessarily garbage — if the last 1-minute bar close (a different
+    read of the feed) agrees with it, the market really moved there.
+    """
+    if a is None or b is None:
+        return False
+    try:
+        return price_deviation_pct(float(a), float(b)) <= max_deviation_pct
+    except (TypeError, ValueError):
+        return False
 
 
 def is_sane_fill_price(

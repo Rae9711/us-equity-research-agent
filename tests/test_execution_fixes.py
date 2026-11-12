@@ -71,6 +71,15 @@ def _open_leg(acct, symbol, *, book, price, shares, stop, target,
         signal={
             "source": "test",
             "horizon": "Swing" if book == "swing" else "Intraday",
+            # Production _try_entry passes the full picked slot; the
+            # broker's sane check anchors on the planned entry, so the
+            # test signal must carry it too (a bare signal leaves only
+            # stop/target anchors, which sit 10%+ away on wide-stop plans
+            # like the live AMD leg 557.495/493.4/643.27).
+            "entry_price": price,
+            "stop_price": stop,
+            "target_price": target,
+            "entry_zone": {"low": price - 1, "mid": price, "high": price + 1},
         },
         book=book,
     )
@@ -479,6 +488,24 @@ def test_news_gate_blocks_symbol():
     assert parsed["broad_failed"] is False
 
 
+def test_news_universe_covers_traded_names():
+    # 2026-11-12: AMD/MU/AVGO/ARM are traded names (shadow ledger) whose
+    # per-ticker news was never collected, so the gate could never block
+    # them. The universe now includes them (config + fallback in sync).
+    from src.paper.news_gate import FALLBACK_NEWS_TICKERS, news_universe
+
+    universe = news_universe()
+    for sym in ("AMD", "MU", "AVGO", "ARM"):
+        assert sym in universe
+        assert sym in FALLBACK_NEWS_TICKERS
+    # And a 429 on one of them now blocks that symbol.
+    parsed = parse_news_error_entries(
+        ["AMD:Client error '429 Too Many Requests' for url ..."]
+    )
+    assert parsed["blocked_symbols"] == {"AMD"}
+    assert parsed["global_block"] is False
+
+
 def test_news_gate_broad_only_not_global():
     parsed = parse_news_error_entries(
         ["broad:Client error '429 Too Many Requests' for url ..."]
@@ -758,6 +785,88 @@ def test_swing_time_exit_sets_no_cooldown(data_root, monkeypatch):
     )
     assert reentry["action"] == "ENTRY"
     assert "冷却" not in (reentry["reason"] or "")
+
+
+# ---------------------------------------------------------------------------
+# Quote outage: 3 consecutive ticks with no usable quote force an exit at
+# the last good mark (2026-11-12) — a leg that cannot be priced cannot be
+# managed, and its stop may already have been hit.
+# ---------------------------------------------------------------------------
+
+
+def test_quote_outage_forces_exit_after_three_ticks(data_root, monkeypatch):
+    acct = default_account()
+    _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
+              stop=335.0, target=354.0, trading_date="2026-11-09")
+    for _ in range(2):
+        decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                              quote=None, monkeypatch=monkeypatch)
+        assert _exit_row(decision, "intraday") is None
+        assert get_position(acct, "intraday") is not None
+    decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                          quote=None, monkeypatch=monkeypatch)
+    row = _exit_row(decision, "intraday")
+    assert row is not None
+    assert "数据中断" in (row["reason"] or "")
+    assert "最后有效价" in (row["reason"] or "")
+    assert row["trade"]["price"] == pytest.approx(341.0)
+    assert row["trade"].get("quote_outage_exit") is True
+    assert get_position(acct, "intraday") is None
+
+
+def test_quote_outage_resets_on_good_quote(data_root, monkeypatch):
+    acct = default_account()
+    _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
+              stop=335.0, target=354.0, trading_date="2026-11-09")
+    for _ in range(2):
+        _tick_hold(acct, "2026-11-09", close_window=False,
+                   quote=None, monkeypatch=monkeypatch)
+    # One good tick (340, inside the plan) resets the streak.
+    decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                          quote=340.0, monkeypatch=monkeypatch)
+    assert _exit_row(decision, "intraday") is None
+    # Two more bad ticks: streak is 2, still below the 3-tick threshold.
+    for _ in range(2):
+        decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                              quote=None, monkeypatch=monkeypatch)
+    assert _exit_row(decision, "intraday") is None
+    assert get_position(acct, "intraday") is not None
+
+
+def test_quote_outage_insane_quote_counts_too(data_root, monkeypatch):
+    # A rejected quote with no usable bar fallback counts toward the
+    # streak the same way a missing quote does.
+    acct = default_account()
+    _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
+              stop=335.0, target=354.0, trading_date="2026-11-09")
+    for _ in range(2):
+        decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                              quote=100.0, monkeypatch=monkeypatch)
+        assert _exit_row(decision, "intraday") is None
+    # The rejected quote must never become the position's mark: last_price
+    # stays at the entry (341), so the garbage quote is still rejected on
+    # the next tick instead of validating itself as an anchor.
+    assert get_position(acct, "intraday")["last_price"] == pytest.approx(341.0)
+    decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                          quote=100.0, monkeypatch=monkeypatch)
+    row = _exit_row(decision, "intraday")
+    assert row is not None
+    assert "数据中断" in (row["reason"] or "")
+    assert get_position(acct, "intraday") is None
+
+
+def test_quote_outage_without_last_price_keeps_holding(data_root, monkeypatch):
+    # No last good mark: there is no price to exit at, so the leg keeps
+    # holding (and the streak keeps counting) rather than inventing one.
+    acct = default_account()
+    _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
+              stop=335.0, target=354.0, trading_date="2026-11-09")
+    get_position(acct, "intraday")["last_price"] = None
+    for _ in range(4):
+        decision = _tick_hold(acct, "2026-11-09", close_window=False,
+                              quote=None, monkeypatch=monkeypatch)
+    assert _exit_row(decision, "intraday") is None
+    assert get_position(acct, "intraday") is not None
 
 
 def test_holding_days_counts_trading_days_only():

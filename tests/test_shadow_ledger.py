@@ -205,6 +205,34 @@ def test_entry_open_below_stop_is_skipped_not_instant_stop():
     assert outcome == "skipped" and reason == "open-above-target"
 
 
+def test_entry_stop_too_tight_skipped_live_parity():
+    # Live refuses entries whose stop is < 0.8% from the entry; the shadow
+    # ledger must skip them too instead of letting noise stop them out.
+    # LONG 100 / stop 99.5 = 0.5% -> too tight.
+    rec = _rec(entry=100.0, stop=99.5, target=104.0)
+    outcome, _, reason = evaluate_entry(
+        rec, [_bar("2026-11-13", 99.8, 100.5, 99.6, 100.0)])
+    assert outcome == "skipped" and reason == "stop-too-tight"
+    update_record(rec, [_bar("2026-11-13", 99.8, 100.5, 99.6, 100.0)], "2026-11-13")
+    assert rec["status"] == "skipped" and rec["skip_reason"] == "stop-too-tight"
+    assert rec["r_multiple"] is None
+    # SHORT mirror: 200 / stop 201 = 0.5% -> too tight.
+    rec = _rec(direction="SHORT", entry=200.0, stop=201.0, target=190.0)
+    outcome, _, reason = evaluate_entry(
+        rec, [_bar("2026-11-13", 199.5, 200.5, 199.0, 199.8)])
+    assert outcome == "skipped" and reason == "stop-too-tight"
+
+
+def test_entry_stop_at_floor_is_tradable():
+    # A stop clearly above the 0.8% floor (1.0%): live allows it, so does
+    # the ledger. (Exactly 0.8% nominal is float-fuzzy — 100/99.2 computes
+    # to 0.7999...% — and the live check rejects it too, so parity holds.)
+    rec = _rec(entry=100.0, stop=99.0, target=104.0)
+    outcome, bar, _ = evaluate_entry(
+        rec, [_bar("2026-11-13", 99.5, 100.5, 99.3, 100.0)])
+    assert outcome == "entered" and bar is not None
+
+
 # ---------------------------------------------------------------------------
 # Exits
 # ---------------------------------------------------------------------------

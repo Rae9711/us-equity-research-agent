@@ -65,6 +65,12 @@ VERSION = 1
 
 MAX_HOLD_DAYS = {"intraday": 3, "swing": 20, "unknown": 3}
 
+# Minimum stop distance (% of entry) for a candidate to be a trade at all.
+# Mirrors the live ``min_stop_dist_pct`` (account params, 0.8%): the live
+# system refuses to open a leg whose stop is closer than this to the
+# entry, so the shadow ledger must not count such plans as trades either.
+MIN_STOP_DIST_PCT = 0.8
+
 WIN_PROB_BUCKETS = ["<50", "50-60", "60-70", ">70"]
 
 BACKFILL_FROM = "2026-10-20"
@@ -421,7 +427,18 @@ def evaluate_entry(
     or beyond the target is not a trade at all -- the stop would sit on
     the wrong side of the fill and the planned risk is meaningless -- so
     it is skipped, not entered-and-instantly-stopped.
+
+    Live parity: the live system rejects entries whose stop sits closer
+    than MIN_STOP_DIST_PCT to the entry (``min_stop_dist_pct`` in the
+    account params, 0.8%). Such plans are not trades at all -- the stop
+    is noise-scale -- so they are skipped here as "stop-too-tight"
+    instead of letting normal noise stop them out.
     """
+    entry = _f(record.get("entry"))
+    stop = _f(record.get("stop"))
+    if entry is not None and stop is not None and entry > 0:
+        if abs(entry - stop) / entry * 100.0 < MIN_STOP_DIST_PCT:
+            return ("skipped", None, "stop-too-tight")
     cdate = record["candidate_date"]
     for bar in bars:
         d = _bar_date(bar)

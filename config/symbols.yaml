@@ -53,6 +53,14 @@ news:
     - META
     - GOOGL
     - TSLA
+    # Extended 2026-11-12: AMD/MU/AVGO/ARM are traded names (shadow ledger
+    # symbols) whose per-ticker news was never collected, so the news gate
+    # could never block them. SMH/TQQQ stay out — sector/leveraged ETFs,
+    # covered by the broad query + RSS.
+    - AMD
+    - MU
+    - AVGO
+    - ARM
   rss:
     - url: https://feeds.bloomberg.com/markets/news.rss
       name: Bloomberg

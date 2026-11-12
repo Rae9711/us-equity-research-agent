@@ -248,12 +248,19 @@ def execute_exit(
     trading_date: str | None = None,
     book: str | None = None,
     symbol: str | None = None,
+    bar_validated: bool = False,
 ) -> dict[str, Any]:
     """Close an open position at ``price``.
 
     If ``book`` is omitted, closes the legacy primary book (intraday preferred).
     When a book holds several legs, ``symbol`` selects which one; without it
     the first leg in the book is closed.
+
+    ``bar_validated``: the fill price comes from real 1-minute bars the
+    management path already scanned (a gap-through-stop/target open). The
+    sane-price guard is skipped for it — a genuine gap can sit far from
+    the plan anchors, and the bar series is the independent evidence the
+    price is real. Single-price exits (tick quote) must never pass this.
     """
     ensure_positions(account)
     if book:
@@ -309,13 +316,14 @@ def execute_exit(
     max_dev = float(
         params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
     )
-    ok, reject = is_sane_fill_price(
-        price,
-        anchors=anchors_from_position(pos),
-        max_deviation_pct=max_dev,
-    )
-    if not ok:
-        raise NonsensePriceError(reject or "nonsense fill price")
+    if not bar_validated:
+        ok, reject = is_sane_fill_price(
+            price,
+            anchors=anchors_from_position(pos),
+            max_deviation_pct=max_dev,
+        )
+        if not ok:
+            raise NonsensePriceError(reject or "nonsense fill price")
 
     shares = int(pos["shares"])
     avg = float(pos["avg_entry"])

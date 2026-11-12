@@ -129,6 +129,83 @@ def normalize_slot(slot: dict[str, Any], *, source: str, horizon: str) -> dict[s
     }
 
 
+def _polygon_last_trade(symbol: str) -> tuple[float | None, str]:
+    """Polygon last-trade price, or (None, "none").
+
+    Fail-soft: a missing key, a 429, or a network error just means this
+    fallback is unavailable — the caller moves on to the raw snapshot.
+    """
+    try:
+        from src.collectors.polygon_client import PolygonClient
+
+        data = PolygonClient().last_trade(symbol)
+        results = data.get("results") or {}
+        px = _safe_float(results.get("p"))
+        if px:
+            return px, "polygon_last_trade"
+    except Exception:
+        logger.debug("Polygon last trade failed for %s", symbol, exc_info=True)
+    return None, "none"
+
+
+def _polygon_minute_bars(
+    symbol: str, trading_date: str
+) -> list[dict[str, Any]]:
+    """Today's 1-minute bars from Polygon aggregates (delayed on the free
+    tier). Same shape and session filter as the yfinance path. Returns []
+    when unavailable — callers fall back to the single-price path."""
+    from datetime import date as date_type
+    from datetime import datetime as datetime_type
+    from datetime import time as time_type
+    from datetime import timezone
+
+    from src.utils.trading_calendar import ET
+
+    try:
+        day = date_type.fromisoformat(trading_date)
+    except ValueError:
+        return []
+    try:
+        from src.collectors.polygon_client import PolygonClient
+
+        data = PolygonClient().minute_aggs(symbol, trading_date)
+        results = data.get("results") or []
+    except Exception:
+        logger.debug("Polygon minute bars failed for %s", symbol, exc_info=True)
+        return []
+    open_t = time_type(9, 30)
+    close_t = time_type(16, 0)
+    out: list[dict[str, Any]] = []
+    for row in results:
+        try:
+            ts_ms = int(row.get("t"))
+            o, h, lo, c = (
+                float(row["o"]),
+                float(row["h"]),
+                float(row["l"]),
+                float(row["c"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        ts = datetime_type.fromtimestamp(ts_ms / 1000, tz=timezone.utc).astimezone(ET)
+        if ts.date() != day:
+            continue
+        if not (open_t <= ts.time() < close_t):
+            continue
+        if min(o, h, lo, c) <= 0:
+            continue
+        out.append(
+            {
+                "ts": ts.isoformat(),
+                "open": round(o, 4),
+                "high": round(h, 4),
+                "low": round(lo, 4),
+                "close": round(c, 4),
+            }
+        )
+    return out
+
+
 def resolve_quote(
     symbol: str,
     trading_date: str,
@@ -157,6 +234,11 @@ def resolve_quote(
                 source = "yfinance_live"
         except Exception:
             logger.debug("yfinance live quote failed for %s", symbol, exc_info=True)
+
+    if px is None and prefer_live:
+        # Polygon last trade (~15-min delayed on the free tier) is fresher
+        # than the morning snapshot when yfinance is down. Fail-soft.
+        px, source = _polygon_last_trade(symbol)
 
     if px is None:
         px = resolve_symbol_last(symbol, trading_date, raw=raw)
@@ -287,9 +369,9 @@ def resolve_minute_bars(
         hist = yf.Ticker(sym).history(period="1d", interval="1m", prepost=True)
     except Exception:
         logger.debug("minute bars failed for %s", sym, exc_info=True)
-        return []
+        return _polygon_minute_bars(sym, trading_date)
     if hist.empty:
-        return []
+        return _polygon_minute_bars(sym, trading_date)
     open_t = time_type(9, 30)
     close_t = time_type(16, 0)
     out: list[dict[str, Any]] = []
