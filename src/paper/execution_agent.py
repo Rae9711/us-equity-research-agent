@@ -65,6 +65,10 @@ logger = logging.getLogger(__name__)
 # Fix 2 (revised 2026-11-12): an intraday leg may hold overnight, at most
 # 3 trading days; on the 3rd trading day it is flattened at the close.
 INTRADAY_MAX_HOLDING_DAYS = 3
+# Swing legs also have a max hold (2026-11-12): 20 trading days, matching
+# the shadow ledger's assumption. A sideways swing leg must not jam one of
+# the two swing slots indefinitely.
+SWING_MAX_HOLDING_DAYS = 20
 
 BOOK_LABEL_ZH = {
     BOOK_INTRADAY: "短线",
@@ -749,6 +753,43 @@ def _manage_single_position(
             ):
                 return flattened
             # SKIP (not due — defensive) falls through to the HOLD tail.
+
+    # Fix 2 (extended 2026-11-12): a swing leg also has a max hold — 20
+    # trading days, matching the shadow ledger. On the 20th trading day it
+    # is flattened in the close window; if that window was missed, the
+    # first later tick flattens it instead (overdue). A time exit is
+    # neutral, like a target exit: no stop cooldown is set.
+    force_swing_eod = bool(params.get("force_exit_swing_at_close", True))
+    if force_swing_eod and is_swing:
+        holding_days = holding_trading_days(pos.get("opened_date"), trading_date)
+        due = (
+            holding_days is not None
+            and holding_days >= SWING_MAX_HOLDING_DAYS
+            and (
+                session_in_close_window(trading_date)
+                or (
+                    holding_days > SWING_MAX_HOLDING_DAYS
+                    and phase != "premarket"
+                )
+            )
+        )
+        if due:
+            r_mult = _r_multiple(direction, entry_px, stop, px)
+            reason = f"{label}持仓 {sym} 满 {holding_days} 个交易日收盘平仓 @ {px}"
+            if r_mult is not None:
+                reason += f"·R={r_mult:.2f}"
+            trade = execute_exit(
+                account,
+                price=px,
+                reason=reason,
+                trading_date=trading_date,
+                book=book,
+                symbol=sym,
+            )
+            base["action"] = "EXIT"
+            base["reason"] = trade["reason"]
+            base["trade"] = trade
+            return base
 
     mark_to_market(account, price_by_symbol={sym: px})
     base["reason"] = (

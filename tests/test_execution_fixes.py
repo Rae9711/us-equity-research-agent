@@ -688,6 +688,78 @@ def test_swing_never_flattens_on_day3(data_root, monkeypatch):
     assert get_position(acct, "swing") is not None
 
 
+# ---------------------------------------------------------------------------
+# Fix 2 (extended 2026-11-12): swing legs also have a max hold — 20 trading
+# days, matching the shadow ledger. Flatten in the close window on day 20
+# (or first later tick if overdue). A time exit sets no stop cooldown.
+# ---------------------------------------------------------------------------
+
+
+def test_swing_holds_through_day19(data_root, monkeypatch):
+    acct = default_account()
+    _open_leg(acct, "NVDA", book="swing", price=340.0, shares=2,
+              stop=330.0, target=360.0, trading_date="2026-10-20")
+    # Day 19 (Fri 11-13): close window reached, but only 19 days held.
+    decision = _tick_hold(acct, "2026-11-13", close_window=True, quote=345.0,
+                          monkeypatch=monkeypatch)
+    assert _exit_row(decision, "swing") is None
+    assert get_position(acct, "swing") is not None
+
+
+def test_swing_flattens_on_day20_close(data_root, monkeypatch):
+    acct = default_account()
+    _open_leg(acct, "NVDA", book="swing", price=340.0, shares=2,
+              stop=330.0, target=360.0, trading_date="2026-10-20")
+    # Day 20 (Mon 11-16): close window -> deterministic flatten.
+    decision = _tick_hold(acct, "2026-11-16", close_window=True, quote=345.0,
+                          monkeypatch=monkeypatch)
+    row = _exit_row(decision, "swing")
+    assert row is not None
+    assert "20 个交易日" in (row["reason"] or "")
+    assert row["trade"]["price"] == pytest.approx(345.0)
+    # R = (345 - 340) / (340 - 330)
+    assert row["trade"]["r_multiple"] == pytest.approx(0.5, abs=0.01)
+    assert get_position(acct, "swing") is None
+
+
+def test_swing_overdue_flattens_next_morning(data_root, monkeypatch):
+    """If the day-20 close window was missed (no tick ran), the first later
+    tick flattens the leg instead of letting it run to a 21st full day."""
+    acct = default_account()
+    _open_leg(acct, "NVDA", book="swing", price=340.0, shares=2,
+              stop=330.0, target=360.0, trading_date="2026-10-20")
+    # Tue 11-17, morning tick, close window NOT reached, 21 trading days held.
+    decision = _tick_hold(acct, "2026-11-17", close_window=False, quote=345.0,
+                          monkeypatch=monkeypatch)
+    row = _exit_row(decision, "swing")
+    assert row is not None
+    assert "满 21 个交易日收盘平仓" in (row["reason"] or "")
+    assert get_position(acct, "swing") is None
+
+
+def test_swing_time_exit_sets_no_cooldown(data_root, monkeypatch):
+    """A max-hold flatten is neutral like a target exit: the same symbol
+    may re-enter the same book the same day (no stop cooldown)."""
+    acct = default_account()
+    _open_leg(acct, "NVDA", book="swing", price=340.0, shares=2,
+              stop=330.0, target=360.0, trading_date="2026-10-20")
+    decision = _tick_hold(acct, "2026-11-16", close_window=True, quote=345.0,
+                          monkeypatch=monkeypatch)
+    assert _exit_row(decision, "swing") is not None
+    assert get_position(acct, "swing") is None
+    cooldown = (acct.get("risk_state") or {}).get("stop_cooldown") or {}
+    assert "2026-11-16:swing:NVDA" not in cooldown
+    reentry = _try_entry(
+        acct,
+        "swing",
+        _picked("NVDA", price=345.0, stop=335.0, target=360.0,
+                direction="LONG", book="swing"),
+        "2026-11-16",
+    )
+    assert reentry["action"] == "ENTRY"
+    assert "冷却" not in (reentry["reason"] or "")
+
+
 def test_holding_days_counts_trading_days_only():
     # Fri 11-06 -> Mon 11-09 is 2 trading days (weekend skipped).
     assert holding_trading_days("2026-11-06", "2026-11-09") == 2

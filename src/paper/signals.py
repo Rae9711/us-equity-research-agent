@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date, datetime, time
 from typing import Any
 
 from src.research.entry_status import (
@@ -23,6 +24,7 @@ from src.research.entry_status import (
     resolve_symbol_last,
 )
 from src.utils.paths import morning_json_path, step_json_path
+from src.utils.trading_calendar import ET
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,43 @@ logger = logging.getLogger(__name__)
 ENTER_STATUSES = frozenset({STATUS_READY, STATUS_TRIGGERED})
 # Wait for pullback into zone (no chase)
 WAIT_STATUSES = frozenset({STATUS_ACTIVE})
+
+# Research freshness: a morning / step-3 research payload may drive NEW
+# entries only when it was generated on the trading date and at/before
+# 11:00 ET. A "morning" plan generated at 15:52 (2026-10-21 TSLA, entered
+# 15:53) is out-of-distribution for the system — its levels were framed as
+# a pre-open plan but built on afternoon data. Missing/unparseable
+# generated_at is treated as fresh (fail-open, same philosophy as the
+# news gate): old files predate the field.
+RESEARCH_CUTOFF_HOUR_ET = 11
+
+
+def _parse_generated_at(value: Any) -> datetime | None:
+    """ISO timestamp -> aware ET datetime, or None when missing/unparseable."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return None
+    return dt.astimezone(ET)
+
+
+def research_is_fresh(payload: dict[str, Any] | None, trading_date: str) -> bool:
+    """True when ``payload`` may drive new entries for ``trading_date``."""
+    gen = _parse_generated_at((payload or {}).get("generated_at"))
+    if gen is None:
+        return True
+    try:
+        day = date.fromisoformat(trading_date)
+    except ValueError:
+        return True
+    if gen.date() != day:
+        return False
+    cutoff = ET.localize(datetime.combine(day, time(RESEARCH_CUTOFF_HOUR_ET, 0)))
+    return gen <= cutoff
 
 
 def _safe_float(value: Any) -> float | None:
@@ -308,9 +347,32 @@ def _morning_top_trades(morning: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def load_candidate_signals(trading_date: str) -> dict[str, Any]:
-    """Load morning + step3 session primary + swing + top_trades list."""
+    """Load morning + step3 session primary + swing + top_trades list.
+
+    Stale research (``generated_at`` after 11:00 ET, or on another date)
+    is suppressed at the slot level: the raw payloads stay in the ctx for
+    display/diagnostics, but no morning-derived slot (primary, top_trades,
+    swing) and no step-3 session primary may drive a new entry that day.
+    Existing positions are unaffected — this gates entries only.
+    """
     morning = _load_json(morning_json_path(trading_date))
     step3 = _load_json(step_json_path(3, trading_date))
+    morning_fresh = research_is_fresh(morning, trading_date)
+    step3_fresh = research_is_fresh(step3, trading_date)
+    if not morning_fresh:
+        logger.warning(
+            "morning research for %s is stale (generated_at=%s); "
+            "morning-derived slots suppressed",
+            trading_date,
+            (morning or {}).get("generated_at"),
+        )
+    if not step3_fresh:
+        logger.warning(
+            "step3 research for %s is stale (generated_at=%s); "
+            "session primary suppressed",
+            trading_date,
+            (step3 or {}).get("generated_at"),
+        )
     session = (
         step3.get("session_trade_update")
         or step3.get("trade_reeval")
@@ -335,10 +397,12 @@ def load_candidate_signals(trading_date: str) -> dict[str, Any]:
     return {
         "morning": morning,
         "step3": step3,
-        "session_primary": session_primary,
-        "morning_primary": primary,
-        "top_trades": top_trades,
-        "swing": swing,
+        "session_primary": session_primary if step3_fresh else None,
+        "morning_primary": primary if morning_fresh else None,
+        "top_trades": top_trades if morning_fresh else [],
+        "swing": swing if morning_fresh else None,
+        "morning_stale": not morning_fresh,
+        "step3_stale": not step3_fresh,
     }
 
 
@@ -552,7 +616,19 @@ def pick_intraday_signal(
         rank = row.get("rank") or (i + 1)
         _add(f"top_trade_{rank}", row, f"Top#{rank} {row.get('symbol')}", "Intraday")
 
-    return _pick_from_evaluated(evaluated, allow_swing_fallback=False)
+    result = _pick_from_evaluated(evaluated, allow_swing_fallback=False)
+    if result.get("action") == "skip" and not evaluated:
+        notes = []
+        if ctx.get("morning_stale"):
+            notes.append("当日晨间研究生成于 11:00 之后，已过期")
+        if ctx.get("step3_stale"):
+            notes.append("Step3 盘中复核生成于 11:00 之后，已过期")
+        if notes:
+            result = dict(result)
+            result["reason"] = (
+                f"{result.get('reason') or '跳过'}（{'；'.join(notes)}）"
+            )
+    return result
 
 
 def pick_swing_signal(
@@ -584,11 +660,14 @@ def pick_swing_signal(
         )
     # Treat swing rows as the only candidates; reuse enter/wait paths via fallback flag
     if not evaluated:
+        reason = "无 Swing / 长线信号"
+        if ctx.get("morning_stale"):
+            reason += "（当日晨间研究生成于 11:00 之后，已过期）"
         return {
             "action": "skip",
             "signal": None,
             "entry_status": None,
-            "reason": "无 Swing / 长线信号",
+            "reason": reason,
             "quote": None,
             "quote_source": None,
             "candidates": [],
