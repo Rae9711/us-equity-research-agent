@@ -23,12 +23,14 @@ from src.paper.account import (
     mark_to_market,
     max_positions_for_book,
     open_positions,
+    append_decision,
 )
 from src.paper.allocation import (
     allocate_for_entry,
     apply_portfolio_risk_cap,
     book_notional_cap_pct,
 )
+from src.paper.circuit_breaker import breaker_decision_row, check_circuit_breaker
 from src.paper.news_gate import news_block_reason, news_gate_for_date
 from src.paper.broker_sim import (
     InsufficientCashError,
@@ -1095,6 +1097,14 @@ def decide_and_act(
         )
         book_results.extend(managed or [])
 
+    # Item 4 (circuit breaker): day -1% / week -2% blocks ALL new entries.
+    # Position management above already ran and is unaffected. Trips latch
+    # for the rest of the day/week; check_circuit_breaker persists state
+    # and returns any trip/reset events for the decision record.
+    breaker_status, breaker_events = check_circuit_breaker(account, trading_date)
+    for _ev in breaker_events:
+        append_decision(account, breaker_decision_row(_ev, trading_date))
+
     # 2) Entries for empty books (skip new 短线 when session closed)
     if phase == "premarket":
         if not book_results:
@@ -1109,10 +1119,13 @@ def decide_and_act(
                 "quote_source": None,
                 "books": [],
                 "news_gate": news_gate,
+                "circuit_breaker": breaker_status,
                 "advisory": True,
                 "advisory_zh": "模拟交易 · 不构成投资建议",
             }
-        return _aggregate(book_results, trading_date, phase)
+        _pre = _aggregate(book_results, trading_date, phase)
+        _pre["circuit_breaker"] = breaker_status
+        return _pre
 
     miss = float(params.get("miss_threshold_pct") or 1.0)
 
@@ -1141,6 +1154,24 @@ def decide_and_act(
     need_swing = len(get_positions(account, BOOK_SWING)) < max_positions_for_book(
         BOOK_SWING
     )
+
+    # Item 4 (circuit breaker): a tripped day/week breaker blocks ALL new
+    # entries. Position management above is unaffected.
+    if breaker_status.get("blocked"):
+        need_intraday = False
+        need_swing = False
+        book_results.append(
+            {
+                "book": "circuit_breaker",
+                "book_zh": "熔断",
+                "action": "SKIP",
+                "reason": breaker_status.get("reason") or "熔断封锁新开仓",
+                "trade": None,
+                "signal": None,
+                "quote": None,
+                "quote_source": None,
+            }
+        )
 
     picked_intra = None
     picked_swing = None
@@ -1221,6 +1252,7 @@ def decide_and_act(
 
     result = _aggregate(book_results, trading_date, phase)
     result["news_gate"] = news_gate
+    result["circuit_breaker"] = breaker_status
     return result
 
 
@@ -1237,6 +1269,12 @@ def _decide_single_book(
 ) -> dict[str, Any]:
     """Legacy single-position path (dual_books=False)."""
     news_gate = news_gate_for_date(trading_date, raw=raw)
+    # Item 4 (circuit breaker): evaluated on every tick so trip/reset
+    # events are recorded and the status is exposed; it gates entries
+    # only, never the position management below.
+    _breaker_status, _breaker_events = check_circuit_breaker(account, trading_date)
+    for _ev in _breaker_events:
+        append_decision(account, breaker_decision_row(_ev, trading_date))
     result: dict[str, Any] = {
         "trading_date": trading_date,
         "session_phase": phase,
@@ -1247,6 +1285,7 @@ def _decide_single_book(
         "quote": None,
         "quote_source": None,
         "news_gate": news_gate,
+        "circuit_breaker": _breaker_status,
         "advisory": True,
         "advisory_zh": "模拟交易 · 不构成投资建议",
     }
@@ -1287,6 +1326,11 @@ def _decide_single_book(
     if force_price is not None:
         for s in _collect_symbols(trading_date, account):
             inj[s] = float(force_price)
+
+    if _breaker_status.get("blocked"):
+        result["action"] = "SKIP"
+        result["reason"] = _breaker_status.get("reason") or "熔断封锁新开仓"
+        return result
 
     picked = pick_signal(
         trading_date,

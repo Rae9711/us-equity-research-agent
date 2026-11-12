@@ -117,6 +117,7 @@ def run_paper_tick(
         "trade": decision.get("trade"),
         "signal": decision.get("signal"),
         "entry_status": decision.get("entry_status"),
+        "circuit_breaker": decision.get("circuit_breaker"),
         "allocation": decision.get("allocation"),
         "portfolio": alloc_snap,
         "books": decision.get("books"),
