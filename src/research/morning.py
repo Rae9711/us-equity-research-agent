@@ -85,7 +85,23 @@ def _call_llm(context: dict[str, Any], rule_bundle: dict[str, Any]) -> dict[str,
         f"## rule_parts（勿改 judgment/分数）\n"
         f"{json.dumps(rule_bundle.get('parts', {}), ensure_ascii=False, indent=2)}"
     )
-    return client.complete_json(MORNING_SYSTEM, user_prompt)
+    result = client.complete_json(MORNING_SYSTEM, user_prompt)
+    # Gemini shadow opinion: same prompt, recorded only. A shadow failure
+    # must never break the primary (Anthropic) research path.
+    shadow: dict[str, Any] = {"ok": False, "model": None, "parts": {}, "error": None}
+    try:
+        from src.llm.gemini_client import GeminiClient
+
+        gemini = GeminiClient()
+        shadow["model"] = gemini.model
+        gemini_response = gemini.complete_json(MORNING_SYSTEM, user_prompt)
+        shadow["ok"] = True
+        shadow["parts"] = gemini_response.get("parts") or {}
+    except Exception as exc:  # noqa: BLE001 - shadow must not fail the run
+        logger.warning("Gemini shadow scoring failed: %s", exc)
+        shadow["error"] = str(exc)
+    result["gemini_shadow"] = shadow
+    return result
 
 
 def run_morning_research(
@@ -152,10 +168,12 @@ def run_morning_research(
     rule_bundle = compute_rule_parts(raw, as_of_et=pit_as_of)
 
     llm_parts: dict[str, Any] = {}
+    gemini_shadow: dict[str, Any] | None = None
     if not skip_llm:
         try:
             llm_response = _call_llm(context, rule_bundle)
             llm_parts = llm_response.get("parts") or {}
+            gemini_shadow = llm_response.get("gemini_shadow") or None
         except Exception:
             logger.exception("LLM morning research failed; using rule parts only")
             skip_llm = True
@@ -268,6 +286,36 @@ def run_morning_research(
             driver_tree=rule_bundle.get("driver_tree"),
         )
 
+    # Gemini shadow trade decision: same inputs, Gemini's parts. Recorded
+    # only; never affects the primary trade_decision or entries.
+    gemini_trade: dict[str, Any] = {}
+    if gemini_shadow and gemini_shadow.get("ok") and gemini_shadow.get("parts"):
+        try:
+            from src.research.trade_candidates import compute_trade_decision
+
+            gemini_trade = compute_trade_decision(
+                raw,
+                rule_bundle=rule_bundle,
+                parts=_merge_parts(gemini_shadow["parts"], rule_bundle.get("parts") or {}),
+                regime_label=regime_model.label,
+                regime_confidence=regime_model.confidence,
+                edges=rule_bundle.get("edges"),
+                as_of_et=pit_as_of,
+            )
+        except Exception:
+            logger.exception("Gemini shadow trade decision failed")
+
+    gemini_shadow_payload: dict[str, Any] | None = None
+    if gemini_shadow is not None:
+        gemini_shadow_payload = {
+            "ok": bool(gemini_shadow.get("ok")),
+            "model": gemini_shadow.get("model"),
+            "error": gemini_shadow.get("error"),
+            "parts": gemini_shadow.get("parts") or {},
+            "trade_candidates": gemini_trade.get("trade_candidates") or [],
+            "best_opportunity": gemini_trade.get("best_opportunity") or {},
+        }
+
     payload: dict[str, Any] = {
         "generated_at": datetime.now(ET).isoformat(),
         "decision_as_of": as_of_et_iso(trading_date, pit_as_of),
@@ -276,6 +324,7 @@ def run_morning_research(
         "prior_trading_day": raw.get("prior_trading_day"),
         "data_ready": raw.get("data_ready"),
         "llm_used": not skip_llm and bool(llm_parts),
+        "gemini_shadow": gemini_shadow_payload,
         "bias": rule_bundle.get("bias"),
         "total_score": rule_bundle.get("total"),
         "driver_type": rule_bundle.get("driver_type"),
