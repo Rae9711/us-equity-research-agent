@@ -154,6 +154,22 @@ def _pct(now: float, ref: float) -> float:
     return (now - ref) / ref * 100.0
 
 
+def _tick_iso(tick_dt: datetime | str | None) -> str:
+    """ISO timestamp for trip/reset events: the tick time, not run time.
+
+    ``tick_dt`` is the time of the tick being evaluated (ET). When omitted
+    (live tick without an explicit tick time) it falls back to now, which
+    is the tick time for a live run. Naive datetimes are read as ET.
+    """
+    if tick_dt is None:
+        return datetime.now(ET).isoformat()
+    if isinstance(tick_dt, str):
+        tick_dt = datetime.fromisoformat(tick_dt)
+    if tick_dt.tzinfo is None:
+        tick_dt = ET.localize(tick_dt)
+    return tick_dt.isoformat()
+
+
 def _reason(status: dict[str, Any]) -> str | None:
     parts: list[str] = []
     if status.get("tripped_day"):
@@ -172,6 +188,7 @@ def evaluate(
     trading_date: date | str,
     state: dict[str, Any],
     *,
+    tick_dt: datetime | str | None = None,
     day_threshold_pct: float = DAY_THRESHOLD_PCT,
     week_threshold_pct: float = WEEK_THRESHOLD_PCT,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -180,6 +197,10 @@ def evaluate(
     Mutates and returns ``state`` (caller persists it). Returns
     (status, new_events). The status never gates exits; callers must only
     use ``status["blocked"]`` to skip new entries.
+
+    ``tick_dt`` is the time of the tick being evaluated; trip/reset events
+    and ``tripped_at`` record it (never the wall-clock run time). When
+    omitted it defaults to now, which is the tick time for a live run.
     """
     if isinstance(trading_date, str):
         trading_date = date.fromisoformat(trading_date)
@@ -187,7 +208,7 @@ def evaluate(
     day_ref, week_ref = reference_equities(account, trading_date)
     day_pct = _pct(equity, day_ref)
     week_pct = _pct(equity, week_ref)
-    now_iso = datetime.now(ET).isoformat()
+    tick_iso = _tick_iso(tick_dt)
     week_key = f"{trading_date.isocalendar()[0]}-W{trading_date.isocalendar()[1]:02d}"
     events: list[dict[str, Any]] = []
 
@@ -206,7 +227,7 @@ def evaluate(
                     "ref_equity": day_ref,
                     "equity": equity,
                     "pct": day_pct,
-                    "ts": now_iso,
+                    "ts": tick_iso,
                 }
             )
         day.update(
@@ -230,7 +251,7 @@ def evaluate(
                     "ref_equity": week_ref,
                     "equity": equity,
                     "pct": week_pct,
-                    "ts": now_iso,
+                    "ts": tick_iso,
                 }
             )
         week.update(
@@ -245,7 +266,7 @@ def evaluate(
 
     # Trips latch for the rest of the day/week.
     if not day.get("tripped") and day_pct <= -abs(day_threshold_pct):
-        day.update({"tripped": True, "trip_pct": day_pct, "tripped_at": now_iso})
+        day.update({"tripped": True, "trip_pct": day_pct, "tripped_at": tick_iso})
         events.append(
             {
                 "type": "trip",
@@ -254,11 +275,11 @@ def evaluate(
                 "ref_equity": day_ref,
                 "equity": equity,
                 "pct": day_pct,
-                "ts": now_iso,
+                "ts": tick_iso,
             }
         )
     if not week.get("tripped") and week_pct <= -abs(week_threshold_pct):
-        week.update({"tripped": True, "trip_pct": week_pct, "tripped_at": now_iso})
+        week.update({"tripped": True, "trip_pct": week_pct, "tripped_at": tick_iso})
         events.append(
             {
                 "type": "trip",
@@ -267,7 +288,7 @@ def evaluate(
                 "ref_equity": week_ref,
                 "equity": equity,
                 "pct": week_pct,
-                "ts": now_iso,
+                "ts": tick_iso,
             }
         )
 
@@ -295,6 +316,7 @@ def check_circuit_breaker(
     account: dict[str, Any],
     trading_date: date | str,
     *,
+    tick_dt: datetime | str | None = None,
     state_path: str | Path | None = None,
     day_threshold_pct: float = DAY_THRESHOLD_PCT,
     week_threshold_pct: float = WEEK_THRESHOLD_PCT,
@@ -303,12 +325,16 @@ def check_circuit_breaker(
 
     Reads ``account`` only; never mutates it and never touches
     account.json. Safe to call on every tick.
+
+    ``tick_dt`` is the time of the tick being evaluated; trip/reset events
+    and ``tripped_at`` record it (never the wall-clock run time).
     """
     state = _load_state(state_path)
     status, events = evaluate(
         account,
         trading_date,
         state,
+        tick_dt=tick_dt,
         day_threshold_pct=day_threshold_pct,
         week_threshold_pct=week_threshold_pct,
     )

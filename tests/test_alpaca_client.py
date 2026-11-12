@@ -93,7 +93,13 @@ def test_live_endpoint_is_refused():
         AlpacaPaperClient(key_id="k", secret_key="s", base_url="https://example.com")
 
 
-def test_missing_keys_raise_without_network():
+def test_missing_keys_raise_without_network(monkeypatch):
+    # Isolate from the ambient environment: the client treats an explicit
+    # "" the same as unset (key_id or os.environ.get(...)), so APCA keys
+    # present in the environment would otherwise satisfy the constructor
+    # and this test would not raise.
+    monkeypatch.delenv("APCA_API_KEY_ID", raising=False)
+    monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
     with pytest.raises(ValueError, match="not set"):
         AlpacaPaperClient(key_id="", secret_key="")
 

@@ -11,7 +11,7 @@ Rules under test:
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -23,6 +23,7 @@ from src.paper.circuit_breaker import (
     reference_equities,
     _default_state,
 )
+from src.utils.trading_calendar import ET
 
 
 def _acct(equity, curve, starting_cash=10000.0):
@@ -41,6 +42,44 @@ def _acct(equity, curve, starting_cash=10000.0):
 def _curve(pairs):
     # pairs: (date_str, equity) -> one point at 16:00 ET that day
     return [(f"{d}T16:00:00-05:00", eq) for d, eq in pairs]
+
+
+def test_trip_records_tick_time_not_wall_clock(tmp_path):
+    # D2: tripped_at / event ts must be the tick time passed in, not the
+    # wall-clock time at which the breaker runs. The fixed tick time
+    # (09:35) differs from any plausible run time for this test.
+    tick_dt = ET.localize(datetime(2026, 11, 12, 9, 35, 0))
+    acct = _acct(9850.0, _curve([("2026-11-11", 10000.0)]))
+    status, events = check_circuit_breaker(
+        acct, "2026-11-12", tick_dt=tick_dt, state_path=tmp_path / "cb.json"
+    )
+    assert status["blocked"] is True
+    assert len(events) == 1 and events[0]["type"] == "trip" and events[0]["scope"] == "day"
+    assert events[0]["ts"] == tick_dt.isoformat()
+    saved = json.loads((tmp_path / "cb.json").read_text(encoding="utf-8"))
+    assert saved["day"]["tripped_at"] == tick_dt.isoformat()
+    assert saved["day"]["tripped_at"] != datetime.now(ET).isoformat()
+
+
+def test_reset_records_tick_time_not_wall_clock(tmp_path):
+    # Same rule for reset events: the reset is stamped with the tick that
+    # observed the new day, not the run time.
+    path = tmp_path / "cb.json"
+    tick1 = ET.localize(datetime(2026, 11, 12, 9, 35, 0))
+    acct = _acct(9850.0, _curve([("2026-11-11", 10000.0)]))
+    status, _ = check_circuit_breaker(acct, "2026-11-12", tick_dt=tick1, state_path=path)
+    assert status["blocked"] is True
+
+    tick2 = ET.localize(datetime(2026, 11, 13, 9, 31, 0))
+    acct2 = _acct(
+        10050.0,
+        _curve([("2026-11-11", 10000.0), ("2026-11-12", 10050.0)]),
+    )
+    status, events = check_circuit_breaker(acct2, "2026-11-13", tick_dt=tick2, state_path=path)
+    assert status["blocked"] is False
+    resets = [e for e in events if e["type"] == "reset" and e["scope"] == "day"]
+    assert len(resets) == 1
+    assert resets[0]["ts"] == tick2.isoformat()
 
 
 def test_day_trip_at_exactly_minus_1pct(tmp_path):

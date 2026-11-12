@@ -12,6 +12,7 @@ Dual books (default):
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from src.paper.account import (
@@ -57,7 +58,7 @@ from src.paper.signals import (
     resolve_quote_bar,
 )
 from src.research.entry_status import infer_session_phase
-from src.utils.trading_calendar import holding_trading_days, session_in_close_window
+from src.utils.trading_calendar import ET, holding_trading_days, session_in_close_window
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,25 @@ def _collect_symbols(trading_date: str, account: dict[str, Any]) -> list[str]:
     return syms
 
 
+def _parse_ts_et(value: Any) -> datetime | None:
+    """Parse a bar/entry timestamp to an aware ET datetime (None if bad).
+
+    Bar ``ts`` values are ISO strings from :func:`resolve_minute_bars`
+    (tz-aware ET); fixtures may use naive ``"YYYY-MM-DD HH:MM"`` strings,
+    which are read as ET. Unparseable values return None — callers treat
+    that as "unknown time", never as a reason to drop a bar.
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = ET.localize(dt)
+    return dt.astimezone(ET)
+
+
 def _bar_stop_trigger_price(direction: str, bar: dict[str, Any]) -> float | None:
     """Adverse extreme of a bar (the price that would have touched the stop)."""
     d = (direction or "LONG").upper()
@@ -284,6 +304,7 @@ def _scan_bars_for_exit(
     target: float | None,
     bars: list[dict[str, Any]],
     prev_close: float | None,
+    entry_ts: datetime | None = None,
 ) -> tuple[str, dict[str, Any], float | None] | None:
     """First stop/target touch across 1-minute bars, in time order.
 
@@ -291,9 +312,22 @@ def _scan_bars_for_exit(
     ``"target"``, or None when no bar touched either level. Within one bar
     the stop is checked first: order inside a minute is unknowable, and the
     risk control takes precedence over the profit target.
+
+    D1: bars starting before ``entry_ts`` (the position's entry time) can
+    never trigger an exit — a leg that exited and re-entered the same day
+    must not exit instantly on a stale pre-entry touch. Such bars are
+    skipped for touch purposes, but their closes still feed the
+    previous-close chain used for gap detection on later bars. When
+    ``entry_ts`` is None the full day is scanned (previous behavior).
     """
     prev = prev_close
     for bar in bars:
+        bar_dt = _parse_ts_et(bar.get("ts"))
+        if entry_ts is not None and bar_dt is not None and bar_dt < entry_ts:
+            close = _safe_float(bar.get("close"))
+            if close is not None:
+                prev = close
+            continue
         trig_stop = _bar_stop_trigger_price(direction, bar)
         if stop is not None and trig_stop is not None and _stop_hit(direction, trig_stop, stop):
             return ("stop", bar, prev)
@@ -306,6 +340,85 @@ def _scan_bars_for_exit(
         if close is not None:
             prev = close
     return None
+
+
+def _entry_ts_for_scan(
+    pos: dict[str, Any], trading_date: str
+) -> datetime | None:
+    """Entry time used to skip pre-entry bars, or None (no filtering).
+
+    Only a leg opened *today* needs filtering: today's bars all postdate
+    an earlier day's entry, so no filter applies then. When the leg opened
+    today but ``opened_at`` is missing or unparseable, fall back to
+    scanning the full day (previous behavior) and log it — a missing
+    timestamp must never silently drop a genuine touch. An entry whose
+    wall-clock date disagrees with the trading date (e.g. a fixture whose
+    entry was stamped "now" for a past session) also skips the filter:
+    applying it would drop every bar.
+    """
+    if (pos.get("opened_date") or "") != trading_date:
+        return None
+    raw = pos.get("opened_at")
+    if not raw:
+        logger.warning(
+            "position %s opened %s has no opened_at; scanning full-day bars",
+            pos.get("symbol"),
+            trading_date,
+        )
+        return None
+    dt = _parse_ts_et(raw)
+    if dt is None:
+        logger.warning(
+            "position %s opened_at %r unparseable; scanning full-day bars",
+            pos.get("symbol"),
+            raw,
+        )
+        return None
+    if dt.date().isoformat() != trading_date:
+        logger.debug(
+            "position %s opened_at %s is not on trading date %s; "
+            "skipping pre-entry bar filter",
+            pos.get("symbol"),
+            raw,
+            trading_date,
+        )
+        return None
+    return dt
+
+
+def _last_bar_close(bars: list[dict[str, Any]] | None) -> float | None:
+    """Close of the last 1-minute bar with a usable close (None if none)."""
+    if not bars:
+        return None
+    for bar in reversed(bars):
+        close = _safe_float(bar.get("close"))
+        if close is not None and close > 0:
+            return close
+    return None
+
+
+def _resolve_bars_for_symbol(
+    sym: str,
+    trading_date: str,
+    raw: dict[str, Any] | None,
+    bars_map: dict[str, list[dict[str, Any]]] | None,
+    forced: bool,
+) -> tuple[list[dict[str, Any]] | None, bool]:
+    """Today's 1-minute bars for one symbol, preferring already-fetched bars.
+
+    Returns ``(bars, resolved)``: ``resolved`` is True once the source has
+    been consulted, so a tick never fetches the same bars twice (the D3
+    fallback and the stop/target scan share the one resolution).
+    """
+    if bars_map is not None:
+        return bars_map.get(sym), True
+    if forced:
+        return None, True
+    try:
+        return resolve_minute_bars(sym, trading_date, raw=raw), True
+    except Exception:
+        logger.debug("minute bar scan failed for %s", sym, exc_info=True)
+        return None, True
 
 
 def _target_fill_price(
@@ -375,15 +488,58 @@ def _manage_single_position(
     max_dev = float(
         params.get("max_price_deviation_pct") or DEFAULT_MAX_DEVIATION_PCT
     )
+    anchors = anchors_from_position(pos)
     sane, reject = is_sane_fill_price(
-        px, anchors=anchors_from_position(pos), max_deviation_pct=max_dev
+        px, anchors=anchors, max_deviation_pct=max_dev
     )
+    forced = bool(price_map and sym in price_map)
+    bars: list[dict[str, Any]] | None = None
+    bars_resolved = False
     if not sane:
-        base["reason"] = (
-            f"{label}持仓 {sym}：{reject or '报价异常'}，拒绝止损/止盈/平仓，继续持有"
+        # D3: when the live quote is rejected, fall back to the last
+        # 1-minute bar close already fetched for this symbol — but only
+        # when THAT price also passes the sane check against the same
+        # anchors. When the fallback is also insane or unavailable, keep
+        # the previous refuse-and-hold behavior.
+        bars, bars_resolved = _resolve_bars_for_symbol(
+            sym, trading_date, raw, bars_map, forced
         )
-        base["quote_rejected"] = True
-        return base
+        fb_close = _last_bar_close(bars)
+        fb_sane = False
+        if fb_close is not None:
+            fb_sane, _fb_reject = is_sane_fill_price(
+                fb_close, anchors=anchors, max_deviation_pct=max_dev
+            )
+        if fb_close is not None and fb_sane:
+            logger.info(
+                "%s %s: live quote $%s rejected (%s); using last 1m bar "
+                "close $%s as quote",
+                label,
+                sym,
+                px,
+                reject,
+                fb_close,
+            )
+            px = fb_close
+            qsrc = "minute_bar_close_fallback"
+            base["quote"] = px
+            base["quote_source"] = qsrc
+            base["quote_fallback"] = True
+        else:
+            logger.warning(
+                "%s %s: live quote $%s rejected (%s); bar-close fallback %s "
+                "— refusing stop/target/close exit, holding",
+                label,
+                sym,
+                px,
+                reject,
+                "also rejected" if fb_close is not None else "unavailable",
+            )
+            base["reason"] = (
+                f"{label}持仓 {sym}：{reject or '报价异常'}，拒绝止损/止盈/平仓，继续持有"
+            )
+            base["quote_rejected"] = True
+            return base
 
     stop = _safe_float(pos.get("stop"))
     target = _safe_float(pos.get("target"))
@@ -397,21 +553,19 @@ def _manage_single_position(
     # first touch wins and fills off that bar, not the late tick quote.
     # When no bars are available (or the quote was force-injected for a
     # demo/test), fall through to the single-price checks below.
-    forced = bool(price_map and sym in price_map)
-    bars: list[dict[str, Any]] | None = None
-    if bars_map is not None:
-        bars = bars_map.get(sym)
-    elif not forced:
-        try:
-            bars = resolve_minute_bars(sym, trading_date, raw=raw)
-        except Exception:
-            logger.debug("minute bar scan failed for %s", sym, exc_info=True)
-            bars = None
+    # Bars already resolved for the D3 fallback above are reused here.
+    if not bars_resolved:
+        bars, bars_resolved = _resolve_bars_for_symbol(
+            sym, trading_date, raw, bars_map, forced
+        )
     if bars:
         bar_prev_close = resolve_quote_bar(sym, trading_date, raw=raw).get(
             "prev_close"
         )
-        hit = _scan_bars_for_exit(direction, stop, target, bars, bar_prev_close)
+        hit = _scan_bars_for_exit(
+            direction, stop, target, bars, bar_prev_close,
+            entry_ts=_entry_ts_for_scan(pos, trading_date),
+        )
         if hit is not None:
             kind, bar, bar_prev = hit
             if kind == "stop":
@@ -1054,11 +1208,17 @@ def decide_and_act(
     raw: dict[str, Any] | None = None,
     force_price: float | None = None,
     bars_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
+    tick_dt: datetime | None = None,
 ) -> dict[str, Any]:
     """One paper-trading tick. Mutates ``account``. Returns decision summary.
 
     ``bars_by_symbol`` injects today's 1-minute bars per symbol (tests /
     replay); when omitted the tick fetches live bars for stop/target scans.
+
+    ``tick_dt`` is the time of this tick (ET); it is threaded to the
+    circuit breaker so trip/reset events record the tick time, not the
+    wall-clock run time. When omitted the breaker falls back to now,
+    which is the tick time for a live run.
     """
     phase = session_phase or infer_session_phase(trading_date)
     params = account.get("params") or {}
@@ -1085,6 +1245,7 @@ def decide_and_act(
             force_price=force_price,
             params=params,
             bars_map=bars_by_symbol,
+            tick_dt=tick_dt,
         )
 
     book_results: list[dict[str, Any]] = []
@@ -1101,7 +1262,9 @@ def decide_and_act(
     # Position management above already ran and is unaffected. Trips latch
     # for the rest of the day/week; check_circuit_breaker persists state
     # and returns any trip/reset events for the decision record.
-    breaker_status, breaker_events = check_circuit_breaker(account, trading_date)
+    breaker_status, breaker_events = check_circuit_breaker(
+        account, trading_date, tick_dt=tick_dt
+    )
     for _ev in breaker_events:
         append_decision(account, breaker_decision_row(_ev, trading_date))
 
@@ -1266,13 +1429,16 @@ def _decide_single_book(
     force_price: float | None,
     params: dict[str, Any],
     bars_map: dict[str, list[dict[str, Any]]] | None = None,
+    tick_dt: datetime | None = None,
 ) -> dict[str, Any]:
     """Legacy single-position path (dual_books=False)."""
     news_gate = news_gate_for_date(trading_date, raw=raw)
     # Item 4 (circuit breaker): evaluated on every tick so trip/reset
     # events are recorded and the status is exposed; it gates entries
     # only, never the position management below.
-    _breaker_status, _breaker_events = check_circuit_breaker(account, trading_date)
+    _breaker_status, _breaker_events = check_circuit_breaker(
+        account, trading_date, tick_dt=tick_dt
+    )
     for _ev in _breaker_events:
         append_decision(account, breaker_decision_row(_ev, trading_date))
     result: dict[str, Any] = {

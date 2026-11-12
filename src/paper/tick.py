@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from src.paper.account import (
@@ -24,6 +24,7 @@ from src.paper.journal import record_tick_decision
 from src.research.entry_status import infer_session_phase
 from src.utils.paths import raw_data_path
 from src.utils.trading_calendar import (
+    ET,
     require_trading_day,
     skipped_non_trading_day,
     today_et,
@@ -50,11 +51,17 @@ def run_paper_tick(
     force_price: float | None = None,
     allow_non_trading_day: bool = False,
     bars_by_symbol: dict[str, list[dict[str, Any]]] | None = None,
+    tick_dt: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one simulated trading tick and persist account state.
 
     When market is closed, still marks/exits using last raw snapshot price
     (demo-friendly) unless no raw data exists.
+
+    ``tick_dt`` is the time of this tick (ET). When omitted it is captured
+    once here at tick start and threaded to the circuit breaker, so
+    trip/reset events record the tick time rather than a later
+    wall-clock read inside the breaker.
     """
     if isinstance(trading_date, str):
         d = date.fromisoformat(trading_date)
@@ -62,6 +69,11 @@ def run_paper_tick(
         d = today_et()
     else:
         d = trading_date
+
+    if tick_dt is None:
+        tick_dt = datetime.now(ET)
+    elif tick_dt.tzinfo is None:
+        tick_dt = ET.localize(tick_dt)
 
     if not allow_non_trading_day:
         resolved = require_trading_day(d, job="paper_tick")
@@ -82,6 +94,7 @@ def run_paper_tick(
         raw=raw or None,
         force_price=force_price,
         bars_by_symbol=bars_by_symbol,
+        tick_dt=tick_dt,
     )
     record_tick_decision(account, decision)
 

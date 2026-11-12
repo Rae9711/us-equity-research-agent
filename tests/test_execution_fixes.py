@@ -559,6 +559,10 @@ def test_news_gate_exits_unaffected(data_root, monkeypatch):
     acct = default_account()
     _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
               stop=335.0, target=354.0, trading_date="2026-11-12")
+    # D1: pin the entry time before the 09:31 bar — execute_entry stamps
+    # opened_at with the wall-clock run time (mid-session today), which
+    # would make the 09:31 touch pre-entry and correctly filtered out.
+    get_position(acct, "intraday")["opened_at"] = "2026-11-12T09:30:00-05:00"
     gate = {
         "blocked_symbols": ["ARM"],
         "global_block": False,

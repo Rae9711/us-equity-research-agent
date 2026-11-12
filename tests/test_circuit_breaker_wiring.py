@@ -11,6 +11,9 @@ they exercise decide_and_act / run_paper_tick with the breaker wired in.
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 import pytest
 
 from src.paper.account import (
@@ -20,6 +23,7 @@ from src.paper.account import (
 )
 from src.paper.execution_agent import decide_and_act
 from src.paper.tick import run_paper_tick
+from src.utils.trading_calendar import ET
 
 
 @pytest.fixture
@@ -204,3 +208,46 @@ def test_tick_summary_exposes_breaker_status(data_root, open_gate, monkeypatch):
     summary = run_paper_tick("2026-11-12", session_phase="open")
     assert summary["circuit_breaker"]["blocked"] is True
     assert summary["circuit_breaker"]["tripped_day"] is True
+
+
+def test_trip_via_decide_and_act_records_tick_time(data_root, open_gate, monkeypatch):
+    # D2: the tick time threaded through decide_and_act is what lands in
+    # the breaker state, not the wall-clock run time.
+    tick_dt = ET.localize(datetime(2026, 11, 12, 9, 35, 0))
+    acct = _tripped_account()
+    monkeypatch.setattr(
+        "src.paper.execution_agent.pick_intraday_signal",
+        lambda *a, **k: _picked("ARM", book="intraday"),
+    )
+    monkeypatch.setattr(
+        "src.paper.execution_agent.pick_swing_signal",
+        lambda *a, **k: {"action": "skip", "reason": "test", "signal": None},
+    )
+    decision = decide_and_act(
+        acct, "2026-11-12", session_phase="open", tick_dt=tick_dt
+    )
+    assert decision["circuit_breaker"]["blocked"] is True
+    saved = json.loads(
+        (data_root / "paper" / "circuit_breaker.json").read_text(encoding="utf-8")
+    )
+    assert saved["day"]["tripped_at"] == tick_dt.isoformat()
+    assert saved["events"][0]["ts"] == tick_dt.isoformat()
+
+
+def test_trip_via_single_book_path_records_tick_time(data_root, open_gate, monkeypatch):
+    # D2, legacy path: _decide_single_book must thread the tick time too.
+    tick_dt = ET.localize(datetime(2026, 11, 12, 10, 5, 0))
+    acct = _tripped_account()
+    acct["params"]["dual_books"] = False
+    monkeypatch.setattr(
+        "src.paper.execution_agent.pick_signal",
+        lambda *a, **k: _picked("ARM", book="intraday"),
+    )
+    decision = decide_and_act(
+        acct, "2026-11-12", session_phase="open", tick_dt=tick_dt
+    )
+    assert decision["circuit_breaker"]["blocked"] is True
+    saved = json.loads(
+        (data_root / "paper" / "circuit_breaker.json").read_text(encoding="utf-8")
+    )
+    assert saved["day"]["tripped_at"] == tick_dt.isoformat()

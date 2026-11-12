@@ -503,7 +503,7 @@ def simulate_day(account: dict[str, Any], date_str: str, ctx: ReplayContext,
             with replay_patches(ctx):
                 decision = decide_and_act(
                     account, date_str, session_phase="open", raw=raw or None,
-                    bars_by_symbol=bars_map,
+                    bars_by_symbol=bars_map, tick_dt=tick_dt,
                 )
         except Exception as exc:
             logger.exception("replay tick failed %s %s", date_str, slot)
@@ -1150,13 +1150,9 @@ def render_report(result: dict[str, Any]) -> str:
         "旧腿开仓时不存在，可能减少重放股数或跳过开仓。",
         "- **熔断（item 4，2026-11-12 新增）**：旧腿开仓时不存在；重放中触发会封锁新开仓。",
         "",
-        "## 重放中发现的潜在缺陷（生产代码，待修）", "",
-        "- **逐笔 K 线扫描不区分开仓前后的 K 线**：`_scan_bars_for_exit` 扫描当日全部 1 分钟 K 线，"
-        "不剔除开仓时刻之前的 K 线。一只日内腿若在触及目标/止损之后重新开仓（如 MU 10/27 先止盈后重开），"
-        "下一档 tick 会立刻拿开仓前的旧触及把它再平掉。在本次重放的真实路径里没有触发（重开腿的目标价不同），"
-        "但在合成测试中复现了：同一标的当日退出又重开后，每档 tick 各平仓一次。",
-        "- **熔断参考权益用 wall-clock 时间戳**：熔断事件的 `tripped_at` 取运行时刻而非 tick 时刻，"
-        "不影响判断，只影响事件记录的可读性。",
+        "## 重放中发现的潜在缺陷（已修复）", "",
+        "- **逐笔 K 线扫描不区分开仓前后的 K 线**（2026-11-12 已修复）：`_scan_bars_for_exit` 现只扫描开仓时刻及之后的 K 线；"
+        "修复后重放数字不变（该缺陷在真实路径里本就没有触发）。"
         "",
         "## 仍未验证", "",
         "- 2026-09-21 之前历史：只有 -589.73 美元总额调整，无法逐笔验证，今后也无法恢复。",

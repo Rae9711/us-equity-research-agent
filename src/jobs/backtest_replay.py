@@ -36,13 +36,14 @@ def _trading_days_window(end_date: date, days: int) -> list[date]:
     return list(reversed(result))
 
 
-def _fetch_historical_prices(symbols: list[str], start: date, end: date) -> dict[str, dict[str, float]]:
-    """Fetch historical DAILY RETURNS (%) using yfinance for backtest."""
+def _download_close_frame(symbols: list[str], start: date, end: date):
+    """Download daily closes via yfinance; returns a DataFrame of closes
+    indexed by date, or None when yfinance is missing/empty/failed."""
     try:
         import yfinance as yf
     except ImportError:
         logger.warning("yfinance not available for backtest")
-        return {}
+        return None
 
     # Include one extra day before start to compute first-day return
     fetch_start = start - timedelta(days=5)
@@ -56,7 +57,7 @@ def _fetch_historical_prices(symbols: list[str], start: date, end: date) -> dict
             auto_adjust=True,
         )
         if df.empty:
-            return {}
+            return None
 
         # Get Close prices
         if len(symbols) == 1:
@@ -65,33 +66,72 @@ def _fetch_historical_prices(symbols: list[str], start: date, end: date) -> dict
         else:
             close_df = df["Close"].copy() if "Close" in df.columns else df.copy()
 
-        # Compute percentage returns: pct_change * 100
-        returns_df = close_df.pct_change() * 100.0
-
-        result: dict[str, dict[str, float]] = {}
-        for idx_date in returns_df.index:
-            d_str = idx_date.strftime("%Y-%m-%d")
-            row_data = {}
-            for sym in symbols:
-                if sym in returns_df.columns:
-                    val = returns_df[sym].iloc[returns_df.index.get_loc(idx_date)]
-                    if val == val and val is not None:  # not NaN
-                        row_data[sym] = round(float(val), 4)
-            if row_data:
-                result[d_str] = row_data
-
-        return result
+        return close_df
     except Exception as exc:
         logger.warning("yfinance download failed: %s", exc)
+        return None
+
+
+def _fetch_historical_prices(symbols: list[str], start: date, end: date) -> dict[str, dict[str, float]]:
+    """Fetch historical DAILY RETURNS (%) using yfinance for backtest."""
+    close_df = _download_close_frame(symbols, start, end)
+    if close_df is None:
         return {}
+
+    # Compute percentage returns: pct_change * 100
+    returns_df = close_df.pct_change() * 100.0
+
+    result: dict[str, dict[str, float]] = {}
+    for idx_date in returns_df.index:
+        d_str = idx_date.strftime("%Y-%m-%d")
+        row_data = {}
+        for sym in symbols:
+            if sym in returns_df.columns:
+                val = returns_df[sym].iloc[returns_df.index.get_loc(idx_date)]
+                if val == val and val is not None:  # not NaN
+                    row_data[sym] = round(float(val), 4)
+        if row_data:
+            result[d_str] = row_data
+
+    return result
+
+
+def _fetch_historical_closes(symbols: list[str], start: date, end: date) -> dict[str, dict[str, float]]:
+    """Fetch historical DAILY CLOSE levels using yfinance for backtest.
+
+    Returns {date_str: {symbol: close}}. Used for ^VIX, whose signal input
+    is the level (vix < 22), not the daily return.
+    """
+    close_df = _download_close_frame(symbols, start, end)
+    if close_df is None:
+        return {}
+
+    result: dict[str, dict[str, float]] = {}
+    for idx_date in close_df.index:
+        d_str = idx_date.strftime("%Y-%m-%d")
+        row_data = {}
+        for sym in symbols:
+            if sym in close_df.columns:
+                val = close_df[sym].iloc[close_df.index.get_loc(idx_date)]
+                if val == val and val is not None:  # not NaN
+                    row_data[sym] = round(float(val), 4)
+        if row_data:
+            result[d_str] = row_data
+
+    return result
 
 
 def _replay_day(
     d: date,
     historical_prices: dict[str, dict[str, float]],
     data_gaps: list[str],
+    vix_closes: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Replay pipeline for a single day. Returns per-day metrics."""
+    """Replay pipeline for a single day. Returns per-day metrics.
+
+    vix_closes maps date_str -> ^VIX close level; the signal uses the
+    latest close strictly before d (prior-day close, no lookahead).
+    """
     date_str = d.isoformat()
     result: dict[str, Any] = {
         "date": date_str,
@@ -120,11 +160,25 @@ def _replay_day(
         from src.schemas.market_case import FeaturesModel
         features = FeaturesModel()
 
-    # Inject historical prices if features empty
+    # Inject yfinance fallback where raw features are missing. (D4: the old
+    # path set data_available/qqq_return here but never filled the signal
+    # inputs features.qqq_chg / features.vix, so should_trade could never
+    # fire on fallback days.)
     day_prices = historical_prices.get(date_str, {})
     if day_prices and features.qqq_chg is None:
         data_gaps.append(f"{date_str}: using yfinance fallback")
         result["data_available"] = bool(day_prices)
+        if day_prices.get("QQQ") is not None:
+            features.qqq_chg = day_prices["QQQ"]
+    if features.vix is None and vix_closes:
+        # Prior-day close: the VIX close for day d is only known after d
+        # ends, so the signal must use the latest close strictly before d
+        # (this also bridges weekends/holidays with no ^VIX row).
+        prior_days = [ds for ds in vix_closes if ds < date_str]
+        if prior_days:
+            prior_day = max(prior_days)
+            features.vix = vix_closes[prior_day]
+            data_gaps.append(f"{date_str}: using yfinance fallback (^VIX prior close {prior_day})")
 
     # R0 Regime
     try:
@@ -320,12 +374,20 @@ def run_backtest(
     logger.info("Fetching historical prices for %d symbols", len(symbols))
     historical_prices = _fetch_historical_prices(symbols, window[0], window[-1])
 
+    # ^VIX closes feed the fallback vix level (signal needs the level, not
+    # the return). Fetch covers 5 days before the window so the first day
+    # also has a prior-day close.
+    vix_closes_raw = _fetch_historical_closes(["^VIX"], window[0], window[-1])
+    vix_closes = {
+        d: row["^VIX"] for d, row in vix_closes_raw.items() if "^VIX" in row
+    }
+
     data_gaps: list[str] = []
     day_results = []
 
     for d in window:
         try:
-            result = _replay_day(d, historical_prices, data_gaps)
+            result = _replay_day(d, historical_prices, data_gaps, vix_closes=vix_closes)
             day_results.append(result)
         except Exception as exc:
             logger.error("Replay failed for %s: %s", d, exc)
