@@ -189,7 +189,22 @@ def levels_race(
 
 
 def consistency(records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Direction flips per symbol across consecutive predictions."""
+    """Direction flips per symbol across consecutive predictions.
+
+    A flip is any direction change vs the previous prediction for that
+    symbol. Flips are NOT all unreliability: day-to-day market-view
+    changes and horizon-differentiated plans (intraday LONG + swing
+    SHORT on the same name) are legitimate, and sequential reversal
+    (close a long, then open a short) is normal trading. So the panel
+    splits out the two cases that actually need attention:
+
+    * ``same_pass_opposite``: the same research pass (same date +
+      origin) produced BOTH directions for one symbol -- the only case
+      where the research contradicts itself at one moment in time.
+    * ``flip_days``: dates on which many symbols flipped together.
+      When every symbol flips on the same day, the judgements are one
+      daily market call stamped on many names, not independent views.
+    """
     by_sym: dict[str, list[dict[str, Any]]] = {}
     for rec in records:
         by_sym.setdefault(rec["symbol"], []).append(rec)
@@ -209,10 +224,18 @@ def consistency(records: list[dict[str, Any]]) -> dict[str, Any]:
                     f"{sym} {prev['candidate_date']} {prev['direction']} -> "
                     f"{rec['candidate_date']} {rec['direction']} ({rec.get('origin')})")
             prev = rec
+    same_pass: dict[tuple[str, str, str], set[str]] = {}
+    for rec in records:
+        key = (rec["candidate_date"], rec.get("origin") or "", rec["symbol"])
+        same_pass.setdefault(key, set()).add(rec["direction"])
+    opposite = sorted(k for k, v in same_pass.items() if len(v) > 1)
     return {"predictions": len(records), "flips": flips,
             "flips_by_symbol": flips_by_symbol,
             "flip_days": dict(sorted(flip_days.items())),
-            "flip_detail": flip_detail}
+            "max_flips_one_day": max(flip_days.values()) if flip_days else 0,
+            "flip_detail": flip_detail,
+            "same_pass_opposite_groups": len(opposite),
+            "same_pass_opposite_detail": [f"{d} {o} {s}" for d, o, s in opposite]}
 
 
 def _avg_range(bars: list[dict[str, Any]], cdate: str) -> float | None:

@@ -123,6 +123,23 @@ def test_consistency_counts_flips():
     assert out["flips"] == 2
     assert out["flips_by_symbol"] == {"AAA": 2}
     assert out["flip_days"] == {"2026-10-21": 1, "2026-10-23": 1}
+    assert out["max_flips_one_day"] == 1
+    assert out["same_pass_opposite_groups"] == 0
+
+
+def test_consistency_same_pass_opposite_is_split_out():
+    # Same morning pass, both directions on one symbol: a same-pass
+    # contradiction. A sequential flip the next day is counted separately.
+    recs = [
+        _rec("2026-10-20", "AAA", "LONG", 100, 98, 104),
+        _rec("2026-10-20", "AAA", "SHORT", 100, 102, 96),
+        _rec("2026-10-21", "AAA", "LONG", 100, 98, 104),
+    ]
+    out = consistency(recs)
+    assert out["same_pass_opposite_groups"] == 1
+    assert out["same_pass_opposite_detail"] == ["2026-10-20 morning AAA"]
+    # flips: LONG -> SHORT (same day) then SHORT -> LONG (next day)
+    assert out["flips"] == 2
 
 
 def test_realism_ratios():
