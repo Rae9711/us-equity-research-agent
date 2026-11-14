@@ -157,6 +157,26 @@ def test_get_account_positions_and_cancel():
     assert ("DELETE", PAPER_BASE_URL + "/v2/orders/order-123") in calls
 
 
+def test_close_position_deletes_and_returns_closed_position():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE" and request.url.path == "/v2/positions/AMD":
+            return httpx.Response(200, json={"symbol": "AMD", "qty": "2", "side": "long", "status": "closed"})
+        return httpx.Response(404, json={"message": "position not found"})
+
+    client = _client(handler)
+    closed = client.close_position("amd")
+    assert closed["symbol"] == "AMD"
+    assert closed["status"] == "closed"
+
+
+def test_close_position_returns_none_when_already_flat():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "position not found"})
+
+    client = _client(handler)
+    assert client.close_position("AMD") is None
+
+
 def test_auth_failure_raises_alpaca_error_with_guidance():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"code": 40110000, "message": "authentication failed"})

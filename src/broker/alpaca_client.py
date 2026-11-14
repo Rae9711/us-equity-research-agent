@@ -210,6 +210,19 @@ class AlpacaPaperClient:
     def cancel_order(self, order_id: str) -> None:
         self._request("DELETE", f"/v2/orders/{order_id}")
 
+    def close_position(self, symbol: str) -> dict[str, Any] | None:
+        """Close an open paper position at market (DELETE /v2/positions/{symbol}).
+
+        Returns the closed-position JSON, or None when Alpaca reports no
+        position for the symbol (404) -- already flat, not an error.
+        """
+        try:
+            return self._request("DELETE", f"/v2/positions/{symbol.upper()}")
+        except AlpacaError as exc:
+            if exc.status == 404:
+                return None
+            raise
+
     def submit_bracket_order(self, signal: dict[str, Any]) -> dict[str, Any]:
         """Submit a bracket order for a system signal. Returns the order
         JSON (id, legs). The entry is a market order; TP/SL legs activate
