@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from src.paper.shadow_ledger import (
     MAX_HOLD_DAYS,
+    RECALIBRATION_MIN_SAMPLE,
+    RECALIBRATION_PRIOR_STRENGTH,
+    calibrated_win_prob,
     compute_summary,
     derive_levels,
     evaluate_day,
@@ -15,6 +18,7 @@ from src.paper.shadow_ledger import (
     extract_step3_candidates,
     make_record,
     r_multiple,
+    recalibration_map,
     update_record,
     win_prob_bucket,
 )
@@ -381,3 +385,97 @@ def test_compute_summary_empty():
     assert s["totals"]["settled"] == 0
     assert s["totals"]["expectancy_r"] is None
     assert s["totals"]["brier"] is None
+
+
+# --- Recalibration: stated win_prob -> observed win rate -----------------
+
+
+def _gt70_bucket_recs():
+    # Mirrors the live >70% bucket as of 2026-11-12: 7 settled, 3 wins,
+    # stated probs ~70-78% (mean ~71.9%).
+    probs = [72.0, 71.0, 71.0, 78.0, 70.0, 70.0, 71.0]
+    rs = [1.43, -1.0, 0.33, -1.0, -1.0, 1.18, -1.0]
+    return [_settled(p, r) for p, r in zip(probs, rs)]
+
+
+def test_recalibration_shrinks_small_bucket_toward_stated_mean():
+    recs = _gt70_bucket_recs()
+    m = recalibration_map(recs)
+    b = m[">70"]
+    assert b["n"] == 7 and b["wins"] == 3
+    assert abs(b["empirical_win_rate"] - 3 / 7) < 1e-9
+    stated_mean = sum([72.0, 71.0, 71.0, 78.0, 70.0, 70.0, 71.0]) / 7 / 100.0
+    assert abs(b["stated_mean_win_prob"] - stated_mean) < 1e-9
+    k = RECALIBRATION_PRIOR_STRENGTH
+    expected = (7 * (3 / 7) + k * stated_mean) / (7 + k)
+    assert abs(b["calibrated_win_prob"] - expected) < 1e-9
+    # Shrunk value sits strictly between raw empirical and stated mean.
+    assert 3 / 7 < b["calibrated_win_prob"] < stated_mean
+    assert b["sample_sufficient"] is False  # n=7 < RECALIBRATION_MIN_SAMPLE
+    assert 7 < RECALIBRATION_MIN_SAMPLE
+
+
+def test_recalibration_empty_bucket_is_placeholder():
+    m = recalibration_map([])
+    for bucket in ("<50", "50-60", "60-70", ">70"):
+        b = m[bucket]
+        assert b["n"] == 0 and b["wins"] == 0
+        assert b["empirical_win_rate"] is None
+        assert b["calibrated_win_prob"] is None
+        assert b["wilson_ci_95"] == [0.0, 1.0]
+        assert b["sample_sufficient"] is False
+
+
+def test_recalibration_large_sample_trusts_empirical():
+    recs = [_settled(75.0, 1.0) for _ in range(12)] + [
+        _settled(75.0, -1.0) for _ in range(28)
+    ]
+    m = recalibration_map(recs)
+    b = m[">70"]
+    assert b["n"] == 40 and b["wins"] == 12
+    assert b["sample_sufficient"] is True
+    k = RECALIBRATION_PRIOR_STRENGTH
+    expected = (40 * 0.3 + k * 0.75) / (40 + k)
+    assert abs(b["calibrated_win_prob"] - expected) < 1e-9
+    # With n=40 the calibrated rate is much closer to empirical than prior.
+    assert abs(b["calibrated_win_prob"] - 0.3) < abs(b["calibrated_win_prob"] - 0.75)
+
+
+def test_recalibration_wilson_ci_contains_empirical_and_shrinks():
+    small = [_settled(75.0, 1.0), _settled(75.0, -1.0)]
+    big = [_settled(75.0, 1.0) for _ in range(20)] + [
+        _settled(75.0, -1.0) for _ in range(20)
+    ]
+    lo_s, hi_s = recalibration_map(small)[">70"]["wilson_ci_95"]
+    lo_b, hi_b = recalibration_map(big)[">70"]["wilson_ci_95"]
+    assert lo_s <= 0.5 <= hi_s
+    assert lo_b <= 0.5 <= hi_b
+    assert (hi_b - lo_b) < (hi_s - lo_s)
+
+
+def test_calibrated_win_prob_lookup():
+    recs = _gt70_bucket_recs()
+    m = recalibration_map(recs)
+    out = calibrated_win_prob(71.0, mapping=m)
+    assert out["bucket"] == ">70"
+    assert out["calibrated_win_prob"] == m[">70"]["calibrated_win_prob"]
+    assert out["source"] == "calibrated-shrunk"
+    # Empty bucket -> prior placeholder, flagged as such.
+    out2 = calibrated_win_prob(71.0, mapping=recalibration_map([]))
+    assert out2["source"] == "prior"
+    assert out2["calibrated_win_prob"] == 0.80  # bucket centre fallback
+    # No stated prob -> unstated.
+    assert calibrated_win_prob(None)["source"] == "unstated"
+    # Records path (no precomputed mapping) agrees with the mapping path.
+    out3 = calibrated_win_prob(71.0, records=recs)
+    assert out3 == out
+
+
+def test_compute_summary_includes_recalibration():
+    recs = _gt70_bucket_recs() + [_settled(65.0, 2.0), _settled(45.0, -1.0)]
+    s = compute_summary(recs, as_of_date="2026-11-14")
+    assert set(s["recalibration"]) == {"<50", "50-60", "60-70", ">70"}
+    assert s["recalibration"][">70"]["n"] == s["buckets"][">70"]["n"] == 7
+    assert s["recalibration"]["<50"]["n"] == 1
+    assert s["recalibration"]["50-60"]["n"] == 0
+    assert s["recalibration"]["50-60"]["calibrated_win_prob"] is None

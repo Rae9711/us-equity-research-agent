@@ -608,6 +608,117 @@ def _apply_exit(record: dict[str, Any], exit_info: dict[str, Any], bar: dict[str
 # Calibration summary
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Recalibration: stated win_prob -> observed win rate
+# ---------------------------------------------------------------------------
+# The shadow ledger's buckets report the empirical win rate, but with only
+# ~26 settled trades a bucket's raw rate is mostly noise (the >70% bucket
+# sits at 3/7 = 43% against a stated ~75%). A recalibration map shrinks
+# each bucket's empirical rate toward the bucket's mean *stated* win_prob
+# with a fixed pseudo-observation strength, and reports a Wilson 95% CI,
+# so the daily watch can say what a stated confidence is actually worth
+# instead of quoting either the noisy raw rate or the untested claim.
+# This is reporting only: nothing here feeds live sizing or entry rules
+# (changing those needs Rae's decision).
+# ---------------------------------------------------------------------------
+
+# Pseudo-observation strength of the prior (mean stated win_prob).
+RECALIBRATION_PRIOR_STRENGTH = 10.0
+
+# Settled trades needed before a bucket's calibrated rate counts as
+# evidence rather than a shrunk placeholder.
+RECALIBRATION_MIN_SAMPLE = 10
+
+# Fallback prior (fraction) when a bucket has settled trades but no stated
+# win_prob at all: the bucket's nominal centre.
+BUCKET_PRIOR_CENTRE = {"<50": 0.40, "50-60": 0.55, "60-70": 0.65, ">70": 0.80}
+
+
+def _wilson_ci_frac(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson 95% CI for a win rate, as fractions in [0, 1]."""
+    if n <= 0:
+        return 0.0, 1.0
+    p = wins / n
+    denom = 1 + z * z / n
+    centre = p + z * z / (2 * n)
+    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)
+    return max(0.0, (centre - margin) / denom), min(1.0, (centre + margin) / denom)
+
+
+def recalibration_map(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per-bucket stated-confidence -> observed-win-rate mapping.
+
+    For each win_prob bucket over settled records:
+    - ``empirical_win_rate``: wins / n (None when n == 0).
+    - ``stated_mean_win_prob``: mean of the stated win_probs (fraction,
+      None when no stated probs).
+    - ``calibrated_win_prob``: shrinkage estimate
+      (n * empirical + k * prior) / (n + k) with k =
+      RECALIBRATION_PRIOR_STRENGTH and prior = stated mean (or the bucket
+      centre when no stated probs). None when n == 0 and no prior exists
+      (cannot happen for a bucket with settled trades, but kept explicit).
+    - ``wilson_ci_95``: [low, high] fractions; [0, 1] when n == 0.
+    - ``sample_sufficient``: n >= RECALIBRATION_MIN_SAMPLE.
+    """
+    settled = [r for r in records if r.get("status") == "exited" and r.get("r_multiple") is not None]
+    out: dict[str, dict[str, Any]] = {}
+    for bucket in WIN_PROB_BUCKETS:
+        sub = [r for r in settled if win_prob_bucket(r.get("win_prob")) == bucket]
+        n = len(sub)
+        wins = sum(1 for r in sub if r["r_multiple"] > 0)
+        stated = [r["win_prob"] / 100.0 for r in sub if r.get("win_prob") is not None]
+        stated_mean = sum(stated) / len(stated) if stated else None
+        prior = stated_mean if stated_mean is not None else BUCKET_PRIOR_CENTRE[bucket]
+        if n == 0:
+            calibrated = None
+            empirical = None
+        else:
+            empirical = wins / n
+            calibrated = (n * empirical + RECALIBRATION_PRIOR_STRENGTH * prior) / (
+                n + RECALIBRATION_PRIOR_STRENGTH
+            )
+        lo, hi = _wilson_ci_frac(wins, n)
+        out[bucket] = {
+            "n": n,
+            "wins": wins,
+            "empirical_win_rate": empirical,
+            "stated_mean_win_prob": stated_mean,
+            "calibrated_win_prob": calibrated,
+            "wilson_ci_95": [round(lo, 3), round(hi, 3)],
+            "sample_sufficient": n >= RECALIBRATION_MIN_SAMPLE,
+        }
+    return out
+
+
+def calibrated_win_prob(
+    win_prob: float | None, mapping: dict[str, dict[str, Any]] | None = None,
+    records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Map one stated win_prob (percent) to its calibrated rate.
+
+    Returns {"calibrated_win_prob": fraction|None, "bucket": str,
+    "source": "calibrated"|"prior"|"unstated"}. With no settled trades in
+    the bucket the answer is the bucket prior (the stated mean, or the
+    nominal centre) and the source says so -- it is a placeholder, not
+    evidence. Pass a precomputed ``mapping`` (from recalibration_map) or
+    the raw ``records``; either is enough.
+    """
+    if win_prob is None:
+        return {"calibrated_win_prob": None, "bucket": "unknown", "source": "unstated"}
+    bucket = win_prob_bucket(win_prob)
+    if mapping is None:
+        mapping = recalibration_map(records or [])
+    entry = mapping.get(bucket) or {}
+    value = entry.get("calibrated_win_prob")
+    if value is None:
+        prior = entry.get("stated_mean_win_prob")
+        if prior is None:
+            prior = BUCKET_PRIOR_CENTRE.get(bucket)
+        return {"calibrated_win_prob": prior, "bucket": bucket, "source": "prior"}
+    source = "calibrated" if entry.get("sample_sufficient") else "calibrated-shrunk"
+    return {"calibrated_win_prob": value, "bucket": bucket, "source": source}
+
+
 def _stats(rs: list[float], win_probs: list[float | None]) -> dict[str, Any]:
     n = len(rs)
     if n == 0:
@@ -665,6 +776,7 @@ def compute_summary(records: list[dict[str, Any]], as_of_date: str | None = None
         "as_of_date": as_of_date,
         "totals": totals,
         "buckets": buckets,
+        "recalibration": recalibration_map(settled),
         "by_horizon": by_horizon,
         "by_month": by_month,
         "settled_trades": [
