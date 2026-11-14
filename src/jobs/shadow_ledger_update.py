@@ -32,6 +32,10 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.paper.judgment_quality import compute_panel  # noqa: E402
+from src.paper.model_comparison import (  # noqa: E402
+    aggregate_model_agreement,
+    summarize_model_agreement,
+)
 from src.paper.shadow_ledger import (  # noqa: E402
     BACKFILL_FROM,
     VERSION,
@@ -154,6 +158,7 @@ def run(state_dir: Path, as_of: date, from_date: date) -> dict:
     processed = state.get("processed_dates") or {}
     done_morning = set(processed.get("morning") or [])
     done_step3 = set(processed.get("step3") or [])
+    agreement_by_date = state.get("model_agreement") or {}
     today = datetime.now(ET).date()
 
     stats = {"dates_ingested": [], "new_records": 0, "entered": 0,
@@ -172,6 +177,13 @@ def run(state_dir: Path, as_of: date, from_date: date) -> dict:
                         by_id[rec["id"]] = rec
                         records.append(rec)
                         stats["new_records"] += 1
+                # Anthropic-vs-Gemini agreement for this date (report-only;
+                # a failed comparison must never break the ledger update).
+                try:
+                    agreement_by_date[ds] = summarize_model_agreement(doc)
+                except Exception as exc:  # noqa: BLE001 - never break ingest
+                    print(f"[shadow] model agreement failed for {ds}: {exc}",
+                          file=sys.stderr)
                 done_morning.add(ds)
                 stats["dates_ingested"].append(ds)
             elif d < today:
@@ -227,10 +239,12 @@ def run(state_dir: Path, as_of: date, from_date: date) -> dict:
     state["records"] = records
     state["processed_dates"] = {"morning": sorted(done_morning),
                                 "step3": sorted(done_step3)}
+    state["model_agreement"] = agreement_by_date
     state["updated_at"] = datetime.now(ET).isoformat()
     atomic_write(ledger_path, state)
 
     summary = compute_summary(records, as_of_date=as_of_s)
+    summary["model_agreement"] = aggregate_model_agreement(agreement_by_date)
     summary["generated_at"] = datetime.now(ET).isoformat()
     summary["run_stats"] = stats
     atomic_write(summary_path, summary)
