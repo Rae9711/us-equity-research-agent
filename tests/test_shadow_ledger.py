@@ -18,6 +18,7 @@ from src.paper.shadow_ledger import (
     extract_step3_candidates,
     make_record,
     r_multiple,
+    recalibration_by_horizon,
     recalibration_map,
     update_record,
     win_prob_bucket,
@@ -479,3 +480,84 @@ def test_compute_summary_includes_recalibration():
     assert s["recalibration"]["<50"]["n"] == 1
     assert s["recalibration"]["50-60"]["n"] == 0
     assert s["recalibration"]["50-60"]["calibrated_win_prob"] is None
+
+
+# --- Recalibration by horizon ----------------------------------------------
+
+
+def _live_gt70_split_recs():
+    # Mirrors the live >70% bucket split as of 2026-11-16: 5/13 overall,
+    # but intraday 3/7, swing 0/3, unknown 2/3.
+    recs = [_settled(75.0, 1.0, horizon="intraday") for _ in range(3)]
+    recs += [_settled(76.0, -1.0, horizon="intraday") for _ in range(4)]
+    recs += [_settled(70.0, -1.0, horizon="swing") for _ in range(3)]
+    recs += [_settled(71.0, 1.0, horizon="unknown") for _ in range(2)]
+    recs += [_settled(70.0, -1.0, horizon="unknown")]
+    return recs
+
+
+def test_recalibration_by_horizon_splits_gt70_bucket():
+    m = recalibration_by_horizon(_live_gt70_split_recs())
+    assert set(m) == {"intraday", "swing", "unknown"}
+    assert set(m["intraday"]) == {"<50", "50-60", "60-70", ">70"}
+    intra = m["intraday"][">70"]
+    assert intra["n"] == 7 and intra["wins"] == 3
+    assert abs(intra["empirical_win_rate"] - 3 / 7) < 1e-9
+    swing = m["swing"][">70"]
+    assert swing["n"] == 3 and swing["wins"] == 0
+    assert swing["empirical_win_rate"] == 0.0
+    unk = m["unknown"][">70"]
+    assert unk["n"] == 3 and unk["wins"] == 2
+    # Same shrinkage math as the pooled map, applied per horizon: the
+    # swing cell (0 wins) calibrates strictly below the intraday cell.
+    assert swing["calibrated_win_prob"] < intra["calibrated_win_prob"]
+    assert unk["calibrated_win_prob"] > intra["calibrated_win_prob"]
+    # No horizon's cell claims enough sample on its own.
+    assert intra["sample_sufficient"] is False
+    assert swing["sample_sufficient"] is False
+
+
+def test_recalibration_by_horizon_unknown_group_keeps_derived_trades():
+    # A record with no horizon (or a blank one) lands in "unknown",
+    # never silently assigned to intraday/swing and never dropped.
+    recs = [_settled(75.0, 1.0, horizon="unknown"),
+            _settled(75.0, -1.0, horizon=None)]
+    m = recalibration_by_horizon(recs)
+    assert m["unknown"][">70"]["n"] == 2
+    assert m["unknown"][">70"]["wins"] == 1
+    assert m["intraday"][">70"]["n"] == 0
+    assert m["swing"][">70"]["n"] == 0
+    # Non-settled records (no exit yet) never enter any cell.
+    open_rec = _settled(75.0, 1.0, horizon="swing")
+    open_rec["status"] = "open"
+    open_rec["r_multiple"] = None
+    m2 = recalibration_by_horizon(recs + [open_rec])
+    assert m2["swing"][">70"]["n"] == 0
+
+
+def test_recalibration_by_horizon_empty_is_placeholders():
+    m = recalibration_by_horizon([])
+    for horizon in ("intraday", "swing", "unknown"):
+        for bucket in ("<50", "50-60", "60-70", ">70"):
+            b = m[horizon][bucket]
+            assert b["n"] == 0 and b["empirical_win_rate"] is None
+            assert b["calibrated_win_prob"] is None
+            assert b["wilson_ci_95"] == [0.0, 1.0]
+            assert b["sample_sufficient"] is False
+
+
+def test_compute_summary_includes_recalibration_by_horizon():
+    recs = _live_gt70_split_recs() + [_settled(65.0, 2.0, horizon="swing"),
+                                      _settled(45.0, -1.0, horizon="intraday")]
+    s = compute_summary(recs, as_of_date="2026-11-16")
+    by_h = s["recalibration_by_horizon"]
+    assert set(by_h) == {"intraday", "swing", "unknown"}
+    # Per-horizon bucket counts add up to the horizon totals.
+    for horizon in ("intraday", "swing", "unknown"):
+        total_n = sum(by_h[horizon][b]["n"]
+                      for b in ("<50", "50-60", "60-70", ">70"))
+        assert total_n == s["by_horizon"][horizon]["n"]
+    assert by_h["swing"][">70"]["wins"] == 0
+    assert by_h["intraday"][">70"]["wins"] == 3
+    # Pooled counts still agree with the bucket totals.
+    assert sum(by_h[h][">70"]["n"] for h in by_h) == s["buckets"][">70"]["n"] == 13

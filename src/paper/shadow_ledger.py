@@ -690,6 +690,23 @@ def recalibration_map(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]
     return out
 
 
+def recalibration_by_horizon(records: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+    """Per-horizon recalibration: stated win_prob -> observed win rate.
+
+    Same shrinkage + Wilson CI math as recalibration_map, split by
+    horizon (intraday / swing / unknown). The pooled map hides a real
+    split in the live book: as of 2026-11-16 the >70% bucket is 5/13
+    overall, but 0/3 for swing vs 3/7 for intraday -- the overconfidence
+    lives mostly in swing. Report-only, like the pooled map: nothing
+    here feeds live sizing or entry rules.
+    """
+    settled = [r for r in records if r.get("status") == "exited" and r.get("r_multiple") is not None]
+    return {
+        h: recalibration_map([r for r in settled if (r.get("horizon") or "unknown") == h])
+        for h in ("intraday", "swing", "unknown")
+    }
+
+
 def calibrated_win_prob(
     win_prob: float | None, mapping: dict[str, dict[str, Any]] | None = None,
     records: list[dict[str, Any]] | None = None,
@@ -777,6 +794,7 @@ def compute_summary(records: list[dict[str, Any]], as_of_date: str | None = None
         "totals": totals,
         "buckets": buckets,
         "recalibration": recalibration_map(settled),
+        "recalibration_by_horizon": recalibration_by_horizon(settled),
         "by_horizon": by_horizon,
         "by_month": by_month,
         "settled_trades": [
