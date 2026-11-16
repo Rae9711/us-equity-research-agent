@@ -238,6 +238,26 @@ def _safe_json(resp: httpx.Response) -> Any:
         return resp.text[:500]
 
 
+# Alpaca order statuses that count as "open" for the status file. Note the
+# plain `status=open` query does NOT return "held" legs: a bracket's
+# stop-loss leg sits in "held" (OCO partner of the working take-profit
+# leg) while it is live, so fetch "all" and filter instead -- otherwise
+# the daily report undercounts the resting legs of a bracket.
+OPEN_ORDER_STATUSES = frozenset(
+    {
+        "new",
+        "partially_filled",
+        "accepted",
+        "pending_new",
+        "accepted_for_bidding",
+        "stopped",
+        "suspended",
+        "calculated",
+        "held",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Daily-report status file (added 2026-11-12)
 #
@@ -352,7 +372,10 @@ def sync_status(
     try:
         account = client.get_account()
         positions = client.list_positions()
-        orders = client.list_orders(status="open")
+        # Fetch "all" and filter: the plain status=open query omits "held"
+        # orders, and a bracket's stop-loss leg is held while live.
+        all_orders = client.list_orders(status="all")
+        orders = [o for o in (all_orders or []) if str(o.get("status") or "") in OPEN_ORDER_STATUSES]
     except AlpacaError as exc:
         if exc.status in (401, 403):
             reason = "auth_failed"

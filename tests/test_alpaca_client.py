@@ -291,6 +291,42 @@ def test_sync_status_writes_connected_file(tmp_path):
     assert "test-secret" not in path.read_text(encoding="utf-8")
 
 
+def test_sync_status_counts_held_stop_leg_as_open(tmp_path):
+    # A bracket's stop-loss leg sits in "held" while live (OCO partner of
+    # the working take-profit leg). The plain status=open query omits held
+    # orders, so sync must fetch "all" and filter -- otherwise the daily
+    # report shows only the take-profit leg.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/account":
+            return httpx.Response(
+                200,
+                json={"id": "acct", "cash": "9000.00", "equity": "10194.60", "buying_power": "18000.00", "status": "ACTIVE"},
+            )
+        if request.url.path == "/v2/positions":
+            return httpx.Response(
+                200,
+                json=[{"symbol": "AMD", "side": "long", "qty": "2", "avg_entry_price": "521.67", "unrealized_pl": "-25.30"}],
+            )
+        if request.url.path == "/v2/orders":
+            assert request.url.params.get("status") == "all"
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": "tp-1", "symbol": "AMD", "side": "sell", "type": "limit", "qty": "2", "status": "new", "order_class": "bracket"},
+                    {"id": "entry-1", "symbol": "AMD", "side": "buy", "type": "market", "qty": "2", "status": "filled", "order_class": "bracket"},
+                    {"id": "sl-1", "symbol": "AMD", "side": "sell", "type": "stop", "qty": "2", "status": "held", "order_class": "bracket"},
+                ],
+            )
+        return httpx.Response(404, json={"message": "not found"})
+
+    client = _client(handler)
+    path = tmp_path / "alpaca_status.json"
+    status = sync_status(client, state_path=path)
+    assert [o["id"] for o in status["open_orders"]] == ["tp-1", "sl-1"]
+    assert status["open_orders"][1]["type"] == "stop"
+    assert status["open_orders"][1]["status"] == "held"
+
+
 def test_sync_status_auth_failure_writes_disconnected(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"message": "authentication failed"})
