@@ -333,6 +333,7 @@ def run_morning_research(
         "r0": {"label": regime_model.label, "confidence": regime_model.confidence} if regime_model else None,
         "hypothesis": hypothesis_model.model_dump() if hypothesis_model else None,
         "trade_candidates": trade_decision.get("trade_candidates") or [],
+        "market_direction": trade_decision.get("market_direction"),
         "best_opportunity": trade_decision.get("best_opportunity") or {},
         "best_trades": trade_decision.get("best_trades") or {},
         "swing_trade": trade_decision.get("swing_trade")

@@ -71,6 +71,17 @@ def collect_step0(trading_date: date | None = None, *, force: bool = False) -> d
     news = collect_news(published_gte=prior_close_utc_iso(trading_date))
     options = collect_options()
 
+    # Seed the background news cache with the morning bundle (best
+    # effort — a cache failure must never break Step 0). The entry gate
+    # reads only this cache, so the morning collection is what makes
+    # fresh overnight news visible to the gate before Step 3 runs.
+    try:
+        from src.paper.news_cache import load_news_cache, merge_news_bundle, save_news_cache
+
+        save_news_cache(merge_news_bundle(load_news_cache(), news))
+    except Exception:
+        logger.debug("news cache seed failed (non-fatal)", exc_info=True)
+
     checklist = {
         "macro": macro.get("checklist", {}),
         "market": market.get("checklist", {}),

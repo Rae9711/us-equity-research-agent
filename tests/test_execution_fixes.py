@@ -6,7 +6,8 @@ Fix 2 (revised): intraday legs hold overnight, max 3 trading days, then
 Fix 3: every exit records r_multiple (stop, target, EOD flatten, breaker).
 Fix 4: -$589.73 booked as an explicit history adjustment + epoch start.
 Fix 5: portfolio-level planned-risk cap (existing + new <= 3% equity).
-Fix 6: no new entries when Polygon intraday news data is missing/429.
+Fix 6 (fail-safe, 2026-11-17): missing/429 news never blocks a new entry;
+only a fresh negative high-signal headline vetoes (per-symbol or global).
 Fix 7 (revised): intraday <= 3 legs, swing <= 2 legs, 5 total; the
   per-book notional cap is shared by the book's legs.
 
@@ -498,7 +499,9 @@ def test_news_universe_covers_traded_names():
     for sym in ("AMD", "MU", "AVGO", "ARM"):
         assert sym in universe
         assert sym in FALLBACK_NEWS_TICKERS
-    # And a 429 on one of them now blocks that symbol.
+    # The parser still reports a 429 for one of them; the fail-safe gate
+    # (2026-11-17) no longer blocks on that alone — only fresh negative
+    # news vetoes.
     parsed = parse_news_error_entries(
         ["AMD:Client error '429 Too Many Requests' for url ..."]
     )
@@ -534,14 +537,47 @@ def test_news_gate_whole_collection_failure_global():
     assert parsed["global_block"] is True
 
 
+def _veto_cache(symbol, *, title="breaking: AAPL guidance cut", minutes_ago=10, broad=False):
+    """A news cache with one fresh negative high-signal headline."""
+    from datetime import datetime, timedelta
+
+    from src.utils.trading_calendar import ET
+
+    now = datetime.now(ET)
+    article = {
+        "title": title,
+        "ticker": None if broad else symbol,
+        "published_utc": (now - timedelta(minutes=minutes_ago)).isoformat(),
+        "sentiment": "negative",
+        "url": "https://example.com/x",
+    }
+    tickers = {}
+    if not broad:
+        tickers[symbol] = {
+            "status": "ok",
+            "fetched_at": now.isoformat(),
+            "articles": [article],
+            "last_error": None,
+        }
+    return {
+        "version": 1,
+        "updated_at": now.isoformat(),
+        "last_refresh_error": None,
+        "broad": {
+            "status": "ok",
+            "fetched_at": now.isoformat(),
+            "articles": [article] if broad else [],
+            "last_error": None,
+        },
+        "tickers": tickers,
+        "errors": [],
+    }
+
+
 def test_try_entry_skips_blocked_symbol(data_root):
-    gate = news_gate_for_date(
-        "2026-11-12",
-        step3={"intraday_news_errors": [
-            "AAPL:Client error '429 Too Many Requests' for url ..."
-        ]},
-    )
-    assert gate["source"] == "step3"
+    # Fail-safe gate: only a FRESH negative high-signal headline vetoes.
+    gate = news_gate_for_date("2026-11-12", cache=_veto_cache("AAPL"))
+    assert gate["source"] == "cache"
     assert gate["blocked_symbols"] == ["AAPL"]
     assert news_block_reason(gate, "AAPL") is not None
 
@@ -552,9 +588,9 @@ def test_try_entry_skips_blocked_symbol(data_root):
     )
     assert out["action"] == "SKIP"
     assert out.get("news_blocked") is True
-    assert "新闻数据缺失" in (out["reason"] or "")
+    assert "新鲜负面新闻" in (out["reason"] or "")
 
-    # An unblocked symbol still enters.
+    # An unvetoed symbol still enters.
     out = _try_entry(
         default_account(), "intraday",
         _picked("MSFT", price=500.0, stop=490.0, target=520.0),
@@ -563,12 +599,40 @@ def test_try_entry_skips_blocked_symbol(data_root):
     assert out["action"] == "ENTRY"
 
 
+def test_try_entry_missing_news_not_blocked(data_root):
+    """The 2026-11-16 regression: a 429-only cache must NOT block entries."""
+    from datetime import datetime
+
+    from src.utils.trading_calendar import ET
+
+    now = datetime.now(ET)
+    cache = {
+        "version": 1,
+        "updated_at": now.isoformat(),
+        "last_refresh_error": None,
+        "broad": {"status": "failed", "fetched_at": None, "articles": [], "last_error": "broad:429"},
+        "tickers": {
+            "AAPL": {"status": "failed", "fetched_at": None, "articles": [], "last_error": "AAPL:429"},
+        },
+        "errors": ["AAPL:Client error '429 Too Many Requests' for url ..."],
+    }
+    gate = news_gate_for_date("2026-11-12", cache=cache, now=now)
+    assert gate["blocked_symbols"] == []
+    assert gate["global_block"] is False
+    assert news_block_reason(gate, "AAPL") is None
+
+    out = _try_entry(
+        default_account(), "intraday",
+        _picked("AAPL", price=200.0, stop=195.0, target=210.0),
+        "2026-11-12", news_gate=gate,
+    )
+    assert out["action"] == "ENTRY"
+
+
 def test_try_entry_global_block_skips_all(data_root):
     gate = news_gate_for_date(
         "2026-11-12",
-        step3={"intraday_news_errors": [
-            "collect_intraday_news raised RuntimeError('boom')"
-        ]},
+        cache=_veto_cache("AAPL", title="breaking: CPI came in hot", broad=True),
     )
     assert gate["global_block"] is True
     out = _try_entry(
@@ -577,7 +641,7 @@ def test_try_entry_global_block_skips_all(data_root):
         "2026-11-12", news_gate=gate,
     )
     assert out["action"] == "SKIP"
-    assert "全局新闻数据缺失" in (out["reason"] or "")
+    assert "突发负面新闻" in (out["reason"] or "")
 
 
 def test_news_gate_exits_unaffected(data_root, monkeypatch):

@@ -44,6 +44,14 @@ def _mock_swing_yahoo(request):
         yield
 
 
+@pytest.fixture(autouse=True)
+def _isolated_data_root(tmp_path, monkeypatch):
+    """compute_trade_decision reads the shadow summary from DATA_ROOT
+    (calibration attach, 2026-11-17) — tests must not depend on the
+    live ledger. The DB (DATABASE_URL) is unaffected by DATA_ROOT."""
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path / "data"))
+
+
 def _bullish_raw() -> dict:
     return {
         "trading_date": "2026-07-06",
@@ -600,7 +608,9 @@ def test_compute_trade_decision_top5_and_watchlist():
     assert "top_trades" in result["transparency"]
 
 def test_trade_candidates_direction_from_bias():
-    """Every ranked trade_candidates row carries bias-picked LONG/SHORT."""
+    """Per-symbol directions (2026-11-17): market bias is the tiebreak
+    and the recorded market_direction — it no longer stamps one
+    direction on all rows. A bullish day still leans LONG overall."""
     raw = _bullish_raw()
     rule_bundle = {
         "bias": "Bullish Bias",
@@ -617,16 +627,21 @@ def test_trade_candidates_direction_from_bias():
     }
     with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
         result = compute_trade_decision(raw, rule_bundle=rule_bundle, parts=parts)
+    assert result["market_direction"] == "LONG"
     for row in result["trade_candidates"]:
-        assert row.get("direction") == "LONG"
+        assert row.get("direction") in ("LONG", "SHORT")
+    # Real (quoted) rows carry a per-symbol direction; no-data stubs
+    # inherit the market direction and say so.
+    real = [r for r in result["trade_candidates"] if r.get("direction_source") == "per-symbol"]
+    assert real, "expected at least one per-symbol row"
+    assert all(r.get("direction") == "LONG" for r in real)
     for slot in result["top_trades"]:
-        assert slot.get("direction") == "LONG"
+        assert slot.get("direction") in ("LONG", "SHORT")
 
     bear_bundle = {**rule_bundle, "bias": "Bearish Bias", "total": -3}
     with patch("src.research.trade_candidates._observation", side_effect=_mock_obs):
         bear = compute_trade_decision(raw, rule_bundle=bear_bundle, parts=parts)
-    for row in bear["trade_candidates"]:
-        assert row.get("direction") == "SHORT"
+    assert bear["market_direction"] == "SHORT"
 
 
 def test_enforce_rejects_long_with_target_below_entry():

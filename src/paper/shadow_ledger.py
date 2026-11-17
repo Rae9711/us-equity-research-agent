@@ -207,6 +207,13 @@ def _plan_to_candidate(plan: dict[str, Any], source: str) -> dict[str, Any] | No
         "levels_source": "plan",
         "sources": [source],
         "trade_action": plan.get("trade_action"),
+        # Calibrated expectancy snapshot from research time (Item 2,
+        # 2026-11-17): lets the ledger split settled performance by
+        # would-filter / would-pass, validating the entry filter
+        # out-of-sample. Carried, never used to change ledger outcomes.
+        "calibrated_win_prob": _f(plan.get("calibrated_win_prob")),
+        "calibrated_expectancy_r": _f(plan.get("calibrated_expectancy_r")),
+        "calibration_filter": plan.get("calibration_filter"),
     }
 
 
@@ -278,6 +285,10 @@ def extract_morning_candidates(morning: dict[str, Any]) -> list[dict[str, Any]]:
                     prev["sources"].append("trade_candidates")
                 if prev.get("win_prob") is None and win_prob is not None:
                     prev["win_prob"] = win_prob
+                if prev.get("calibrated_expectancy_r") is None:
+                    prev["calibrated_win_prob"] = _f(c.get("calibrated_win_prob"))
+                    prev["calibrated_expectancy_r"] = _f(c.get("calibrated_expectancy_r"))
+                    prev["calibration_filter"] = c.get("calibration_filter")
                 continue
             levels = derive_levels(
                 direction,
@@ -302,6 +313,9 @@ def extract_morning_candidates(morning: dict[str, Any]) -> list[dict[str, Any]]:
                 "levels_source": "derived",
                 "sources": ["trade_candidates"],
                 "trade_action": c.get("trade_action"),
+                "calibrated_win_prob": _f(c.get("calibrated_win_prob")),
+                "calibrated_expectancy_r": _f(c.get("calibrated_expectancy_r")),
+                "calibration_filter": c.get("calibration_filter"),
             }
             by_key[key] = cand
     return list(by_key.values())
@@ -359,6 +373,9 @@ def make_record(candidate_date: str, origin: str, cand: dict[str, Any]) -> dict[
         "levels_source": cand.get("levels_source"),
         "sources": list(cand.get("sources") or []),
         "trade_action": cand.get("trade_action"),
+        "calibrated_win_prob": cand.get("calibrated_win_prob"),
+        "calibrated_expectancy_r": cand.get("calibrated_expectancy_r"),
+        "calibration_filter": cand.get("calibration_filter"),
         "status": "awaiting-entry",
         "entry_date": None,
         "entry_price": None,

@@ -48,3 +48,14 @@ def step_report_path(step_num: int, trading_date: str) -> Path:
 
 def case_json_path(trading_date: str) -> Path:
     return report_dir(trading_date) / "case.json"
+
+
+def news_cache_path() -> Path:
+    """Paper news cache: ``state/paper/news_cache.json``.
+
+    Written by the background news refresh (Step 0 / Step 3 collections
+    and the paper tick); read by the news gate. Never written by the gate.
+    """
+    d = data_root() / "paper"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "news_cache.json"

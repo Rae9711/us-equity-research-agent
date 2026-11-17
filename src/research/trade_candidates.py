@@ -15,6 +15,10 @@ import json
 from datetime import date, time
 from typing import Any, Literal
 
+from src.paper.calibration_filter import (
+    calibration_filter as _calibration_filter,
+    load_calibration_map,
+)
 from src.research.decision_transparency import (
     add_win_prob_delta,
     build_decision_transparency,
@@ -959,6 +963,59 @@ def _pick_direction(bias: str, total: int) -> str:
     return "LONG" if total >= 0 else "SHORT"
 
 
+def _pick_per_symbol_direction(
+    row_long: dict[str, Any],
+    row_short: dict[str, Any],
+    *,
+    market_direction: str,
+) -> dict[str, Any]:
+    """Pick one symbol's own direction from its LONG/SHORT scores.
+
+    The better ``final_score`` wins (``_rank_key`` breaks ties); an exact
+    tie falls back to the market direction. The winner carries
+    ``direction`` + ``direction_source="per-symbol"`` and the loser's
+    score for transparency.
+    """
+    long_key = (row_long.get("final_score") or 0, _rank_key(row_long))
+    short_key = (row_short.get("final_score") or 0, _rank_key(row_short))
+    if long_key == short_key:
+        long_wins = market_direction == "LONG"
+    else:
+        long_wins = long_key > short_key
+    picked, other = (row_long, row_short) if long_wins else (row_short, row_long)
+    picked = dict(picked)
+    picked["direction"] = "LONG" if long_wins else "SHORT"
+    picked["direction_source"] = "per-symbol"
+    picked["alt_direction"] = "SHORT" if long_wins else "LONG"
+    picked["alt_direction_final_score"] = other.get("final_score")
+    picked["alt_direction_win_prob"] = other.get("win_prob")
+    return picked
+
+
+def _calibrated_rank_key(row: dict[str, Any]) -> tuple[int, float, float]:
+    """Rank by calibrated expectancy (Item 3), final_score as tiebreak.
+
+    Tiers, ascending: (0) tradeable + known non-negative expectancy,
+    expectancy desc; (1) tradeable + no calibration data, final_score
+    desc; (2) tradeable + known negative expectancy, expectancy desc
+    (least negative first); (3) non-tradeable rows (Pass / no-data
+    stubs), final_score desc — a Pass row's expectancy is meaningless,
+    so it must never outrank a tradeable row. With no map at all every
+    tradeable row is tier 1, so the order is exactly the old
+    final_score order.
+    """
+    exp = row.get("calibrated_expectancy_r")
+    fs = row.get("final_score") or 0
+    if row.get("trade_action") not in ("BUY", "Small"):
+        return (3, 0.0, -float(fs))
+    if exp is None:
+        return (1, 0.0, -float(fs))
+    exp_f = float(exp)
+    if exp_f >= 0:
+        return (0, -exp_f, -float(fs))
+    return (2, -exp_f, -float(fs))
+
+
 def _rank_key(row: dict[str, Any]) -> float:
     return row.get("expected_return_pct", 0) * row.get("win_prob", 0)
 
@@ -1059,6 +1116,9 @@ def _build_trade_slot(
             "gap_pct": row.get("gap_pct"),
             "rr_display": row.get("rr_display"),
             "catalyst": _catalyst_for_symbol(sym, macro_calendar),
+            "calibrated_win_prob": row.get("calibrated_win_prob"),
+            "calibrated_expectancy_r": row.get("calibrated_expectancy_r"),
+            "calibration_filter": row.get("calibration_filter"),
             "invalidation": "—",
             "invalid_levels_reason": "No quote data",
             "advisory": True,
@@ -1135,6 +1195,9 @@ def _build_trade_slot(
         "gap_pct": row.get("gap_pct"),
         "rr_display": row.get("rr_display"),
         "catalyst": _catalyst_for_symbol(sym, macro_calendar),
+        "calibrated_win_prob": row.get("calibrated_win_prob"),
+        "calibrated_expectancy_r": row.get("calibrated_expectancy_r"),
+        "calibration_filter": row.get("calibration_filter"),
         "invalidation": "—",
         "advisory": True,
     }
@@ -1173,7 +1236,7 @@ def _index_trade_label(
     top = index_rows[0]
     if top["trade_action"] == "Pass":
         return "NO TRADE"
-    verb = "LONG" if direction == "LONG" else "SHORT"
+    verb = "LONG" if (top.get("direction") or direction) == "LONG" else "SHORT"
     return f"{verb} {top['symbol']}"
 
 
@@ -1224,7 +1287,7 @@ def _decision_tree(
     total_score: int = 0,
 ) -> dict[str, Any]:
     tradeable = [r for r in ranked if r["trade_action"] in ("BUY", "Small")]
-    tradeable.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
+    tradeable.sort(key=_calibrated_rank_key)
 
     picks = _select_stock_picks(ranked, edges, tradeable)
     top_trades: list[dict[str, Any]] = []
@@ -1235,16 +1298,20 @@ def _decision_tree(
         section = _SYMBOL_SECTION.get(sym.upper(), "stocks")
         row = dict(row)
         row["_total_score"] = total_score
+        # Per-symbol direction (2026-11-17): the slot follows the row's
+        # own direction, not the market direction. `direction` is only
+        # the fallback when a row carries none.
+        row_dir = row.get("direction") or direction
         row["horizon"] = _trade_horizon(
-            direction=direction,
+            direction=row_dir,
             p9=p9,
             total=total_score,
-            instrument=_instrument(sym, direction, p9),
+            instrument=_instrument(sym, row_dir, p9),
         )
         slot = _build_trade_slot(
             row,
             rank=rank,
-            direction=direction,
+            direction=row_dir,
             p9=p9,
             obs=obs_by_sym.get(sym, {}),
             raw=raw,
@@ -1967,7 +2034,12 @@ def compute_trade_decision(
         quote_by_sym[sym] = q
         obs = obs_by_sym.get(sym, {})
         if not _has_market_data(obs, q):
-            ranked.append(_pass_stub_row(sym, "No quote data"))
+            # No evidence at all: keep the market direction as a label,
+            # marked no-data — never pretend this is a per-symbol call.
+            stub = _pass_stub_row(sym, "No quote data")
+            stub["direction"] = direction
+            stub["direction_source"] = "no-data"
+            ranked.append(stub)
             continue
         sym_pct = sym_pcts.get(sym)
         prior_chg = _prior_day_change(sym, prior_raw, prior_day) if prior_day else None
@@ -1986,8 +2058,12 @@ def compute_trade_decision(
         vol_ok = bool(q.get("volume")) or str(q.get("session_type")) == "premarket"
         has_catalyst = news_n >= 1 or bool(catalysts)
 
-        row = _score_candidate_v2(
-            sym,
+        # Per-symbol direction (2026-11-17): score BOTH directions with
+        # the symbol's own evidence (RS, prior-day move, gap, momentum,
+        # news, VIX, driver) and keep the better one. The market bias is
+        # only the tiebreak — it no longer stamps one direction on all
+        # 11 names (see docs/per-symbol-research-design.md).
+        _score_kwargs: dict[str, Any] = dict(
             obs=obs,
             prior_day_chg=prior_chg,
             rs_vs_qqq=rs,
@@ -2001,16 +2077,40 @@ def compute_trade_decision(
             q=q,
             qqq_pct=qqq_pct,
             edges=edges,
-            direction=direction,
             macro_calendar=macro_calendar,
             driver_tree=driver_tree,
         )
+        row_long = _score_candidate_v2(sym, direction="LONG", **_score_kwargs)
+        row_short = _score_candidate_v2(sym, direction="SHORT", **_score_kwargs)
+        row = _pick_per_symbol_direction(
+            row_long, row_short, market_direction=direction
+        )
         ranked.append(row)
 
-    ranked.sort(key=lambda r: (r["final_score"], _rank_key(r)), reverse=True)
+    # Calibration (2026-11-17): attach pooled-map calibrated expectancy to
+    # every ranked candidate for transparency, ranking (Item 3) and
+    # shadow-ledger visibility. Research-time snapshot only — the entry
+    # filter in execution_agent re-checks with the freshest map at tick
+    # time, per book horizon. Missing map / no evidence -> None /
+    # "no-data" (fail-open); never raises.
+    try:
+        _cal_map = load_calibration_map()
+        for row in ranked:
+            _cal = _calibration_filter(
+                row.get("win_prob"), row.get("risk_reward"), mapping=_cal_map
+            )
+            row["calibrated_win_prob"] = _cal.get("calibrated_win_prob")
+            row["calibrated_expectancy_r"] = _cal.get("calibrated_expectancy_r")
+            row["calibration_filter"] = _cal.get("filter")
+    except Exception:
+        for row in ranked:
+            row["calibrated_win_prob"] = None
+            row["calibrated_expectancy_r"] = None
+            row["calibration_filter"] = "no-data"
+
+    ranked.sort(key=_calibrated_rank_key)
     for i, row in enumerate(ranked, start=1):
         row["rank"] = i
-        row["direction"] = direction
     if len(ranked) >= 2:
         ranked[0]["why_vs_runner_up"] = _why_vs_runner_up(ranked[0], ranked[1])
 
@@ -2051,6 +2151,16 @@ def compute_trade_decision(
     if swing_trade:
         best_trades["swing"] = swing_trade
 
+    # The decision tree syncs rows to Pass when their levels are invalid
+    # — that changes tiers after the first sort, so re-sort (and
+    # re-number) once here so the final ranked order matches the final
+    # trade_actions. Picks/slots were already built and are unaffected.
+    ranked.sort(key=_calibrated_rank_key)
+    for i, row in enumerate(ranked, start=1):
+        row["rank"] = i
+    if len(ranked) >= 2:
+        ranked[0]["why_vs_runner_up"] = _why_vs_runner_up(ranked[0], ranked[1])
+
     gap_pct_market = None
     qqq_obs = obs_by_sym.get("QQQ", {})
     if qqq_obs.get("gap_pct") is not None:
@@ -2075,6 +2185,7 @@ def compute_trade_decision(
 
     return {
         "edges": edges,
+        "market_direction": direction,
         "trade_candidates": ranked,
         "best_trades": best_trades,
         "best_opportunity": best_opportunity,

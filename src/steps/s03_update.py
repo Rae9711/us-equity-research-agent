@@ -39,6 +39,14 @@ def _headlines_since_open(
     """Return (headlines, collection_errors). Errors are non-fatal but surfaced."""
     try:
         bundle = collect_intraday_news(since=market_open_et(trading_date))
+        # Merge into the background news cache (best effort — the gate
+        # reads only this cache; a merge failure must never break Step 3).
+        try:
+            from src.paper.news_cache import load_news_cache, merge_news_bundle, save_news_cache
+
+            save_news_cache(merge_news_bundle(load_news_cache(), bundle))
+        except Exception:
+            logger.debug("news cache merge failed (non-fatal)", exc_info=True)
         errors = [str(e) for e in (bundle.get("errors") or [])][:8]
         if errors:
             logger.warning(

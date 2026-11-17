@@ -32,6 +32,7 @@ from src.paper.allocation import (
     book_notional_cap_pct,
 )
 from src.paper.circuit_breaker import breaker_decision_row, check_circuit_breaker
+from src.paper.calibration_filter import calibration_filter_for_signal
 from src.paper.news_gate import news_block_reason, news_gate_for_date
 from src.paper.broker_sim import (
     InsufficientCashError,
@@ -1154,6 +1155,19 @@ def _try_entry(
         result["reason"] = f"{label}跳过：{block_reason}"
         result["news_blocked"] = True
         result["news_gate"] = news_gate
+        return result
+
+    # Calibration filter (2026-11-17): skip entries whose calibrated
+    # expectancy is negative (shadow-ledger recalibration map, by-horizon
+    # when the bucket has settled trades, else pooled). Filter ONLY: it
+    # runs before allocation, never modifies the signal, and never feeds
+    # any sizing input. No map / no evidence in the bucket -> pass.
+    cal = calibration_filter_for_signal(sig, horizon=book)
+    if cal.get("filter") == "skip":
+        result["action"] = "SKIP"
+        result["reason"] = f"{label}跳过：{cal.get('reason')}"
+        result["calibration_filtered"] = True
+        result["calibration"] = cal
         return result
 
     direction = str(sig.get("direction") or "LONG").upper()

@@ -198,15 +198,9 @@ def record_evening_learning(trading_date: str) -> dict[str, Any]:
         "advisory_zh": "模拟复盘 · 不构成投资建议",
     }
 
-    # Stub calibration: nudge risk_pct slightly after losses / wins
-    params = account.setdefault("params", {})
-    risk = float(params.get("risk_pct") or 1.0)
-    if win is True and risk < 1.5:
-        params["risk_pct"] = round(min(1.5, risk + 0.05), 2)
-        note["param_adjust"] = f"risk_pct {risk} → {params['risk_pct']} (win)"
-    elif win is False and risk > 0.5:
-        params["risk_pct"] = round(max(0.5, risk - 0.05), 2)
-        note["param_adjust"] = f"risk_pct {risk} → {params['risk_pct']} (loss)"
+    # NOTE 2026-11-17: the old stub that auto-tuned risk_pct +/-0.05 after
+    # wins/losses was removed. Sizing is frozen by Rae's direction; the
+    # evening review records only and never adjusts params.
 
     append_journal(account, note)
     save_account(account)

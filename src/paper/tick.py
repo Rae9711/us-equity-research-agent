@@ -85,6 +85,17 @@ def run_paper_tick(
     phase = session_phase or infer_session_phase(date_str)
     raw = _load_raw(date_str)
 
+    # Background news-cache top-up (fail-safe gate input): refresh only
+    # when a cache file already exists and is stale; never raises and
+    # never blocks the tick. No cache file yet -> Step 0 / Step 3 seed
+    # it first; with no cache the gate is neutral anyway.
+    try:
+        from src.paper import news_cache
+
+        news_cache.refresh_news_cache_if_stale(tick_dt)
+    except Exception:
+        logger.debug("news cache top-up failed (non-fatal)", exc_info=True)
+
     account = load_account()
     ensure_positions(account)
     decision = decide_and_act(

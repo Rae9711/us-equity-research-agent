@@ -69,6 +69,33 @@ def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
             )
     mag7.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
 
+    # Per-symbol block (2026-11-17): each candidate's own price action
+    # plus its own headlines, so the LLM's P12 focus-stocks judgment is
+    # per-symbol instead of inheriting one market call. Additive only —
+    # the existing `mag7` / `headlines` keys are unchanged.
+    per_symbol: list[dict[str, Any]] = []
+    _sym_quotes: dict[str, dict[str, Any]] = {}
+    _sym_quotes.update(_stock_quotes(raw))
+    for _sym in ("QQQ", "SPY", "TQQQ"):
+        _sym_quotes[_sym] = _quote(raw, _sym)
+    _sym_quotes["SMH"] = (_sector_quotes(raw) or {}).get("SMH") or {}
+    for _sym in sorted(_sym_quotes):
+        _q = _sym_quotes.get(_sym) or {}
+        if not isinstance(_q, dict) or "error" in _q:
+            continue
+        per_symbol.append(
+            {
+                "symbol": _sym,
+                "close": _q.get("close"),
+                "change_pct": _q.get("change_pct"),
+                "headlines": [
+                    h.get("title")
+                    for h in headlines
+                    if (h.get("ticker") or "").upper() == _sym
+                ][:5],
+            }
+        )
+
     options = raw.get("options") or {}
 
     return {
@@ -93,6 +120,7 @@ def build_research_context(raw: dict[str, Any]) -> dict[str, Any]:
         },
         "sectors": sectors,
         "mag7": mag7,
+        "per_symbol": per_symbol,
         "headlines": headlines[:llm_limit],
         "headline_count": len(headlines),
         "options": {
