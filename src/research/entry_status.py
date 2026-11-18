@@ -769,6 +769,8 @@ def enrich_primary_from_morning(
         "entry_price": slot.get("entry_price"),
         "target_price": slot.get("target_price"),
         "stop_price": slot.get("stop_price"),
+        "win_prob": slot.get("win_prob"),
+        "risk_reward": slot.get("risk_reward"),
         "entry_status": es,
         "current_price": es.get("current_price"),
         "remaining_er_pct": es.get("remaining_er_pct"),
@@ -861,6 +863,8 @@ def build_session_trade_update(
                 "target_price": row.get("target_price"),
                 "stop_price": row.get("stop_price"),
                 "entry_zone": row.get("entry_zone"),
+                "win_prob": row.get("win_prob"),
+                "risk_reward": row.get("risk_reward"),
                 "entry_status": es,
                 "remaining_er_pct": es.get("remaining_er_pct"),
                 "trade_action": row.get("trade_action"),
@@ -926,6 +930,7 @@ def build_session_trade_update(
                         "rank": r.get("rank"),
                         "final_score": r.get("final_score"),
                         "win_prob": r.get("win_prob"),
+                        "risk_reward": r.get("risk_reward"),
                         "expected_return_pct": r.get("expected_return_pct"),
                         "live_expected_return_pct": es.get("live_expected_return_pct")
                         or es.get("remaining_er_pct"),
@@ -996,6 +1001,8 @@ def build_session_trade_update(
             "remaining_er_pct": es.get("remaining_er_pct"),
             "alternate_entry": es.get("alternate_entry") or es.get("new_plan"),
             "trade_action": new_primary.get("trade_action"),
+            "win_prob": new_primary.get("win_prob"),
+            "risk_reward": new_primary.get("risk_reward"),
         }
     else:
         primary_out = enrich_primary_from_morning(

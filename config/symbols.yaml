@@ -61,6 +61,14 @@ news:
     - MU
     - AVGO
     - ARM
+    # Extended 2026-11-17: JPM/XOM/UNH/COST/HD are traded names now
+    # (more trades/day); their per-ticker news is collected so the news
+    # gate can block them on fresh negative headlines.
+    - JPM
+    - XOM
+    - UNH
+    - COST
+    - HD
   rss:
     - url: https://feeds.bloomberg.com/markets/news.rss
       name: Bloomberg

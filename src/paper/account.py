@@ -55,9 +55,13 @@ HISTORY_ADJUSTMENT_REASON = (
     "2026-09-21 之前无法恢复的历史亏损（纸盘迁移时核对："
     "分笔明细合计与账户 realized 之差）"
 )
-# Verification-epoch start: the day the six execution/record fixes landed.
+# Verification-epoch start (RESTARTED 2026-11-17 by Rae's decision).
+# Old epoch 2026-11-12 broke the zero-fault gate twice (11-13 day-breaker
+# trip; 11-16 Polygon 429 blocking all intraday entries), so it can never
+# satisfy the 60-clean-days gate. New epoch day 1 = 2026-11-17; 60th
+# trading day = 2027-02-16 (2027-02-15 is Presidents Day, market closed).
 # Statistics from this date on are the validation record for live trading.
-VERIFICATION_EPOCH_START = "2026-11-12"
+VERIFICATION_EPOCH_START = "2026-11-17"
 
 
 def record_history_adjustment(
@@ -84,7 +88,7 @@ def record_history_adjustment(
     account["verification_epoch"] = {
         "started_on": epoch_start,
         "note": (
-            "新验证期起点：六项执行/记录修复提交日；"
+            "验证期起点（2026-11-17 重启：旧纪元零故障门槛已破两次）；"
             "此前数据不计入验证期统计"
         ),
     }

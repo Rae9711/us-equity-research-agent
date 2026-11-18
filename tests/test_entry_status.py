@@ -5,6 +5,9 @@ ADVISORY ONLY — 不构成投资建议.
 
 from __future__ import annotations
 
+from src.paper.account import default_account
+from src.paper.execution_agent import _try_entry
+from src.paper.signals import normalize_slot
 from src.research.entry_status import (
     ACTION_NEW_SETUP,
     ACTION_WAIT_VWAP,
@@ -361,3 +364,146 @@ def test_build_trade_reeval_with_morning_mock(monkeypatch):
     assert out["p16_gate"] == "No Trade"
     # alias still works
     assert build_trade_reeval is build_session_trade_update
+
+
+# ---------------------------------------------------------------------------
+# Regression (2026-11-17): session primary must carry win_prob / risk_reward
+# ---------------------------------------------------------------------------
+# Real case: the 2026-11-17 09:56 MU SHORT session primary carried
+# win_prob 36 in the morning slot, but build_session_trade_update rebuilt
+# it through whitelists that dropped win_prob (and risk_reward), so the
+# tick's allocation saw win_prob=None -> "胜率 0% 不足 48%" and held cash
+# for the wrong reason. The floor itself (48%) is by design; only the
+# pass-through was the bug.
+
+
+def _mu_short_session_update(monkeypatch):
+    """Morning MU SHORT (win_prob 36) -> session re-rank, #1 unchanged."""
+    morning = {
+        "bias": "Bearish",
+        "total_score": -1,
+        "driver_type": "Sector",
+        "daily_driver": "Semi",
+        "parts": {"P16": {"judgment": "No Trade — wait", "one_liner": "no trade"}},
+        "best_trades": {
+            "primary": {
+                "symbol": "MU",
+                "direction": "SHORT",
+                "entry_zone": ZONE_MU_SHORT,
+                "entry_price": 913.0,
+                "stop_price": 954.0,
+                "target_price": 899.29,
+                "expected_return_pct": 1.5,
+                "win_prob": 36,
+                "risk_reward": 1.34,
+                "level_anchors": {"vwap": 928.0, "orb_high": 920.0},
+            }
+        },
+        "top_trades": [
+            {
+                "symbol": "MU",
+                "direction": "SHORT",
+                "rank": 1,
+                "entry_zone": ZONE_MU_SHORT,
+                "entry_price": 913.0,
+                "stop_price": 954.0,
+                "target_price": 899.29,
+                "final_score": 5.0,
+                "win_prob": 36,
+                "risk_reward": 1.34,
+                "level_anchors": {"vwap": 928.0},
+            }
+        ],
+        "transparency": {},
+        "edges": {},
+        "macro_calendar": {},
+        "driver_tree": {},
+    }
+
+    monkeypatch.setattr(
+        "src.research.entry_status.resolve_symbol_last",
+        lambda symbol, trading_date, raw=None: 913.0,
+    )
+
+    def _fake_compute(raw, *, rule_bundle, parts, edges=None, as_of_et=None):
+        primary = {
+            "symbol": "MU",
+            "direction": "SHORT",
+            "entry_price": 913.0,
+            "target_price": 899.29,
+            "stop_price": 954.0,
+            "final_score": 5.0,
+            "expected_return_pct": 1.5,
+            "trade_action": "Small",
+            "entry_zone": ZONE_MU_SHORT,
+            "win_prob": 36,
+            "risk_reward": 1.34,
+        }
+        return {
+            "best_trades": {"primary": primary, "p16_gate": "No Trade"},
+            "best_opportunity": {"p16_gate": "No Trade", "symbol": "MU"},
+            "top_trades": [{**primary, "rank": 1, "why_factors": ["rs"]}],
+            "trade_candidates": [],
+            "transparency": {"todays_opportunities": [{"symbol": "MU", "label": "MU"}]},
+        }
+
+    monkeypatch.setattr(
+        "src.research.trade_candidates.compute_trade_decision",
+        _fake_compute,
+    )
+
+    out = build_session_trade_update(
+        morning,
+        "2026-11-17",
+        raw={"trading_date": "2026-11-17", "stocks": {"quotes": {}}},
+        session_phase="open",
+    )
+    assert out is not None
+    return out
+
+
+def test_session_trade_update_carries_win_prob(monkeypatch):
+    out = _mu_short_session_update(monkeypatch)
+    assert out["changed"] is False  # same #1, only the values matter here
+    # primary_out whitelist (the live primary the tick trades on).
+    assert out["primary"]["symbol"] == "MU"
+    assert out["primary"]["win_prob"] == 36
+    assert out["primary"]["risk_reward"] == 1.34
+    # re_ranked top_trades whitelist.
+    assert out["top_trades"][0]["win_prob"] == 36
+    assert out["top_trades"][0]["risk_reward"] == 1.34
+    # enrich_primary_from_morning fallback (morning primary, live status).
+    assert out["morning_primary_live"]["win_prob"] == 36
+    assert out["morning_primary_live"]["risk_reward"] == 1.34
+    # refreshed_top whitelist (morning top_trades, live status).
+    assert out["morning_top_refreshed"][0]["win_prob"] == 36
+    assert out["morning_top_refreshed"][0]["risk_reward"] == 1.34
+
+
+def test_try_entry_sees_session_primary_win_prob(monkeypatch, tmp_path):
+    # Empty DATA_ROOT: no shadow summary on disk -> calibration filter
+    # has no map and passes, so the entry reaches allocation.
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path / "data"))
+    out = _mu_short_session_update(monkeypatch)
+    sig = normalize_slot(
+        out["primary"], source="session_trade_update", horizon="Intraday"
+    )
+    assert sig is not None
+    assert sig["win_prob"] == 36
+    assert sig["risk_reward"] == 1.34
+    picked = {
+        "action": "enter",
+        "signal": sig,
+        "quote": 913.0,
+        "quote_source": "test",
+        "entry_status": {"status": "READY"},
+        "reason": "test",
+    }
+    result = _try_entry(default_account(), "intraday", picked, "2026-11-17")
+    assert result["allocation"] is not None
+    # Allocation sees the signal's real win_prob (36), not None/0.
+    assert result["allocation"]["win_prob"] == 36
+    # 36 < 48 floor holds cash -- by design -- but for the right reason.
+    assert result["action"] == "SKIP"
+    assert "胜率 36%" in (result["reason"] or "")
+    assert "胜率 0%" not in (result["reason"] or "")

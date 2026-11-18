@@ -48,11 +48,17 @@ FALLBACK_NEWS_TICKERS: tuple[str, ...] = (
     "GOOGL",
     "TSLA",
     # Keep in sync with config/symbols.yaml polygon_tickers (extended
-    # 2026-11-12 with the traded names AMD/MU/AVGO/ARM).
+    # 2026-11-12 with the traded names AMD/MU/AVGO/ARM; extended 2026-11-17
+    # with JPM/XOM/UNH/COST/HD for more trades/day).
     "AMD",
     "MU",
     "AVGO",
     "ARM",
+    "JPM",
+    "XOM",
+    "UNH",
+    "COST",
+    "HD",
 )
 
 WHOLE_COLLECTION_MARKER = "collect_intraday_news raised"

@@ -346,7 +346,7 @@ def test_history_adjustment_recorded_and_idempotent(data_root):
     adj = acct["history_adjustment"]
     assert adj["amount"] == HISTORY_ADJUSTMENT_AMOUNT == -589.73
     assert "2026-09-21" in adj["reason"]
-    assert acct["verification_epoch"]["started_on"] == "2026-11-12"
+    assert acct["verification_epoch"]["started_on"] == "2026-11-17"
     assert acct["equity"] == pytest.approx(10000.0)
     assert acct["realized_pnl"] == 0.0
     # Second call is a no-op: the record is never duplicated or rewritten.
@@ -371,16 +371,16 @@ def test_verification_epoch_summary_date_filter(data_root):
     acct = default_account()
     _open_leg(acct, "ARM", book="intraday", price=341.0, shares=5,
               stop=335.0, target=354.0, trading_date="2026-11-09")
-    # Pre-epoch leg (before 2026-11-12) must not count toward the epoch.
+    # Pre-epoch leg (before 2026-11-17) must not count toward the epoch.
     execute_exit(acct, price=330.0, reason="pre-epoch",
                  trading_date="2026-11-09", book="intraday")
     _open_leg(acct, "NVDA", book="swing", price=170.0, shares=2,
-              stop=160.0, target=190.0, trading_date="2026-11-12")
+              stop=160.0, target=190.0, trading_date="2026-11-17")
     execute_exit(acct, price=180.0, reason="epoch",
-                 trading_date="2026-11-12", book="swing")
+                 trading_date="2026-11-17", book="swing")
     record_history_adjustment(acct)
     summary = verification_epoch_summary(acct)
-    assert summary["started_on"] == "2026-11-12"
+    assert summary["started_on"] == "2026-11-17"
     assert summary["closed_legs"] == 1
     assert summary["wins"] == 1
     assert summary["realized_pnl"] == pytest.approx(20.0)
@@ -395,7 +395,7 @@ def test_load_account_backfills_adjustment(data_root):
     save_account(acct)
     loaded = load_account()
     assert loaded["history_adjustment"]["amount"] == -589.73
-    assert loaded["verification_epoch"]["started_on"] == "2026-11-12"
+    assert loaded["verification_epoch"]["started_on"] == "2026-11-17"
     # The open leg survives the list-schema migration intact.
     assert get_position(loaded, "intraday")["symbol"] == "ARM"
 

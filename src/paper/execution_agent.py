@@ -50,6 +50,7 @@ from src.paper.price_guard import (
     prices_agree,
 )
 from src.paper.signals import (
+    MAX_ENTER_ATTEMPTS,
     load_candidate_signals,
     normalize_slot,
     pick_intraday_signal,
@@ -262,6 +263,15 @@ def _collect_symbols(trading_date: str, account: dict[str, Any]) -> list[str]:
         (ctx.get("swing"), "swing", "Swing"),
     ):
         norm = normalize_slot(raw_slot or {}, source=source, horizon=horizon)
+        if norm:
+            s = norm["symbol"]
+            if s not in syms:
+                syms.append(s)
+    # Fallback candidates live in top_trades: without their symbols the
+    # forced-price map misses them and their entry status is evaluated
+    # on a live quote instead of the forced price.
+    for row in ctx.get("top_trades") or []:
+        norm = normalize_slot(row or {}, source="top_trade", horizon="Intraday")
         if norm:
             s = norm["symbol"]
             if s not in syms:
@@ -1367,6 +1377,77 @@ def _aggregate(books: list[dict[str, Any]], trading_date: str, phase: str) -> di
 
 
 
+def _try_entry_with_fallback(
+    account: dict[str, Any],
+    book: str,
+    picked: dict[str, Any],
+    trading_date: str,
+    *,
+    peer_entering: bool = False,
+    news_gate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Try a pick's enterable candidates in order (max 3 attempts).
+
+    Before this, one tick tried only the primary per book: when it was
+    calibration-filtered, MISSED/INVALIDATED, in stop-cooldown, or held
+    by the allocation floor, the tick tried nothing else. Now the tick
+    walks the pick's ``enter_candidates`` (calibrated-expectancy order)
+    until one enters. At most ONE new leg per book per tick: stop at the
+    first ENTRY. Book caps (intraday 3 / swing 2 / total 5) and the 3%
+    portfolio planned-risk cap still run inside ``_try_entry``.
+    Skipped attempts are side-effect free, so retrying the next
+    candidate is safe. The returned row is one per book (the ENTRY, or
+    the primary's SKIP when all candidates skip) with ``attempts``
+    attached for traceability.
+    """
+    listed = picked.get("enter_candidates") or []
+    # A non-empty list means enterable candidates exist -- even when the
+    # primary verdict itself is skip/wait (swing pick: the slot may be
+    # MISSED while a top_trades swing row is enterable).
+    candidates = list(listed)[:MAX_ENTER_ATTEMPTS] if listed else [picked]
+    attempts: list[dict[str, Any]] = []
+    first_result: dict[str, Any] | None = None
+    for idx, cand in enumerate(candidates):
+        result = _try_entry(
+            account,
+            book,
+            cand,
+            trading_date,
+            peer_entering=peer_entering,
+            news_gate=news_gate,
+        )
+        sig = cand.get("signal") or {}
+        attempts.append(
+            {
+                "n": idx + 1,
+                "symbol": (sig.get("symbol") or "").upper(),
+                "direction": (sig.get("direction") or "").upper(),
+                "action": result.get("action"),
+                "reason": result.get("reason"),
+            }
+        )
+        if first_result is None:
+            first_result = result
+        if result.get("action") == "ENTRY":
+            out = dict(result)
+            out["attempts"] = attempts
+            if idx > 0:
+                out["fallback_used"] = True
+                out["reason"] = (
+                    f"顺延第{idx + 1}候选成交（前{idx}个跳过）："
+                    f"{result.get('reason') or ''}"
+                )
+            return out
+    final = dict(first_result or {})
+    final["attempts"] = attempts
+    if len(attempts) > 1:
+        skipped = "；".join(
+            f"#{a['n']} {a['symbol']} {a.get('reason') or ''}" for a in attempts[1:]
+        )
+        final["reason"] = f"{final.get('reason') or ''}；顺延候选亦跳过：{skipped}"
+    return final
+
+
 def decide_and_act(
     account: dict[str, Any],
     trading_date: str,
@@ -1469,6 +1550,16 @@ def decide_and_act(
                 inj[sym] = float(force_price)
         return picked
 
+    def _inject_candidates(picked: dict[str, Any] | None, inj: dict[str, float]):
+        if picked is None:
+            return None
+        picked = _inject_force(picked, inj)
+        cands = picked.get("enter_candidates")
+        if cands:
+            picked = dict(picked)
+            picked["enter_candidates"] = [_inject_force(c, inj) for c in cands]
+        return picked
+
     inj = dict(price_map or {})
     if force_price is not None:
         for s in _collect_symbols(trading_date, account):
@@ -1513,7 +1604,7 @@ def decide_and_act(
             raw=raw,
             current_price_by_symbol=inj or None,
         )
-        picked_intra = _inject_force(picked_intra, inj)
+        picked_intra = _inject_candidates(picked_intra, inj)
     elif not get_position(account, BOOK_INTRADAY) and phase == "closed":
         book_results.append(
             {
@@ -1536,17 +1627,21 @@ def decide_and_act(
             raw=raw,
             current_price_by_symbol=inj or None,
         )
-        picked_swing = _inject_force(picked_swing, inj)
+        picked_swing = _inject_candidates(picked_swing, inj)
 
-    both_enter = (
-        bool(picked_intra and picked_intra.get("action") == "enter")
-        and bool(picked_swing and picked_swing.get("action") == "enter")
-    )
+    def _has_enterable(picked: dict[str, Any] | None) -> bool:
+        return bool(picked) and (
+            picked.get("action") == "enter" or bool(picked.get("enter_candidates"))
+        )
 
-    # Swing core first so cash reserve + budget share apply cleanly, then satellite
+    both_enter = _has_enterable(picked_intra) and _has_enterable(picked_swing)
+
+    # Swing core first so cash reserve + budget share apply cleanly, then satellite.
+    # Each book walks its enter_candidates in order (max 3 attempts, at
+    # most one new leg per book per tick).
     if picked_swing is not None:
         book_results.append(
-            _try_entry(
+            _try_entry_with_fallback(
                 account,
                 BOOK_SWING,
                 picked_swing,
@@ -1557,7 +1652,7 @@ def decide_and_act(
         )
     if picked_intra is not None:
         book_results.append(
-            _try_entry(
+            _try_entry_with_fallback(
                 account,
                 BOOK_INTRADAY,
                 picked_intra,

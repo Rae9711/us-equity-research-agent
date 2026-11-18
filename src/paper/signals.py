@@ -15,6 +15,10 @@ import logging
 from datetime import date, datetime, time
 from typing import Any
 
+from src.paper.calibration_filter import (
+    calibration_filter_for_signal,
+    planned_risk_reward,
+)
 from src.research.entry_status import (
     STATUS_ACTIVE,
     STATUS_READY,
@@ -561,6 +565,80 @@ def _candidate_edge_score(row: dict[str, Any]) -> float:
     return float(wp) * max(er, 0.15) * rr_w * max(status_boost, 0.15)
 
 
+MAX_ENTER_ATTEMPTS = 3
+
+
+def _uncalibrated_expectancy(sig: dict[str, Any]) -> float | None:
+    """Raw expectancy (R) from the signal's own win_prob / planned R:R."""
+    wp = _safe_float(sig.get("win_prob"))
+    if wp is None:
+        return None
+    rr = planned_risk_reward(
+        _safe_float(sig.get("entry_price")),
+        _safe_float(sig.get("stop_price")),
+        _safe_float(sig.get("target_price")),
+        sig.get("direction"),
+    )
+    if rr is None:
+        rr = _safe_float(sig.get("risk_reward"))
+    if rr is None:
+        return None
+    p = wp / 100.0
+    return p * rr - (1.0 - p)
+
+
+def _enter_candidates(
+    evaluated: list[dict[str, Any]],
+    *,
+    horizon: str,
+    include_swing_key: bool = False,
+) -> list[dict[str, Any]]:
+    """Enterable candidates ordered by calibrated expectancy, best first.
+
+    Same recalibration map as the ``_try_entry`` filter: a candidate the
+    filter would skip is excluded here. ``_try_entry`` still re-checks
+    every attempt -- it remains the enforcement point. Rows without
+    calibration evidence order by their raw expectancy instead.
+    At most ``MAX_ENTER_ATTEMPTS`` are returned: one tick tries no more
+    than that per book, and at most one new leg per book per tick.
+    """
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for row in evaluated:
+        if row.get("action") != "enter":
+            continue
+        if row.get("key") == "swing" and not include_swing_key:
+            continue
+        sig = row.get("signal") or {}
+        verdict = calibration_filter_for_signal(sig, horizon=horizon)
+        if verdict.get("filter") == "skip":
+            continue
+        exp = verdict.get("calibrated_expectancy_r")
+        if exp is None:
+            exp = _uncalibrated_expectancy(sig)
+        scored.append(
+            (float(exp) if exp is not None else 0.0, row)
+        )
+    scored.sort(key=lambda t: (t[0], _candidate_edge_score(t[1])), reverse=True)
+    out: list[dict[str, Any]] = []
+    for exp, row in scored[:MAX_ENTER_ATTEMPTS]:
+        out.append(
+            {
+                "action": "enter",
+                "signal": row["signal"],
+                "entry_status": row["entry_status"],
+                "reason": (
+                    f"模拟买入：{row['label']} Entry Status="
+                    f"{row['entry_status'].get('status')}（价位贴近 Ideal Entry）"
+                ),
+                "quote": row["quote"],
+                "quote_source": row["quote_source"],
+                "pick_score": round(_candidate_edge_score(row), 2),
+                "calibrated_expectancy_r": round(exp, 3),
+            }
+        )
+    return out
+
+
 def _pick_from_evaluated(
     evaluated: list[dict[str, Any]],
     *,
@@ -699,6 +777,8 @@ def pick_intraday_signal(
         _add(f"top_trade_{rank}", row, f"Top#{rank} {row.get('symbol')}", "Intraday")
 
     result = _pick_from_evaluated(evaluated, allow_swing_fallback=False)
+    result = dict(result)
+    result["enter_candidates"] = _enter_candidates(evaluated, horizon="intraday")
     if result.get("action") == "skip" and not evaluated:
         notes = []
         if ctx.get("morning_stale"):
@@ -725,14 +805,22 @@ def pick_swing_signal(
     phase = session_phase or infer_session_phase(trading_date)
     ctx = load_candidate_signals(trading_date)
     prices = current_price_by_symbol or {}
-    norm = normalize_slot(ctx.get("swing") or {}, source="swing", horizon="Swing")
     evaluated: list[dict[str, Any]] = []
-    if norm:
+    seen_syms: set[str] = set()
+
+    def _add(key: str, raw_slot: dict[str, Any] | None, label: str) -> None:
+        norm = normalize_slot(raw_slot or {}, source=key, horizon="Swing")
+        if not norm:
+            return
+        sym = norm["symbol"]
+        if sym in seen_syms:
+            return
+        seen_syms.add(sym)
         evaluated.append(
             _evaluate_slot(
                 norm,
-                key="swing",
-                label="Swing · 长线",
+                key=key,
+                label=label,
                 trading_date=trading_date,
                 phase=phase,
                 prices=prices,
@@ -740,6 +828,16 @@ def pick_swing_signal(
                 raw=raw,
             )
         )
+
+    _add("swing", ctx.get("swing"), "Swing · 长线")
+    # Fallback swing candidates: morning top_trades rows whose own horizon
+    # is Swing (per-symbol research scores LONG and SHORT per symbol; the
+    # swing slot is only one of them).
+    for i, row in enumerate(ctx.get("top_trades") or []):
+        if not str(row.get("horizon") or "").strip().lower().startswith("swing"):
+            continue
+        rank = row.get("rank") or (i + 1)
+        _add(f"top_trade_{rank}", row, f"Top#{rank} {row.get('symbol')} · 长线")
     # Treat swing rows as the only candidates; reuse enter/wait paths via fallback flag
     if not evaluated:
         reason = "无 Swing / 长线信号"
@@ -753,8 +851,12 @@ def pick_swing_signal(
             "quote": None,
             "quote_source": None,
             "candidates": [],
+            "enter_candidates": [],
         }
     row = evaluated[0]
+    enter_candidates = _enter_candidates(
+        evaluated, horizon="swing", include_swing_key=True
+    )
     if row["action"] == "enter":
         return {
             "action": "enter",
@@ -764,6 +866,7 @@ def pick_swing_signal(
             "quote": row["quote"],
             "quote_source": row["quote_source"],
             "candidates": evaluated,
+            "enter_candidates": enter_candidates,
         }
     if row["action"] == "wait":
         return {
@@ -774,6 +877,7 @@ def pick_swing_signal(
             "quote": row["quote"],
             "quote_source": row["quote_source"],
             "candidates": evaluated,
+            "enter_candidates": enter_candidates,
         }
     return {
         "action": "skip",
@@ -783,6 +887,7 @@ def pick_swing_signal(
         "quote": row["quote"],
         "quote_source": row["quote_source"],
         "candidates": evaluated,
+        "enter_candidates": enter_candidates,
     }
 
 

@@ -40,8 +40,12 @@ from src.utils.paths import data_root
 from src.utils.quote_resolve import session_observation
 from src.utils.trading_calendar import prior_trading_day
 
+# Extended 2026-11-17: JPM (financials), XOM (energy), UNH (healthcare),
+# COST (consumer staples), HD (consumer discretionary) -- liquid mega-caps
+# in sectors the old 11-name universe did not cover, for more trades/day.
 CANDIDATE_SYMBOLS = [
     "TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM",
+    "JPM", "XOM", "UNH", "COST", "HD",
     "SMH", "QQQ", "SPY", "TQQQ",
 ]
 ADVISORY_TAG = "ADVISORY — 不构成投资建议"
@@ -49,10 +53,12 @@ FINAL_SCORE_THRESHOLD = 2.5
 EXTENDED_GAP_PCT = 4.0
 MIN_UPSIDE_PCT = 1.0
 
-_STOCK_SYMBOLS = frozenset({"TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM"})
+_STOCK_SYMBOLS = frozenset({"TSLA", "NVDA", "AMD", "MU", "AVGO", "META", "ARM",
+                           "JPM", "XOM", "UNH", "COST", "HD"})
 _SEMI_SYMBOLS = frozenset({"NVDA", "AMD", "MU", "AVGO", "ARM", "SMH"})
 # Liquid names preferred for multi-day / swing positions (not 0DTE).
-_SWING_PREFERRED = ("NVDA", "META", "QQQ", "AVGO", "AMD", "TSLA", "SMH", "SPY")
+_SWING_PREFERRED = ("NVDA", "META", "QQQ", "AVGO", "AMD", "TSLA", "SMH", "SPY",
+                     "JPM", "XOM", "UNH", "COST", "HD")
 _SWING_MIN_QUALITY = 2.0  # independent of intraday BUY/Small threshold
 
 _SYMBOL_SECTION: dict[str, str] = {
@@ -67,6 +73,11 @@ _SYMBOL_SECTION: dict[str, str] = {
     "AVGO": "stocks",
     "META": "stocks",
     "ARM": "stocks",
+    "JPM": "stocks",
+    "XOM": "stocks",
+    "UNH": "stocks",
+    "COST": "stocks",
+    "HD": "stocks",
 }
 
 
