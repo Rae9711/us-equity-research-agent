@@ -157,11 +157,46 @@ def test_aggregate_totals():
     assert [d["date"] for d in out["days"]] == ["2026-11-12", "2026-11-13"]
 
 
+def test_aggregate_parts_by_id_tracks_signed_bias():
+    # Day 1: fixture — P3 judgments equal, confidences equal; P12 primary
+    # confidence missing, judgments differ.
+    # Day 2: Gemini runs hotter on both parts (P3 0.85 vs 0.6, P12 0.7 vs
+    # 0.55) and both judgments differ — mirrors the real 2026-11-16 read.
+    day2 = _morning_doc(trading_date="2026-11-16")
+    day2["parts"]["P3"] = {"judgment": "FOMC 会议纪要发布", "confidence": 0.6}
+    day2["parts"]["P12"] = {"judgment": "焦点：TSLA", "confidence": 0.55}
+    day2["gemini_shadow"]["parts"]["P3"] = {
+        "judgment": "无重大 Tier 1 数据发布", "confidence": 0.85}
+    day2["gemini_shadow"]["parts"]["P12"] = {
+        "judgment": "焦点股票：NVDA / MSFT / AMZN", "confidence": 0.7}
+    out = aggregate_model_agreement({
+        "2026-11-13": summarize_model_agreement(_morning_doc()),
+        "2026-11-16": summarize_model_agreement(day2),
+    })
+    by_id = out["totals"]["parts_by_id"]
+    p3 = by_id["P3"]
+    assert p3["n_compared"] == 2
+    assert p3["n_judgment_equal"] == 1
+    assert p3["judgment_equal_rate"] == 0.5
+    assert p3["mean_abs_confidence_delta"] == 0.125
+    assert p3["mean_signed_confidence_delta"] == 0.125  # Gemini hotter
+    assert p3["n_gemini_more_confident"] == 1
+    assert p3["n_primary_more_confident"] == 0
+    p12 = by_id["P12"]
+    assert p12["n_compared"] == 2
+    assert p12["n_judgment_equal"] == 0
+    assert p12["judgment_equal_rate"] == 0.0
+    assert p12["mean_abs_confidence_delta"] == 0.15
+    assert p12["mean_signed_confidence_delta"] == 0.15
+    assert p12["n_gemini_more_confident"] == 1
+
+
 def test_aggregate_empty():
     out = aggregate_model_agreement({})
     assert out["days"] == []
     assert out["totals"]["n_days"] == 0
     assert out["totals"]["candidate_agreement_rate"] is None
+    assert out["totals"]["parts_by_id"] == {}
 
 
 def test_job_records_model_agreement_and_is_idempotent(tmp_path):

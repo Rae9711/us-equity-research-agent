@@ -92,6 +92,12 @@ def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> N
                     else row.get("entry_status"),
                     "pnl": (row.get("trade") or {}).get("pnl"),
                     "allocation": allocation,
+                    # Calibration verdict for this entry attempt (pass /
+                    # skip / no-data): persisted so the daily watch can
+                    # audit that the filter evaluated the candidate,
+                    # instead of inferring it from silence.
+                    "calibration": row.get("calibration"),
+                    "calibration_filtered": row.get("calibration_filtered"),
                 },
             )
             if allocation and row.get("action") in ("ENTRY", "SKIP", "WAIT"):
@@ -123,6 +129,8 @@ def record_tick_decision(account: dict[str, Any], decision: dict[str, Any]) -> N
             else decision.get("entry_status"),
             "pnl": (decision.get("trade") or {}).get("pnl"),
             "allocation": allocation,
+            "calibration": decision.get("calibration"),
+            "calibration_filtered": decision.get("calibration_filtered"),
         },
     )
     if allocation and decision.get("action") in ("ENTRY", "SKIP", "WAIT"):

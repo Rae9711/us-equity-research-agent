@@ -183,13 +183,24 @@ def summarize_model_agreement(morning_doc: dict[str, Any] | None) -> dict[str, A
 def aggregate_model_agreement(
     entries_by_date: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    """Roll per-day agreement entries into the shadow-summary section."""
+    """Roll per-day agreement entries into the shadow-summary section.
+
+    ``totals["parts_by_id"]`` accumulates per model-authored part (P3/P12):
+    how often the two models' judgments match and whose confidence runs
+    higher. ``mean_signed_confidence_delta`` is Gemini minus primary, so a
+    positive value means Gemini systematically states higher confidence on
+    that part. Two days in (2026-11-13/16) the judgments already differ on
+    every compared part and Gemini ran hotter on 11-16 (P3 0.85 vs 0.6,
+    P12 0.7 vs 0.55); the per-part roll-up is what makes that pattern
+    visible without eyeballing each day's rows.
+    """
     entries = [e for _, e in sorted((entries_by_date or {}).items())
                if isinstance(e, dict)]
     with_shadow = [e for e in entries if e.get("shadow_ok")]
     cand_rows = cand_ident = 0
     parts_compared = parts_equal = 0
     deltas: list[float] = []
+    per_part: dict[str, dict[str, Any]] = {}
     for e in with_shadow:
         cand = e.get("candidates") or {}
         cand_rows += int(cand.get("n_common") or 0)
@@ -200,6 +211,45 @@ def aggregate_model_agreement(
         for r in (parts.get("rows") or []):
             if r.get("confidence_delta") is not None:
                 deltas.append(float(r["confidence_delta"]))
+            if not (r.get("primary_present") and r.get("gemini_present")):
+                continue
+            slot = per_part.setdefault(r.get("part"), {
+                "n_compared": 0,
+                "n_judgment_known": 0,
+                "n_judgment_equal": 0,
+                "_abs_deltas": [],
+                "_signed_deltas": [],
+                "n_gemini_more_confident": 0,
+                "n_primary_more_confident": 0,
+            })
+            slot["n_compared"] += 1
+            if r.get("judgment_equal") is not None:
+                slot["n_judgment_known"] += 1
+                if r["judgment_equal"]:
+                    slot["n_judgment_equal"] += 1
+            pc, gc = _f(r.get("confidence_primary")), _f(r.get("confidence_gemini"))
+            if pc is not None and gc is not None:
+                slot["_abs_deltas"].append(abs(gc - pc))
+                slot["_signed_deltas"].append(gc - pc)
+                if gc > pc:
+                    slot["n_gemini_more_confident"] += 1
+                elif pc > gc:
+                    slot["n_primary_more_confident"] += 1
+    parts_by_id = {}
+    for pid in sorted(per_part):
+        s = per_part[pid]
+        abs_d = s.pop("_abs_deltas")
+        sgn_d = s.pop("_signed_deltas")
+        parts_by_id[pid] = {
+            **s,
+            "judgment_equal_rate": (
+                _round4(s["n_judgment_equal"] / s["n_judgment_known"])
+                if s["n_judgment_known"] else None),
+            "mean_abs_confidence_delta": (
+                _round4(sum(abs_d) / len(abs_d)) if abs_d else None),
+            "mean_signed_confidence_delta": (
+                _round4(sum(sgn_d) / len(sgn_d)) if sgn_d else None),
+        }
     return {
         "days": entries,
         "totals": {
@@ -213,5 +263,6 @@ def aggregate_model_agreement(
             "parts_judgment_equal": parts_equal,
             "mean_abs_confidence_delta": (
                 _round4(sum(deltas) / len(deltas)) if deltas else None),
+            "parts_by_id": parts_by_id,
         },
     }

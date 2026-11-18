@@ -284,3 +284,97 @@ def test_shadow_ledger_carries_calibrated_fields():
     rec = make_record("2026-11-17", "morning", cands[0])
     assert rec["calibrated_expectancy_r"] == pytest.approx(-0.257)
     assert rec["calibration_filter"] == "skip"
+
+
+# --- verdict durability (2026-11-18) -------------------------------------
+# Live finding: after two live days (11-17, 11-18) the ledger held 300
+# decisions and ZERO carried any calibration key — a pass verdict was
+# discarded in _try_entry, and record_tick_decision never persisted the
+# field even on the skip path. The watch could not tell "filter passed"
+# from "filter never ran". The verdict is now recorded on every
+# entry-path decision and persisted into the decision rows.
+
+def test_try_entry_records_pass_verdict(data_root):
+    # Intraday >70 bucket: n=7, calibrated 0.55 (by-horizon). Levels give
+    # R:R 2.0 (500/490/520) -> expectancy +0.65R, passes.
+    _write_summary(data_root)
+    out = _try_entry(
+        default_account(), "intraday",
+        _picked("MSFT", price=500.0, stop=490.0, target=520.0, win_prob=75),
+        "2026-11-18",
+    )
+    assert out["action"] == "ENTRY"
+    cal = out["calibration"]
+    assert cal["filter"] == "pass"
+    assert cal["bucket"] == ">70"
+    assert cal["calibrated_win_prob"] == 0.55
+    assert cal["calibrated_expectancy_r"] == pytest.approx(0.65)
+    assert cal["source"] == "by-horizon"
+    assert cal["n"] == 7
+    assert out.get("calibration_filtered") is None
+
+
+def test_try_entry_records_no_data_verdict(data_root):
+    # No shadow summary on disk -> no-data verdict, still recorded.
+    out = _try_entry(
+        default_account(), "intraday",
+        _picked("AAPL", win_prob=60, risk_reward=1.33),
+        "2026-11-18",
+    )
+    assert out["action"] == "ENTRY"
+    assert out["calibration"]["filter"] == "no-data"
+    assert out["calibration"]["calibrated_win_prob"] is None
+
+
+def test_record_tick_decision_persists_calibration():
+    from src.paper.journal import record_tick_decision
+
+    account = default_account()
+    record_tick_decision(account, {
+        "trading_date": "2026-11-18",
+        "books": [
+            {
+                "action": "ENTRY", "reason": "test entry", "book": "intraday",
+                "book_zh": "短线",
+                "signal": {"symbol": "AVGO", "horizon": "Intraday"},
+                "quote": 350.0, "quote_source": "test",
+                "entry_status": "READY", "trade": {"pnl": None},
+                "allocation": None,
+                "calibration": {"filter": "pass", "bucket": ">70",
+                                "calibrated_win_prob": 0.55,
+                                "calibrated_expectancy_r": 1.2,
+                                "source": "by-horizon", "n": 7,
+                                "horizon_used": "intraday", "reason": None},
+                "calibration_filtered": None,
+            },
+            {
+                "action": "SKIP", "reason": "test skip", "book": "swing",
+                "book_zh": "长线",
+                "signal": {"symbol": "AAPL", "horizon": "Swing"},
+                "quote": 200.0, "quote_source": "test",
+                "entry_status": "READY", "trade": None,
+                "allocation": None,
+                "calibration": {"filter": "skip", "bucket": "<50",
+                                "calibrated_win_prob": 0.28,
+                                "calibrated_expectancy_r": -0.35,
+                                "source": "by-horizon", "n": 11,
+                                "horizon_used": "swing",
+                                "reason": "校准期望值 -0.35R 为负"},
+                "calibration_filtered": True,
+            },
+        ],
+    })
+    rows = account["decisions"]
+    assert len(rows) == 2
+    assert rows[0]["calibration"]["filter"] == "pass"
+    assert rows[0]["calibration"]["calibrated_expectancy_r"] == pytest.approx(1.2)
+    assert rows[0].get("calibration_filtered") is None
+    assert rows[1]["calibration"]["filter"] == "skip"
+    assert rows[1]["calibration_filtered"] is True
+    # No-books fallback: keys present, None when no entry was attempted.
+    record_tick_decision(account, {
+        "trading_date": "2026-11-18", "action": "SKIP", "reason": "blocked",
+        "signal": None, "trade": None, "quote": None, "quote_source": None,
+        "entry_status": None, "allocation": None,
+    })
+    assert account["decisions"][2]["calibration"] is None
