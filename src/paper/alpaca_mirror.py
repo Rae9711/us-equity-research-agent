@@ -139,16 +139,26 @@ def plan_mirror_actions(
 ) -> dict[str, Any]:
     """Plan the reconciliation between the local book and Alpaca paper.
 
-    Returns {"actions", "skipped", "divergences", "adopt", "mark_exited"}.
-    Pure function: no network, no file writes. The job executes ``actions``
-    in the order cancels -> closes -> placements and applies ``adopt`` /
-    ``mark_exited`` to the mirror state.
+    Returns {"actions", "skipped", "divergences", "adopt", "mark_exited",
+    "record_updates"}. Pure function: no network, no file writes. The job
+    executes ``actions`` in the order cancels -> closes -> placements and
+    applies ``adopt`` / ``mark_exited`` / ``record_updates`` to the mirror
+    state.
+
+    ``record_updates`` carries Alpaca facts worth persisting while a leg is
+    still live -- currently the position's ``avg_entry_price``. The planner
+    already reads it for the entry-basis divergence check, but without
+    persisting it the fill is lost once the bracket exits: on 2026-11-23
+    the MU intraday leg netted +$29.15 in Alpaca vs +$102.54 locally and
+    the mirror file could not say why, because it stored only local_entry.
+    Exit fills are not covered (the job never lists closed orders).
     """
     actions: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     divergences: list[dict[str, Any]] = []
     adopt: list[dict[str, Any]] = []
     mark_exited: list[str] = []
+    record_updates: list[dict[str, Any]] = []
     legs_state = mirror_state.get("legs") or {}
     local_symbols: set[str] = set()
 
@@ -208,6 +218,13 @@ def plan_mirror_actions(
                             "symbol": symbol,
                             "detail": f"Alpaca entry {alpaca_entry} vs local entry {entry} (>{ENTRY_BASIS_TOLERANCE_PCT:.0f}% apart); P&L bases differ.",
                         }
+                    )
+                # Persist the live fill while it exists: once the bracket
+                # exits, Alpaca no longer reports the position and the
+                # entry basis is otherwise unrecoverable from the record.
+                if alpaca_entry is not None:
+                    record_updates.append(
+                        {"leg_key": key, "alpaca_entry_price": alpaca_entry}
                     )
             skipped.append({"leg_key": key, "symbol": symbol, "reason": "mirrored"})
             continue
@@ -359,4 +376,5 @@ def plan_mirror_actions(
         "divergences": divergences,
         "adopt": adopt,
         "mark_exited": mark_exited,
+        "record_updates": record_updates,
     }

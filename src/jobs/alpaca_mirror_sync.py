@@ -169,6 +169,7 @@ def run(
         "skipped": plan["skipped"],
         "divergences": plan["divergences"],
         "adopt": plan["adopt"],
+        "record_updates": plan["record_updates"],
         "failures": [],
         "executed": [],
         "deferred": [],
@@ -187,6 +188,9 @@ def run(
     for key in plan["mark_exited"]:
         rec = mirror_state.setdefault("legs", {}).setdefault(key, {})
         rec["status"] = EXITED_STATUS
+    for item in plan["record_updates"]:
+        rec = mirror_state.setdefault("legs", {}).setdefault(item["leg_key"], {})
+        rec["alpaca_entry_price"] = item["alpaca_entry_price"]
 
     if not is_open:
         summary["deferred"] = [dict(a, reason="market_closed") for a in plan["actions"]]

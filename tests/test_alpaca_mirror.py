@@ -188,6 +188,46 @@ def test_plan_diverges_on_mismatched_alpaca_position_instead_of_doubling():
     assert plan["divergences"][0]["type"] == "alpaca_position_mismatch"
 
 
+def test_plan_records_alpaca_entry_price_for_live_leg():
+    # 2026-11-23 MU: the mirror file kept only local_entry, so the
+    # $73.39 Alpaca-vs-local fill gap on the day could only be inferred
+    # from the equity delta. A live leg's Alpaca entry price must be
+    # persisted while the position is still open.
+    state = fresh_mirror_state()
+    state["legs"][leg_key("swing", "AMD", "2026-11-12")] = {"status": "placed", "order_id": "o1"}
+    pos = [{"symbol": "AMD", "direction": "LONG", "qty": 2.0, "avg_entry_price": 550.0, "unrealized_pl": 0.0}]
+    plan = _plan(positions=pos, state=state)
+    assert plan["actions"] == []
+    assert plan["divergences"] == []  # 550 vs 557.495 is 1.3% < 5%
+    assert plan["record_updates"] == [
+        {"leg_key": "swing:AMD:2026-11-12", "alpaca_entry_price": 550.0}
+    ]
+
+
+def test_plan_records_alpaca_entry_price_even_when_basis_differs():
+    state = fresh_mirror_state()
+    state["legs"][leg_key("swing", "AMD", "2026-11-12")] = {"status": "placed", "order_id": "o1"}
+    pos = [{"symbol": "AMD", "direction": "LONG", "qty": 2.0, "avg_entry_price": 525.0, "unrealized_pl": 0.0}]
+    plan = _plan(positions=pos, state=state)
+    assert plan["divergences"][0]["type"] == "entry_basis_differs"
+    assert plan["record_updates"] == [
+        {"leg_key": "swing:AMD:2026-11-12", "alpaca_entry_price": 525.0}
+    ]
+
+
+def test_plan_skips_record_update_without_alpaca_entry_price():
+    state = fresh_mirror_state()
+    state["legs"][leg_key("swing", "AMD", "2026-11-12")] = {"status": "placed", "order_id": "o1"}
+    pos = [{"symbol": "AMD", "direction": "LONG", "qty": 2.0, "avg_entry_price": None, "unrealized_pl": 0.0}]
+    plan = _plan(positions=pos, state=state)
+    assert plan["record_updates"] == []
+
+
+def test_plan_no_record_update_for_unmirrored_leg():
+    plan = _plan()
+    assert plan["record_updates"] == []
+
+
 # ---------------------------------------------------------------------------
 # Job-level tests (mock transport, temp state dir)
 # ---------------------------------------------------------------------------
@@ -291,3 +331,73 @@ def test_job_live_market_closed_defers_without_placing(tmp_path, monkeypatch):
     assert summary["market_open"] is False
     assert summary["deferred"][0]["reason"] == "market_closed"
     assert not any(c[0] == "POST" for c in calls)
+
+
+def _mock_client_with_live_position(calls, avg_entry_price="550.00"):
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "GET" and request.url.path == "/v2/positions":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "symbol": "AMD",
+                        "qty": "2",
+                        "side": "long",
+                        "avg_entry_price": avg_entry_price,
+                        "market_value": "1100",
+                        "unrealized_pl": "0",
+                        "current_price": "550.00",
+                    }
+                ],
+            )
+        if request.method == "GET" and request.url.path == "/v2/orders":
+            return httpx.Response(200, json=[])
+        if request.method == "GET" and request.url.path == "/v2/account":
+            return httpx.Response(
+                200,
+                json={"equity": "10000", "cash": "10000", "buying_power": "40000", "status": "ACTIVE"},
+            )
+        return httpx.Response(404, json={})
+
+    transport = httpx.MockTransport(handler)
+    return AlpacaPaperClient(key_id="PK_TEST", secret_key="secret", transport=transport)
+
+
+def test_job_persists_alpaca_entry_price_for_live_leg(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+    _write_account(tmp_path, [_amd_leg()])
+    paper = tmp_path / "paper"
+    (paper / "alpaca_mirror.json").write_text(
+        json.dumps(
+            {
+                "legs": {
+                    "swing:AMD:2026-11-12": {
+                        "status": "placed",
+                        "order_id": "o1",
+                        "local_entry": 557.495,
+                    }
+                },
+                "divergences": [],
+                "failures": [],
+                "updated_at": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list = []
+    client = _mock_client_with_live_position(calls)
+    monday = datetime(2026, 11, 16, 10, 0, tzinfo=ET)  # market open
+    summary, code = mirror_run(
+        tmp_path, dry_run=False, now=monday, quote_fn=_quote_stub, client=client
+    )
+    assert code == 0
+    assert summary["executed"] == []  # already mirrored: nothing to place
+    assert summary["record_updates"] == [
+        {"leg_key": "swing:AMD:2026-11-12", "alpaca_entry_price": 550.0}
+    ]
+    state = load_mirror_state(tmp_path)
+    rec = state["legs"]["swing:AMD:2026-11-12"]
+    assert rec["status"] == "placed"
+    assert rec["local_entry"] == 557.495
+    assert rec["alpaca_entry_price"] == 550.0
