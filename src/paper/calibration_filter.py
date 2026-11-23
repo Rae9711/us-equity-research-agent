@@ -26,6 +26,12 @@ This module wires it into the entry path as a FILTER ONLY:
 * The filter NEVER touches sizing: it only skips an entry, before
   allocation runs, and never modifies the signal, the win_prob, or any
   allocation input.
+* Planned R:R is computed on the risk the system could actually take:
+  a stop closer than the live minimum stop distance (0.8% of entry,
+  ``min_stop_dist_pct``) can never be entered, so the raw R:R explodes
+  as the stop distance -> 0 (real case 2026-11-19 NVDA intraday:
+  0.07% stop -> a recorded +16.10R verdict). The risk is floored at
+  0.8% of entry, so the expectancy reflects tradeable risk.
 """
 
 from __future__ import annotations
@@ -38,6 +44,11 @@ from src.paper.shadow_ledger import normalize_horizon, win_prob_bucket
 from src.utils.paths import data_root
 
 logger = logging.getLogger(__name__)
+
+# Mirrors the live ``min_stop_dist_pct`` (account params, 0.8%) and the
+# shadow ledger's ``MIN_STOP_DIST_PCT``: a stop closer than this to the
+# entry is rejected at entry time, so it is not tradeable risk.
+MIN_STOP_DIST_PCT = 0.8
 
 
 def load_calibration_map() -> dict[str, Any]:
@@ -71,8 +82,18 @@ def planned_risk_reward(
     stop: float | None,
     target: float | None,
     direction: str | None,
+    *,
+    min_stop_dist_pct: float = MIN_STOP_DIST_PCT,
 ) -> float | None:
-    """Planned reward / planned risk from levels, or None when degenerate."""
+    """Planned reward / planned risk from levels, or None when degenerate.
+
+    The risk is floored at ``min_stop_dist_pct`` of the entry price:
+    a stop tighter than the live minimum can never be entered, so an
+    R:R computed on its raw distance overstates the reward per unit of
+    risk the system would actually take (it diverges as the stop
+    distance -> 0). A zero/negative risk or reward is still degenerate
+    and returns None; only a positive-but-sub-floor risk is floored.
+    """
     try:
         e, s, t = float(entry), float(stop), float(target)
     except (TypeError, ValueError):
@@ -81,6 +102,9 @@ def planned_risk_reward(
     reward = (t - e) if (direction or "LONG").upper() == "LONG" else (e - t)
     if risk is None or risk <= 0 or reward is None or reward <= 0:
         return None
+    floor = abs(e) * float(min_stop_dist_pct) / 100.0
+    if risk < floor:
+        risk = floor
     return reward / risk
 
 

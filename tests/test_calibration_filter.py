@@ -144,6 +144,39 @@ def test_rr_from_levels():
     assert out["filter"] == "skip"  # RR 2.0, p 0.319 -> -0.04R
 
 
+def test_rr_floors_sub_floor_stop():
+    # A stop closer than the 0.8% live minimum is not tradeable risk:
+    # the raw R:R would be reward / 0.11 = 28.18, the floored one is
+    # reward / (153.26 * 0.8%) = 3.10 / 1.22608 = 2.528.
+    assert planned_risk_reward(153.26, 153.15, 156.36, "LONG") == pytest.approx(
+        2.5284, abs=0.001
+    )
+    # SHORT mirror: same geometry, stop above entry.
+    assert planned_risk_reward(153.26, 153.37, 150.16, "SHORT") == pytest.approx(
+        2.5284, abs=0.001
+    )
+    # A stop exactly at the floor is untouched (risk 1.0% >= 0.8%).
+    assert planned_risk_reward(100.0, 99.0, 102.0, "LONG") == pytest.approx(2.0)
+    # Zero risk stays degenerate, not floored into a number.
+    assert planned_risk_reward(100.0, 100.0, 110.0, "LONG") is None
+
+
+def test_nvda_2026_11_19_verdict_regression():
+    # Real case: NVDA intraday 2026-11-19, stop 0.07% from entry. The
+    # live verdict recorded +16.10R (pooled 50-60 bucket, p_cal 0.572)
+    # from a raw R:R of ~28.9. With the risk floored at 0.8% of entry
+    # the same signal gives R:R ~2.53 and expectancy ~+1.02R: still a
+    # pass (the stop-floor check, not the filter, is what rejects it),
+    # but an honest one.
+    sig = {"win_prob": 57.0, "entry_price": 153.26, "stop_price": 153.15,
+           "target_price": 156.36, "direction": "LONG"}
+    out = calibration_filter_for_signal(sig, horizon="intraday", mapping=MAPPING)
+    assert out["source"] == "pooled"  # intraday 50-60 has n=0
+    assert out["calibrated_win_prob"] == 0.572
+    assert out["calibrated_expectancy_r"] == pytest.approx(1.018, abs=0.002)
+    assert out["filter"] == "pass"
+
+
 # --- entry path ----------------------------------------------------------
 
 def test_try_entry_skips_negative_calibrated(data_root):
