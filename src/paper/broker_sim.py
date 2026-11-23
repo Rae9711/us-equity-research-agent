@@ -235,9 +235,11 @@ def execute_entry(
         "horizon": horizon,
         "book": book_key,
     }
-    append_trade(account, trade)
+    # append_trade stores a copy; return the stored row so post-call
+    # annotations (allocation, risk cap) land on the persisted record.
+    stored = append_trade(account, trade)
     mark_to_market(account, price, price_by_symbol={symbol.upper(): price})
-    return trade
+    return stored
 
 
 def execute_exit(
@@ -368,9 +370,12 @@ def execute_exit(
         "horizon": pos.get("horizon"),
         "book": book_key,
     }
-    append_trade(account, trade)
+    # append_trade stores a copy; return the stored row so post-call
+    # annotations (stop_trigger, slippage_capped, gap flags, bar_ts) land
+    # on the persisted record.
+    stored = append_trade(account, trade)
     mark_to_market(account, None)
-    return trade
+    return stored
 
 
 def can_afford(

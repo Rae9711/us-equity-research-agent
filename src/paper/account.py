@@ -507,7 +507,15 @@ def append_decision(account: dict[str, Any], decision: dict[str, Any]) -> None:
         account["decisions"] = rows[-300:]
 
 
-def append_trade(account: dict[str, Any], trade: dict[str, Any]) -> None:
+def append_trade(account: dict[str, Any], trade: dict[str, Any]) -> dict[str, Any]:
+    """Append ``trade`` to the ledger and return the stored row.
+
+    The stored row is a copy of ``trade``; callers annotate the returned
+    trade after the call (stop-fill fields, allocation, outage flags) and
+    those annotations must land on the persisted row, not on a detached
+    dict. Returning the stored row (the object actually in
+    ``account["trades"]``) makes that true for every exit/entry branch.
+    """
     rows = account.setdefault("trades", [])
     row = dict(trade)
     row.setdefault("ts", _now_iso())
@@ -515,6 +523,7 @@ def append_trade(account: dict[str, Any], trade: dict[str, Any]) -> None:
     rows.append(row)
     if len(rows) > 300:
         account["trades"] = rows[-300:]
+    return row
 
 
 def append_journal(account: dict[str, Any], note: dict[str, Any]) -> None:
