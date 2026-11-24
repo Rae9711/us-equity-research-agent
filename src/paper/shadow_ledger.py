@@ -43,9 +43,14 @@ Rules (deterministic, see task spec)
 * Exit, daily bars from the entry day on: stop hit (low <= stop for LONG)
   exits at the stop; target hit (high >= target) exits at the target.
   A gap through a level fills at the open. If both levels are touched on
-  the same day without a gap, order is decided by the open vs the entry
-  price (open towards the target -> target first, else stop first) and
-  the trade is flagged ``ambiguous_same_day_touch``.
+  the same day without a gap, the trade is settled conservatively as a
+  stop first (``-1R``) and flagged ``ambiguous_same_day_touch``: a daily
+  bar cannot order intraday touches, and 1-minute evidence proved the
+  old open-direction guess wrong in both observed cases (AMD SHORT
+  2026-11-04 and 2026-11-18, both stop first at 09:30, recorded as
+  +2.77R/+7.15R wins before the 2026-11-23 correction). A trade later
+  proven target-first on 1-minute data can be corrected in the ledger
+  with ``resolution_1min`` evidence; the default never inflates.
 * Max hold: intraday/unknown 3 trading days, swing 20 trading days
   (entry day counts as day 1); expiry exit at that day's close.
 * ``r_multiple`` = signed exit move / planned risk (entry-to-stop
@@ -497,7 +502,9 @@ def evaluate_day(
     """Evaluate one holding day. Returns an exit dict or None (still open).
 
     The exit dict carries exit_date/price/reason and the ambiguity/gap
-    flags. Callers own hold-day counting and expiry.
+    flags. Callers own hold-day counting and expiry. A day that touches
+    both stop and target settles conservatively as a stop (-1R) and is
+    flagged ambiguous -- a daily bar cannot order intraday touches.
     """
     direction = record["direction"]
     entry = record["entry_price"]
@@ -517,15 +524,15 @@ def evaluate_day(
                 "gap_through_target": True, "ambiguous_same_day_touch": False}
     stop_hit, target_hit = _touched(direction, bar, stop, target)
     if stop_hit and target_hit:
-        op = _f(bar.get("open"))
-        # Order by the open's direction vs the entry price; flag ambiguity.
-        target_first = (op is not None and entry is not None
-                        and ((direction == "LONG" and op >= entry)
-                             or (direction == "SHORT" and op <= entry)))
-        if target_first:
-            return {"exit_date": d, "exit_price": target,
-                    "exit_reason": "target", "gap_through_stop": False,
-                    "gap_through_target": False, "ambiguous_same_day_touch": True}
+        # A daily bar cannot order intraday touches. The old rule guessed
+        # by the open's direction vs the entry price; 1-minute evidence
+        # proved it wrong in both observed cases (AMD SHORT 2026-11-04
+        # and 2026-11-18: stop touched 09:30, target only 09:32/09:45,
+        # so both were -1R stops, not +2.77R/+7.15R wins) and inflated
+        # expectancy by ~+0.27R. Conservative default: stop first. A
+        # trade later proven target-first on 1-minute data can still be
+        # corrected in the ledger with resolution_1min evidence. The
+        # flag stays so the record remains auditable as ambiguous.
         return {"exit_date": d, "exit_price": stop,
                 "exit_reason": "stop", "gap_through_stop": False,
                 "gap_through_target": False, "ambiguous_same_day_touch": True}

@@ -279,14 +279,60 @@ def test_exit_gap_through_target_fills_at_open():
     assert out["gap_through_target"] is True
 
 
-def test_exit_same_day_both_touched_is_ambiguous_and_ordered_by_open():
+def test_exit_same_day_both_touched_is_ambiguous_and_conservative_stop():
+    # A daily bar cannot order intraday touches, so both levels touched
+    # on the same day settles as a stop (-1R), whichever way the open
+    # leans. The old open-direction guess inflated expectancy: 1-minute
+    # evidence showed both observed cases were stop-first.
     rec = _open_rec()
-    # Open above entry -> target checked first.
+    # Open above entry (favourable for LONG) -- old rule said target.
     out = evaluate_day(rec, _bar("2026-11-13", 110.0, 125.0, 85.0, 100.0))
-    assert out["exit_reason"] == "target" and out["ambiguous_same_day_touch"] is True
-    # Open below entry -> stop checked first.
+    assert out["exit_reason"] == "stop" and out["ambiguous_same_day_touch"] is True
+    assert out["exit_price"] == 90.0
+    # Open below entry -- old rule also said stop; still stop.
     out = evaluate_day(rec, _bar("2026-11-13", 95.0, 125.0, 85.0, 100.0))
     assert out["exit_reason"] == "stop" and out["ambiguous_same_day_touch"] is True
+    assert out["exit_price"] == 90.0
+    # SHORT side, open below entry (favourable for SHORT) -- old rule
+    # said target; now stop.
+    rec = _open_rec(direction="SHORT", entry=100.0, stop=110.0, target=80.0)
+    out = evaluate_day(rec, _bar("2026-11-13", 95.0, 115.0, 75.0, 100.0))
+    assert out["exit_reason"] == "stop" and out["ambiguous_same_day_touch"] is True
+    assert out["exit_price"] == 110.0
+
+
+def test_exit_same_day_both_touched_amd_2026_11_04_regression():
+    # Real case: 2026-11-03|morning|AMD|SHORT, entered 2026-11-04 at
+    # 485.25, stop 487.81, target 478.15. The exit day's bar touched
+    # both levels; the old open-direction rule recorded target first
+    # (+2.77R). 1-minute bars show the stop was touched 09:30, the
+    # target only 09:32 -- a -1R stop.
+    rec = _open_rec(direction="SHORT", entry=482.98, stop=487.81,
+                    target=478.15)
+    rec["entry_price"] = 485.25
+    rec["entry_date"] = "2026-11-04"
+    bar = _bar("2026-11-04", 484.0, 493.98, 478.0, 485.0)
+    out = evaluate_day(rec, bar)
+    assert out["exit_reason"] == "stop" and out["ambiguous_same_day_touch"] is True
+    update_record(rec, [bar], "2026-11-04")
+    assert rec["status"] == "exited" and rec["r_multiple"] == -1.0
+
+
+def test_exit_same_day_both_touched_amd_2026_11_18_regression():
+    # Real case: 2026-11-17|step3|AMD|SHORT, entered 2026-11-18 at
+    # 509.89, stop 511.85, target 495.88. The exit day's bar touched
+    # both levels; the old open-direction rule recorded target first
+    # (+7.15R). 1-minute bars show the stop was touched 09:30, the
+    # target only 09:45 -- a -1R stop.
+    rec = _open_rec(direction="SHORT", entry=506.31, stop=511.85,
+                    target=495.88)
+    rec["entry_price"] = 509.89
+    rec["entry_date"] = "2026-11-18"
+    bar = _bar("2026-11-18", 509.0, 514.67, 495.0, 509.0)
+    out = evaluate_day(rec, bar)
+    assert out["exit_reason"] == "stop" and out["ambiguous_same_day_touch"] is True
+    update_record(rec, [bar], "2026-11-18")
+    assert rec["status"] == "exited" and rec["r_multiple"] == -1.0
 
 
 def test_expiry_intraday_three_days_at_close():
