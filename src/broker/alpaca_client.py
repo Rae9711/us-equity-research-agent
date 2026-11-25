@@ -63,7 +63,10 @@ def build_bracket_order(signal: dict[str, Any]) -> dict[str, Any]:
 
     Signal: {symbol, direction LONG|SHORT, shares, stop, target,
     entry (optional, validated when present), horizon Intraday|Swing
-    (Intraday -> TIF day, Swing -> TIF gtc), client_order_id (optional)}.
+    (both horizons -> TIF gtc; intraday legs may hold up to 3 trading
+    days, so a day order would expire at the first close and leave the
+    Alpaca leg unprotected overnight -- AVGO intraday SHORT 2026-11-24/25),
+    client_order_id (optional)}.
     No network call; pure function, safe for dry runs and tests.
     """
     symbol = str(signal.get("symbol") or "").upper()
@@ -116,8 +119,14 @@ def build_bracket_order(signal: dict[str, Any]) -> dict[str, Any]:
                 f"bad bracket geometry for SHORT: expected target {target} < entry {entry_price} < stop {stop}"
             )
 
-    horizon = str(signal.get("horizon") or "Intraday").lower()
-    time_in_force = "gtc" if "swing" in horizon else "day"
+    # Both horizons use GTC: a local intraday leg may hold up to 3 trading
+    # days, so a day order expires at the first close and leaves the Alpaca
+    # leg with no TP/SL on days 2-3 (AVGO intraday SHORT 2026-11-24: bracket
+    # expired 16:01, leg still open next morning). The mirror's close sweep
+    # cancels a symbol's open orders before market-closing it, so a live GTC
+    # bracket is removed when its local leg exits. An explicit signal
+    # time_in_force still overrides.
+    time_in_force = "gtc"
     if signal.get("time_in_force"):
         time_in_force = str(signal["time_in_force"]).lower()
         if time_in_force not in ("day", "gtc"):

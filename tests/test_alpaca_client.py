@@ -27,7 +27,11 @@ def _client(handler):
     )
 
 
-def test_build_long_bracket_intraday():
+def test_build_long_bracket_intraday_uses_gtc():
+    # Intraday brackets are GTC, not day: a local intraday leg may hold up
+    # to 3 trading days, and a day order would expire at the first close,
+    # leaving the Alpaca leg with no TP/SL (AVGO intraday SHORT 2026-11-24:
+    # bracket expired 16:01, leg still open next morning).
     body = build_bracket_order(
         {
             "symbol": "AMD",
@@ -43,7 +47,7 @@ def test_build_long_bracket_intraday():
     assert body["side"] == "buy"
     assert body["type"] == "market"
     assert body["order_class"] == "bracket"
-    assert body["time_in_force"] == "day"
+    assert body["time_in_force"] == "gtc"
     assert body["qty"] == 2
     assert body["take_profit"] == {"limit_price": 643.27}
     assert body["stop_loss"] == {"stop_price": 493.4}
@@ -66,6 +70,34 @@ def test_build_short_bracket_swing_uses_gtc_and_sell():
     assert body["time_in_force"] == "gtc"
     assert body["take_profit"] == {"limit_price": 161.62}
     assert body["stop_loss"] == {"stop_price": 189.69}
+
+
+def test_build_explicit_time_in_force_override_still_respected():
+    # An explicit signal time_in_force still overrides the GTC default.
+    body = build_bracket_order(
+        {
+            "symbol": "AMD",
+            "direction": "LONG",
+            "shares": 1,
+            "stop": 493.4,
+            "target": 643.27,
+            "horizon": "Intraday",
+            "time_in_force": "day",
+        }
+    )
+    assert body["time_in_force"] == "day"
+    body = build_bracket_order(
+        {
+            "symbol": "AMD",
+            "direction": "LONG",
+            "shares": 1,
+            "stop": 493.4,
+            "target": 643.27,
+            "horizon": "Swing",
+            "time_in_force": "gtc",
+        }
+    )
+    assert body["time_in_force"] == "gtc"
 
 
 def test_build_rejects_bad_geometry():
